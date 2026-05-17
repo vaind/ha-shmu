@@ -2,28 +2,19 @@
 
 Guidance for AI coding agents working in this repo. Read this before changing
 data-fetching or condition logic — it records the non-obvious constraints
-learned by reverse-engineering the SHMÚ source. This is the single source of
-agent guidance; `CLAUDE.md` is a symlink to this file for tool compatibility.
+learned by reverse-engineering the SHMÚ source.
 
-## The 6 rules that matter most
+Setup, the pre-push quality gate, and the general contributor ground rules
+(the vendored-library boundary, offline-deterministic tests, TLS handling,
+scraper isolation) are in [CONTRIBUTING.md](CONTRIBUTING.md) and are **not
+repeated here**. `CLAUDE.md` is a symlink to this file for tool compatibility.
 
-1. **Two layers, one boundary.** `custom_components/shmu/shmu_opendata/` is
-   the vendored, pure client library — it must never import `homeassistant`
-   (kept swappable / extractable). The HA glue is the rest of
-   `custom_components/shmu/`.
-2. **Never disable TLS verification.** opendata.shmu.sk omits an intermediate;
-   the fix is the bundled cert in
-   `custom_components/shmu/shmu_opendata/certs/`, not `verify=off`.
-3. **Tests stay offline and deterministic.** Mock HTTP (`aioresponses`); use
-   fixture-derived snapshots for HA tests. Add fixtures, not network calls.
-4. **Scraping is quarantined** to `website.py` (deliberately swappable for the
-   Phase-2 ALADIN source). Don't spread HTML parsing elsewhere.
-5. **Quality gate before done:** `ruff check`, `ruff format`, `mypy`,
-   `pytest tests/` — all clean/green.
-6. **Verify upstream assumptions against the live server** before encoding
-   them, and document what you verified (see the CAP-issuance note under
-   *Non-obvious data-source facts* below). Don't add speculative workarounds
-   for failure modes that don't occur.
+## The rule specific to this data source
+
+**Verify upstream assumptions against the live server** before encoding them,
+and document what you verified (see the dated notes under *Non-obvious
+data-source facts*). Don't add speculative workarounds for failure modes that
+don't occur.
 
 ## Layout
 
@@ -34,12 +25,10 @@ agent guidance; `CLAUDE.md` is a symlink to this file for tool compatibility.
 | `tests/` | Fast offline library tests |
 | `tests/components/` | HA integration tests (`pytest-homeassistant-custom-component`) |
 
-- The vendored library is **HACS-only by design** (not published to PyPI),
-  pure Python with no Home Assistant imports — kept HA-free so it stays
-  swappable and could be extracted to its own package if a HA-core path is
-  ever pursued.
-- `manifest.json` `requirements` is **empty**: the library is bundled and
-  `aiohttp` ships with HA.
+- `manifest.json` `requirements` is **empty**: the vendored library is bundled
+  and `aiohttp` ships with HA (the library is HACS-only by design, not on
+  PyPI — see
+  [Why HACS](CONTRIBUTING.md#why-hacs-and-not-home-assistant-core)).
 - mypy strict-checks the vendored library **in isolation** (see
   `pyproject.toml` `mypy_path`), so it never imports the HA-dependent parent
   package.
@@ -114,9 +103,3 @@ agent guidance; `CLAUDE.md` is a symlink to this file for tool compatibility.
   fixtures). `grib2io`/`cfgrib` were rejected (PyPI sdist-only; no HAOS
   aarch64/armv7 wheels). The website meteogram remains an unused fallback.
 - **Phase 3**: quality-scale polish, diagnostics, optional radar/air-quality.
-
-## Dev commands
-
-Setup, the pre-push quality gate, and the full ground rules live in
-[CONTRIBUTING.md](CONTRIBUTING.md) — that is the canonical workflow doc; this
-file is not duplicated there.

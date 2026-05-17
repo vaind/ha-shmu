@@ -45,8 +45,7 @@ A Home Assistant integration for Slovak weather data published by the
 This integration relies on the SHMÚ website for the current sky condition (the
 open-data files contain no cloud information — see
 [Why HACS](CONTRIBUTING.md#why-hacs-and-not-home-assistant-core)), so it is
-distributed via
-HACS rather than Home Assistant core.
+distributed via HACS rather than Home Assistant core.
 
 1. HACS → Integrations → ⋮ → *Custom repositories* → add this repository as an
    *Integration*.
@@ -54,15 +53,6 @@ HACS rather than Home Assistant core.
 3. *Settings → Devices & Services → Add Integration → SHMÚ Weather*. The
    station nearest your Home Assistant location is preselected; pick any of
    the 27 synoptic stations. Add the integration again for more stations.
-
-## How the weather condition is determined
-
-SHMÚ's open-data feed gives accurate measurements but **no cloud cover** and
-only sparse present-weather codes, so it cannot produce a reliable sky
-condition on its own. The integration therefore takes the condition from the
-SHMÚ public current-weather page (cloud + present weather), falling back to
-the open-data `stav_poc` code, and reports *unknown* rather than guessing when
-neither is available. All numeric values come only from the open data.
 
 ## Data source & attribution
 
