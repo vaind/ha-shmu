@@ -43,6 +43,9 @@
     },
     "binary_sensor": {
       "weather_warning": { "name": "Weather warning" }
+    },
+    "image": {
+      "radar": { "name": "Radar" }
     }
   }
 }
