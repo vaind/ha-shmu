@@ -44,7 +44,8 @@ A Home Assistant integration for Slovak weather data published by the
 
 This integration relies on the SHMÚ website for the current sky condition (the
 open-data files contain no cloud information — see
-[Why HACS](#why-hacs-and-not-home-assistant-core)), so it is distributed via
+[Why HACS](CONTRIBUTING.md#why-hacs-and-not-home-assistant-core)), so it is
+distributed via
 HACS rather than Home Assistant core.
 
 1. HACS → Integrations → ⋮ → *Custom repositories* → add this repository as an
@@ -62,38 +63,6 @@ condition on its own. The integration therefore takes the condition from the
 SHMÚ public current-weather page (cloud + present weather), falling back to
 the open-data `stav_poc` code, and reports *unknown* rather than guessing when
 neither is available. All numeric values come only from the open data.
-
-### Why HACS and not Home Assistant core
-
-Two reasons, both deliberate for v1:
-
-1. Reading the condition from a web page is "scraping", which Home Assistant
-   core discourages.
-2. The SHMÚ client is **vendored** into the integration rather than published
-   to PyPI; core requires the communication layer to be a separate, published
-   package in `manifest.json` requirements.
-
-Both are intentional trade-offs for a self-contained HACS release. The
-scraping is isolated to one swappable module and the vendored library is kept
-Home-Assistant-free, so a future core-eligible path (Phase-2 ALADIN condition
-+ extracting/publishing the library) stays open.
-
-## Development
-
-```bash
-uv venv --python 3.13 .venv
-uv pip install --python .venv pytest pytest-asyncio aioresponses ruff \
-    mypy pytest-homeassistant-custom-component
-.venv/bin/ruff check custom_components/ tests/
-.venv/bin/python -m mypy
-.venv/bin/python -m pytest tests/      # 50 tests, fully offline
-```
-
-The SHMÚ client library is vendored at `custom_components/shmu/shmu_opendata/`
-(kept Home-Assistant-free so it stays swappable and could be extracted to its
-own package later); the integration glue is the rest of
-`custom_components/shmu/`. See [CLAUDE.md](CLAUDE.md) for the non-obvious
-data-source constraints.
 
 ## Data source & attribution
 

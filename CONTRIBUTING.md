@@ -39,6 +39,21 @@ uv pip install --python .venv pytest pytest-asyncio aioresponses ruff \
   describing the problem and the approach.
 - Don't reformat unrelated code.
 
+## Why HACS and not Home Assistant core
+
+Two reasons, both deliberate for v1:
+
+1. Reading the condition from a web page is "scraping", which Home Assistant
+   core discourages.
+2. The SHMÚ client is **vendored** into the integration rather than published
+   to PyPI; core requires the communication layer to be a separate, published
+   package in `manifest.json` requirements.
+
+Both are intentional trade-offs for a self-contained HACS release. The
+scraping is isolated to one swappable module and the vendored library is kept
+Home-Assistant-free, so a future core-eligible path (Phase-2 ALADIN condition
++ extracting/publishing the library) stays open.
+
 ## Data & attribution
 
 SHMÚ data is CC BY 4.0 and must be attributed. This project is not affiliated
