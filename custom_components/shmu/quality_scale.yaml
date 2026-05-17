@@ -1,0 +1,150 @@
+# Home Assistant integration quality scale.
+#
+# Declared tier (manifest.json `quality_scale`): silver.
+#
+# This is a HACS-only custom integration by design (see CONTRIBUTING.md
+# "Why HACS and not Home Assistant core"):
+# the SHMÚ client library is vendored rather than published to PyPI, and the
+# current sky condition is scraped from the SHMÚ website. Two core-oriented
+# rules can therefore never be "done" here and are marked `exempt` with the
+# deliberate-deviation rationale rather than faked: `dependency-transparency`
+# and `strict-typing` (Platinum's published-typed-package expectation).
+# hassfest only validates this file for core integrations, so it is
+# informational for this repo — but kept accurate so the deviations are auditable.
+
+rules:
+  # Bronze
+  action-setup:
+    status: exempt
+    comment: The integration registers no service actions.
+  appropriate-polling: done
+  brands:
+    status: exempt
+    comment: >
+      Deliberate HACS-only integration; not registered in home-assistant/brands
+      (that happens only on a HA-core / HACS-default submission). The HACS CI
+      action explicitly ignores this check for the same reason.
+  common-modules: done
+  config-flow-test-coverage: done
+  config-flow: done
+  dependency-transparency:
+    status: exempt
+    comment: >
+      Deliberate deviation: the SHMÚ client is vendored under
+      custom_components/shmu/shmu_opendata/ (kept HA-free and swappable) rather
+      than published to PyPI. Source is public in this repo; there is no
+      external dependency to declare. See CONTRIBUTING.md "Why HACS".
+  docs-actions:
+    status: exempt
+    comment: The integration registers no service actions.
+  docs-high-level-description: done
+  docs-installation-instructions: done
+  docs-removal-instructions: done
+  entity-event-setup:
+    status: exempt
+    comment: >
+      Entities derive state from the shared DataUpdateCoordinator; they do not
+      subscribe to external/library events.
+  entity-unique-id: done
+  has-entity-name: done
+  runtime-data: done
+  test-before-configure:
+    status: exempt
+    comment: >
+      The config flow only selects from a static, bundled synoptic-station
+      catalogue — there is no host, credential or per-user endpoint to
+      validate. Upstream reachability is verified at setup time via
+      async_config_entry_first_refresh (see test-before-setup).
+  test-before-setup: done
+  unique-config-entry: done
+
+  # Silver
+  action-exceptions:
+    status: exempt
+    comment: The integration registers no service actions.
+  config-entry-unloading: done
+  docs-configuration-parameters: done
+  docs-installation-parameters: done
+  entity-unavailable: done
+  integration-owner: done
+  log-when-unavailable: done
+  parallel-updates: done
+  reauthentication-flow:
+    status: exempt
+    comment: SHMÚ open data is public and requires no authentication.
+  test-coverage: done
+
+  # Gold
+  devices: done
+  diagnostics: done
+  discovery:
+    status: exempt
+    comment: >
+      A public weather-data service has no presence on the local network and
+      cannot be discovered.
+  discovery-update-info:
+    status: exempt
+    comment: Nothing is discovered; there is no discovered connection info to update.
+  docs-data-update: done
+  docs-examples:
+    status: todo
+    comment: README documents features; automation/use-case examples not yet added.
+  docs-known-limitations: done
+  docs-supported-devices:
+    status: exempt
+    comment: >
+      Not a device integration; data comes from fixed SHMÚ synoptic stations,
+      enumerated and selectable in the config flow.
+  docs-supported-functions: done
+  docs-troubleshooting:
+    status: todo
+    comment: Dedicated troubleshooting section not yet written.
+  docs-use-cases:
+    status: todo
+    comment: Use-case walkthroughs not yet written.
+  dynamic-devices:
+    status: exempt
+    comment: >
+      Exactly one fixed station (device) per config entry; no devices appear
+      dynamically at runtime.
+  entity-category: done
+  entity-device-class: done
+  entity-disabled-by-default: done
+  entity-translations: done
+  exception-translations:
+    status: exempt
+    comment: >
+      The config flow raises no user-facing exceptions; update failures surface
+      via UpdateFailed / entity availability, not translatable user errors.
+  icon-translations:
+    status: todo
+    comment: Entities rely on device-class default icons; no icon translations yet.
+  reconfiguration-flow:
+    status: exempt
+    comment: >
+      The only setting (the station) is also the unique id and device
+      identity. Changing it is semantically a different device, so
+      add-new / remove-old is correct; a reconfigure flow would orphan the
+      device and its entity-registry entries.
+  repair-issues:
+    status: exempt
+    comment: >
+      Failure modes are transient upstream outages, already surfaced via entity
+      availability and logs; there is no user-actionable repair.
+  stale-devices:
+    status: exempt
+    comment: >
+      Exactly one device per config entry, removed with the entry — no stale
+      devices can accumulate.
+
+  # Platinum
+  async-dependency: done
+  inject-websession: done
+  strict-typing:
+    status: exempt
+    comment: >
+      The vendored library is checked under mypy --strict in isolation. The
+      HA-integration glue is fully type-annotated but not yet gated by strict
+      mypy, and Platinum additionally expects the dependency to be a published
+      PEP 561 typed package — not applicable to a deliberately vendored library
+      (see dependency-transparency).

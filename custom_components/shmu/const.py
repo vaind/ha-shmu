@@ -34,8 +34,3 @@ OBSERVATION_STALE_AFTER: Final = timedelta(minutes=30)
 ATTRIBUTION: Final = "Data © Slovenský hydrometeorologický ústav (SHMÚ), CC BY 4.0"
 
 MANUFACTURER: Final = "Slovenský hydrometeorologický ústav"
-
-#: SHMÚ data is CC BY 4.0 and must be attributed wherever it is shown.
-ATTRIBUTION: Final = "Data © Slovenský hydrometeorologický ústav (SHMÚ), CC BY 4.0"
-
-MANUFACTURER: Final = "Slovenský hydrometeorologický ústav"
