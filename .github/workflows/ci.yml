@@ -23,9 +23,14 @@ jobs:
           python-version: "3.13"
           enable-cache: true
 
-      # setup-uv (with python-version) already created and activated .venv,
-      # so we install straight into it. Dev deps come from the
-      # [dependency-groups] table in pyproject.toml (single source of truth).
+      # setup-uv only exports UV_PYTHON; it does not create a venv (its
+      # implicit venv behavior changed across major versions), so own the
+      # venv lifecycle explicitly here. Later steps call .venv/bin/* directly.
+      - name: Create virtualenv
+        run: uv venv --python 3.13 .venv
+
+      # Dev deps come from the [dependency-groups] table in pyproject.toml
+      # (single source of truth); installed into the .venv created above.
       - name: Install dev dependencies
         run: uv pip install --group dev
 
