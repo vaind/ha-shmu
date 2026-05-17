@@ -6,14 +6,10 @@ https://opendata.shmu.sk/, licensed CC BY 4.0.
 
 from __future__ import annotations
 
-from datetime import datetime
-
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
-from homeassistant.helpers.event import async_track_utc_time_change
 
-from .const import POLL_INTERVAL_MINUTES, POLL_OFFSET_SECONDS
 from .coordinator import ShmuConfigEntry, ShmuDataUpdateCoordinator
 from .shmu_opendata import ShmuClient, create_ssl_context
 
@@ -39,19 +35,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ShmuConfigEntry) -> bool
 
     entry.runtime_data = coordinator
 
-    # Poll on the upstream UTC 5-minute grid (+offset) rather than a fixed
-    # period, so each snapshot is fetched just after SHMÚ publishes it.
-    async def _refresh_on_grid(now: datetime) -> None:
-        await coordinator.async_request_refresh()
-
-    entry.async_on_unload(
-        async_track_utc_time_change(
-            hass,
-            _refresh_on_grid,
-            minute=list(range(0, 60, POLL_INTERVAL_MINUTES)),
-            second=POLL_OFFSET_SECONDS,
-        )
-    )
+    # Poll on the upstream UTC 5-minute grid with an auto-tuned offset rather
+    # than a fixed period, so each snapshot is fetched just after SHMÚ
+    # publishes it. The coordinator owns the (re)scheduling.
+    coordinator.async_schedule_refresh()
+    entry.async_on_unload(coordinator.async_cancel_refresh)
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True

@@ -54,7 +54,9 @@ class ShmuWeather(ShmuStationEntity, WeatherEntity):
     @property
     def condition(self) -> str | None:
         """HA condition: website first, then ``stav_poc``, else unknown."""
-        condition, _ = self.coordinator.data.resolve_condition(self._station)
+        condition, _ = self.coordinator.data.resolve_condition(
+            self._station, self.observation
+        )
         if condition == ATTR_CONDITION_SUNNY and not is_up(self.hass):
             return ATTR_CONDITION_CLEAR_NIGHT
         return condition
@@ -62,8 +64,8 @@ class ShmuWeather(ShmuStationEntity, WeatherEntity):
     @property
     def extra_state_attributes(self) -> dict[str, str | None]:
         """Provenance, so unexpected readings are debuggable from the UI."""
-        condition, source = self.coordinator.data.resolve_condition(self._station)
         obs = self.observation
+        condition, source = self.coordinator.data.resolve_condition(self._station, obs)
         snapshot = self.coordinator.data.observations
         return {
             "station_id": str(self._station.ind_kli),

@@ -29,12 +29,20 @@ class _FakeClient:
 
     def __init__(self, load: Callable[[str], bytes]) -> None:
         self._load = load
+        #: When True, the next snapshot omits the configured station.
+        self.drop_station: int | None = None
+        self._serial = 0
 
     async def async_get_observations(self, previous=None) -> ObservationSnapshot:
+        observations = parse_observations(self._load("observations.json"))
+        if self.drop_station is not None:
+            observations.pop(self.drop_station, None)
+        self._serial += 1
         return ObservationSnapshot(
-            observations=parse_observations(self._load("observations.json")),
-            source="test",
+            observations=observations,
+            source=f"test-{self._serial}",
             fetched_at=datetime.now(UTC),
+            published_at=None,
         )
 
     async def async_get_warnings(self, previous=None) -> WarningsSnapshot:
@@ -89,6 +97,27 @@ async def test_setup_creates_entities(
     # The only warning's polygon is around Bratislava; Hurbanovo is outside it.
     assert hass.states.get("binary_sensor.hurbanovo_weather_warning").state == "off"
     assert hass.states.get("sensor.hurbanovo_warning_level").state == "none"
+
+
+async def test_observation_carried_forward_across_dropout(
+    hass: HomeAssistant, entry: MockConfigEntry, load: Callable[[str], bytes]
+) -> None:
+    client = _FakeClient(load)
+    with patch("custom_components.shmu.ShmuClient", return_value=client):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    assert hass.states.get("sensor.hurbanovo_temperature").state == "12.1"
+
+    # The next snapshot omits the station entirely (a one-cycle dropout).
+    client.drop_station = 11858
+    await entry.runtime_data.async_refresh()
+    await hass.async_block_till_done()
+
+    # Last reading is carried forward — no flicker to unknown/unavailable.
+    temperature = hass.states.get("sensor.hurbanovo_temperature")
+    assert temperature.state == "12.1"
+    assert hass.states.get("weather.hurbanovo").state == "rainy"
 
 
 async def test_unload(

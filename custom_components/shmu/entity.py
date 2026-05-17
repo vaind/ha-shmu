@@ -36,12 +36,10 @@ class ShmuStationEntity(CoordinatorEntity[ShmuDataUpdateCoordinator]):
 
     @property
     def observation(self) -> Observation | None:
-        """This station's latest observation, if present in the feed."""
-        return self.coordinator.data.observations.observations.get(
-            self._station.ind_kli
-        )
+        """The station's reading, carried forward across one-cycle dropouts."""
+        return self.coordinator.observation
 
     @property
     def available(self) -> bool:
-        """Available only when the station is present in the latest feed."""
+        """Available while the (possibly carried-forward) reading is fresh."""
         return super().available and self.observation is not None

@@ -17,6 +17,7 @@ import re
 import ssl
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 from urllib.parse import quote
 
 import aiohttp
@@ -43,11 +44,17 @@ _CAP_FILE_RE = re.compile(r"^[^/]+\.cap\.xml$")
 
 @dataclass(frozen=True, slots=True)
 class ObservationSnapshot:
-    """Latest observations plus the source file they were parsed from."""
+    """Latest observations plus the source file they were parsed from.
+
+    ``published_at`` is the file's server ``Last-Modified`` time (UTC), used
+    by the coordinator to auto-tune how long after the 5-minute grid boundary
+    it should poll. ``None`` if the server omitted/garbled the header.
+    """
 
     observations: dict[int, Observation]
     source: str
     fetched_at: datetime
+    published_at: datetime | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,7 +105,8 @@ class ShmuClient:
         self._base_url = base_url.rstrip("/")
         self._timeout = aiohttp.ClientTimeout(total=timeout)
 
-    async def _get_url(self, url: str) -> bytes:
+    async def _request(self, url: str) -> tuple[bytes, datetime | None]:
+        """Fetch ``url``; return its body and parsed ``Last-Modified`` (UTC)."""
         try:
             async with self._session.get(
                 url,
@@ -107,11 +115,24 @@ class ShmuClient:
                 ssl=self._ssl,
             ) as response:
                 response.raise_for_status()
-                return await response.read()
+                body = await response.read()
+                last_modified = response.headers.get("Last-Modified")
         except aiohttp.ClientError as err:
             raise ShmuConnectionError(f"Failed to fetch {url}: {err}") from err
         except TimeoutError as err:
             raise ShmuConnectionError(f"Timed out fetching {url}") from err
+
+        published_at: datetime | None = None
+        if last_modified:
+            try:
+                published_at = parsedate_to_datetime(last_modified).astimezone(UTC)
+            except (TypeError, ValueError):
+                published_at = None
+        return body, published_at
+
+    async def _get_url(self, url: str) -> bytes:
+        body, _ = await self._request(url)
+        return body
 
     async def _get(self, path: str) -> bytes:
         return await self._get_url(f"{self._base_url}{path}")
@@ -172,13 +193,16 @@ class ShmuClient:
             _LOGGER.debug("Observations unchanged (%s); using cache", source)
             return previous
 
-        payload = await self._get(f"{day_path}/{quote(filename)}")
+        payload, published_at = await self._request(
+            f"{self._base_url}{day_path}/{quote(filename)}"
+        )
         observations = parse_observations(payload)
         _LOGGER.debug("Parsed %d stations from %s", len(observations), source)
         return ObservationSnapshot(
             observations=observations,
             source=source,
             fetched_at=datetime.now(UTC),
+            published_at=published_at,
         )
 
     async def async_get_warnings(

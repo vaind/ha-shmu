@@ -120,8 +120,6 @@ SENSORS: tuple[ShmuSensorDescription, ...] = (
         device_class=SensorDeviceClass.TEMPERATURE,
         native_unit_of_measurement=UnitOfTemperature.CELSIUS,
         state_class=SensorStateClass.MEASUREMENT,
-        entity_category=EntityCategory.DIAGNOSTIC,
-        entity_registry_enabled_default=False,
         value_fn=lambda o: o.ground_temperature,
     ),
     ShmuSensorDescription(
@@ -130,10 +128,10 @@ SENSORS: tuple[ShmuSensorDescription, ...] = (
         device_class=SensorDeviceClass.IRRADIANCE,
         native_unit_of_measurement=UnitOfIrradiance.WATTS_PER_SQUARE_METER,
         state_class=SensorStateClass.MEASUREMENT,
-        entity_category=EntityCategory.DIAGNOSTIC,
-        entity_registry_enabled_default=False,
         value_fn=lambda o: o.global_radiation,
     ),
+    # The raw WMO 4680 code is not a user-facing measurement — keep it as an
+    # opt-in diagnostic for debugging the condition mapping.
     ShmuSensorDescription(
         key="weather_code",
         translation_key="weather_code",

@@ -14,7 +14,7 @@ from typing import Any
 from homeassistant.core import HomeAssistant
 
 from . import shmu_opendata
-from .const import POLL_INTERVAL_MINUTES, POLL_OFFSET_SECONDS
+from .const import POLL_INTERVAL_MINUTES
 from .coordinator import ShmuConfigEntry
 
 
@@ -28,12 +28,13 @@ async def async_get_config_entry_diagnostics(
 
     obs_snapshot = data.observations
     observation = obs_snapshot.observations.get(station.ind_kli)
+    served = coordinator.observation  # carried-forward reading entities see
 
     web = data.web_conditions
     web_condition = web.conditions.get(station.ind_kli) if web is not None else None
 
-    # Shared resolver — same precedence the weather entity uses.
-    condition, source = data.resolve_condition(station)
+    # Shared resolver — exactly what the weather entity uses.
+    condition, source = data.resolve_condition(station, served)
 
     return {
         "library_version": shmu_opendata.__version__,
@@ -46,7 +47,14 @@ async def async_get_config_entry_diagnostics(
         },
         "coordinator": {
             "last_update_success": coordinator.last_update_success,
-            "poll": f"UTC */{POLL_INTERVAL_MINUTES}min +{POLL_OFFSET_SECONDS}s",
+            "last_update": coordinator.last_success_at.isoformat()
+            if coordinator.last_success_at
+            else None,
+            "next_update": coordinator.next_refresh_at.isoformat()
+            if coordinator.next_refresh_at
+            else None,
+            "failures_since_success": coordinator.failures_since_success,
+            "poll": f"UTC */{POLL_INTERVAL_MINUTES}min, auto-tuned offset",
             "last_exception": repr(coordinator.last_exception)
             if coordinator.last_exception
             else None,

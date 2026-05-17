@@ -23,15 +23,18 @@ A Home Assistant integration for Slovak weather data published by the
 ## Features
 
 - **Weather entity** — current conditions for a chosen SHMÚ synoptic station.
-- **Sensors** — temperature, humidity, pressure, wind speed/gust/bearing,
-  precipitation, snow depth, visibility (plus diagnostic ground temperature,
-  global radiation and the raw weather code), and a warning-level sensor.
+- **Sensors** — temperature, ground temperature, humidity, pressure, wind
+  speed/gust/bearing, precipitation, snow depth, visibility, global radiation,
+  and a warning-level sensor (the raw WMO weather code is an opt-in
+  diagnostic).
 - **Weather warnings** — a binary sensor (with full alert details as
   attributes) that is on while a SHMÚ CAP alert covers your station, decided
   by the alert's own polygon.
 - One shared, change-detecting fetch per cycle, aligned to SHMÚ's upstream
-  publish grid (every 5 min on the UTC grid, a little after the boundary) so
-  data is fresh rather than up to a poll-interval behind.
+  UTC 5-minute publish grid with an offset that auto-tunes to the observed
+  publish lag, so data is fresh rather than up to a poll-interval behind.
+  A station that drops out of one snapshot keeps its last reading (no
+  flicker) until it is genuinely stale.
 
 ## Installation (HACS)
 

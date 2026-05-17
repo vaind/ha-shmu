@@ -11,15 +11,27 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections import deque
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
+from homeassistant.helpers.event import async_track_point_in_utc_time
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
-from .const import CONF_IND_KLI, DOMAIN
+from .const import (
+    CONF_IND_KLI,
+    DOMAIN,
+    OBSERVATION_STALE_AFTER,
+    POLL_INTERVAL_MINUTES,
+    POLL_OFFSET_MAX_SECONDS,
+    POLL_OFFSET_MIN_SECONDS,
+    POLL_OFFSET_PAD_SECONDS,
+)
 from .shmu_opendata import (
+    Observation,
     ObservationSnapshot,
     ShmuClient,
     ShmuConnectionError,
@@ -33,6 +45,16 @@ from .shmu_opendata import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def _next_grid_time(now: datetime, interval_minutes: int) -> datetime:
+    """Return the next UTC time strictly after ``now`` on the N-minute grid."""
+    floor = now.replace(
+        minute=now.minute - now.minute % interval_minutes,
+        second=0,
+        microsecond=0,
+    )
+    return floor + timedelta(minutes=interval_minutes)
 
 
 def _keep_previous[T](
@@ -74,24 +96,27 @@ class ShmuData:
         relevant.sort(key=lambda w: _SEVERITY_ORDER.get(w.severity, 0), reverse=True)
         return relevant
 
-    def resolve_condition(self, station: Station) -> tuple[str | None, str]:
+    def resolve_condition(
+        self, station: Station, observation: Observation | None
+    ) -> tuple[str | None, str]:
         """Resolve a station's HA condition and which source produced it.
 
         Single source of truth for the website -> ``stav_poc`` -> unknown
         precedence, shared by the weather entity and diagnostics so they
-        cannot drift. ``source`` is ``"website"``, ``"stav_poc"`` or
-        ``"unknown"``. The day/night ``sunny`` -> ``clear-night`` shift is a
-        UI concern and stays in the weather entity.
+        cannot drift. ``observation`` is supplied by the caller (the
+        coordinator's carried-forward reading) so the fallback survives a
+        one-cycle station dropout. ``source`` is ``"website"``, ``"stav_poc"``
+        or ``"unknown"``; the day/night ``sunny`` -> ``clear-night`` shift is
+        a UI concern and stays in the weather entity.
         """
         if self.web_conditions is not None:
             web = self.web_conditions.conditions.get(station.ind_kli)
             if web is not None and web.condition is not None:
                 return web.condition, "website"
 
-        obs = self.observations.observations.get(station.ind_kli)
-        if obs is not None:
+        if observation is not None:
             derived = condition_from_weather_code(
-                obs.weather_code, precipitation=obs.precipitation
+                observation.weather_code, precipitation=observation.precipitation
             )
             if derived is not None:
                 return derived, "stav_poc"
@@ -142,6 +167,106 @@ class ShmuDataUpdateCoordinator(DataUpdateCoordinator[ShmuData]):
         self.station: Station = station
         #: Tracks station-presence so we log only on transitions, not every poll.
         self._station_present = True
+        #: Last reading we saw for the station and when we obtained it; served
+        #: across one-cycle dropouts so entities don't flicker (see
+        #: `observation`). Freshness is measured from acquisition time, not the
+        #: reading's upstream timestamp.
+        self._last_observation: Observation | None = None
+        self._last_observation_at: datetime | None = None
+        #: Recently observed publish lags (s) for offset auto-tuning.
+        self._recent_lags: deque[float] = deque(maxlen=5)
+        #: Update health, surfaced in diagnostics.
+        self._last_success_at: datetime | None = None
+        self._failures_since_success = 0
+        #: Grid scheduling state.
+        self._next_refresh_at: datetime | None = None
+        self._unsub_refresh: CALLBACK_TYPE | None = None
+
+    @property
+    def observation(self) -> Observation | None:
+        """The station's reading, carried forward across one-cycle dropouts.
+
+        Returns the last reading we saw, or ``None`` once it is older than
+        ``OBSERVATION_STALE_AFTER`` (a genuine outage, not a transient gap).
+        """
+        obs = self._last_observation
+        if obs is None or self._last_observation_at is None:
+            return None
+        if dt_util.utcnow() - self._last_observation_at > OBSERVATION_STALE_AFTER:
+            return None
+        return obs
+
+    @property
+    def last_success_at(self) -> datetime | None:
+        """When the last fully-successful update completed (UTC)."""
+        return self._last_success_at
+
+    @property
+    def failures_since_success(self) -> int:
+        """Consecutive failed updates since the last successful one."""
+        return self._failures_since_success
+
+    @property
+    def next_refresh_at(self) -> datetime | None:
+        """When the next grid-aligned refresh is scheduled (UTC)."""
+        return self._next_refresh_at
+
+    def _offset_seconds(self) -> int:
+        """Auto-tuned delay after the grid boundary.
+
+        Tracks the worst recent publish lag (so we don't fetch the previous
+        file) plus a fixed safety pad, clamped to a sane range.
+        """
+        lag = max(self._recent_lags) if self._recent_lags else 0.0
+        return int(
+            min(
+                max(lag + POLL_OFFSET_PAD_SECONDS, POLL_OFFSET_MIN_SECONDS),
+                POLL_OFFSET_MAX_SECONDS,
+            )
+        )
+
+    @callback
+    def async_schedule_refresh(self) -> None:
+        """(Re)arm the one-shot timer for the next grid boundary + offset."""
+        if self._unsub_refresh is not None:
+            self._unsub_refresh()
+        now = dt_util.utcnow()
+        target = _next_grid_time(now, POLL_INTERVAL_MINUTES) + timedelta(
+            seconds=self._offset_seconds()
+        )
+        self._next_refresh_at = target
+        self._unsub_refresh = async_track_point_in_utc_time(
+            self.hass, self._handle_scheduled_refresh, target
+        )
+
+    @callback
+    def async_cancel_refresh(self) -> None:
+        """Cancel the pending grid timer (called on unload)."""
+        if self._unsub_refresh is not None:
+            self._unsub_refresh()
+            self._unsub_refresh = None
+
+    async def _handle_scheduled_refresh(self, _now: datetime) -> None:
+        self._unsub_refresh = None
+        try:
+            await self.async_request_refresh()
+        finally:
+            # Always keep polling, even if this cycle failed.
+            self.async_schedule_refresh()
+
+    def _record_publish_lag(self, snapshot: ObservationSnapshot) -> None:
+        """Feed the offset auto-tuner from the file's Last-Modified time."""
+        published = snapshot.published_at
+        if published is None:
+            return
+        grid = published.replace(
+            minute=published.minute - published.minute % POLL_INTERVAL_MINUTES,
+            second=0,
+            microsecond=0,
+        )
+        lag = (published - grid).total_seconds()
+        if 0 <= lag < POLL_INTERVAL_MINUTES * 60:
+            self._recent_lags.append(lag)
 
     def _log_station_presence(self, data: ShmuData) -> None:
         """Log (once per transition) whether the chosen station is reporting.
@@ -163,6 +288,23 @@ class ShmuDataUpdateCoordinator(DataUpdateCoordinator[ShmuData]):
         self._station_present = present
 
     async def _async_update_data(self) -> ShmuData:
+        try:
+            data = await self._fetch()
+        except Exception:
+            self._failures_since_success += 1
+            raise
+
+        self._last_success_at = dt_util.utcnow()
+        self._failures_since_success = 0
+        self._record_publish_lag(data.observations)
+        obs = data.observations.observations.get(self.station.ind_kli)
+        if obs is not None:
+            self._last_observation = obs
+            self._last_observation_at = self._last_success_at
+        self._log_station_presence(data)
+        return data
+
+    async def _fetch(self) -> ShmuData:
         previous = self.data
 
         observations_coro = self._client.async_get_observations(
@@ -197,10 +339,8 @@ class ShmuDataUpdateCoordinator(DataUpdateCoordinator[ShmuData]):
             web, "website conditions", previous.web_conditions if previous else None
         )
 
-        data = ShmuData(
+        return ShmuData(
             observations=observations,
             warnings=warnings,
             web_conditions=web,
         )
-        self._log_station_presence(data)
-        return data
