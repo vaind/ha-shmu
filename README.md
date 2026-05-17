@@ -78,14 +78,6 @@ scraping is isolated to one swappable module and the vendored library is kept
 Home-Assistant-free, so a future core-eligible path (Phase-2 ALADIN condition
 + extracting/publishing the library) stays open.
 
-## Roadmap
-
-| Phase | Scope | Status |
-|------|-------|--------|
-| 1 | Current conditions + CAP warnings (pure Python + website condition) | ✅ done |
-| 2 | ALADIN/SHMÚ daily & hourly forecast (vendored pure-Python GRIB2 decoder) | ✅ done |
-| 3 | Quality-scale polish, diagnostics, optional radar / air quality | planned |
-
 ## Development
 
 ```bash
