@@ -186,5 +186,24 @@ async def test_get_forecast_no_complete_run_raises(session, fixture) -> None:
             repeat=True,
         )
         client = ShmuClient(session)
-        with pytest.raises(ShmuDataError, match="No complete ALADIN run"):
+        with pytest.raises(ShmuDataError, match="No ALADIN run with all"):
+            await client.async_get_forecast(48.1717, 17.2, forecast_hours=(0, 1, 2))
+
+
+async def test_get_forecast_rejects_run_missing_intermediate_hour(
+    session, fixture
+) -> None:
+    """A gap in the requested hours would misattribute accumulated precip,
+    so such a run must be skipped, not silently used."""
+    with aioresponses() as m:
+        m.get(f"{BASE}{FCAST}/", body=_listing("20260517/"), repeat=True)
+        m.get(f"{BASE}{FCAST}/20260517/", body=_listing("1200/"), repeat=True)
+        # Hour 1 is absent though the final requested hour (2) is present.
+        m.get(
+            f"{BASE}{FCAST}/20260517/1200/",
+            body=_listing(_grib_name(0), _grib_name(2)),
+            repeat=True,
+        )
+        client = ShmuClient(session)
+        with pytest.raises(ShmuDataError, match="No ALADIN run with all"):
             await client.async_get_forecast(48.1717, 17.2, forecast_hours=(0, 1, 2))

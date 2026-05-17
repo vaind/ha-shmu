@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime, time
+from datetime import date
 
 from homeassistant.components.weather import (
     ATTR_CONDITION_CLEAR_NIGHT,
@@ -210,9 +210,7 @@ class ShmuWeather(ShmuStationEntity, WeatherEntity):
             ]
             daily.append(
                 Forecast(
-                    datetime=dt_util.start_of_local_day(
-                        datetime.combine(day, time())
-                    ).isoformat(),
+                    datetime=dt_util.start_of_local_day(day).isoformat(),
                     native_temperature=max(temps) if temps else None,
                     native_templow=min(temps) if temps else None,
                     native_precipitation=round(sum(precs), 2) if precs else None,

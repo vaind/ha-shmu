@@ -301,10 +301,12 @@ class ShmuClient:
         listings are read each call; the large GRIB2 set is fetched solely
         when the chosen run folder differs from ``previous``. A run is
         immutable once complete, so its folder path is a stable cache key.
-        Only a run whose last requested hour is published is used — until
-        then ``previous`` keeps serving, so a half-published run never
-        truncates the forecast. Newest two days are scanned to bridge a
-        midnight rollover (same rationale as the observation walk).
+        A run is used only when **every** requested hour is published: a
+        missing intermediate file would make a precipitation step span more
+        than its interval (totals are accumulated since the run start), so a
+        partially-published run is skipped entirely and ``previous`` keeps
+        serving. Newest two days are scanned to bridge a midnight rollover
+        (same rationale as the observation walk).
         """
         wanted = sorted(set(forecast_hours))
         if not wanted:
@@ -330,8 +332,10 @@ class ShmuClient:
                     match = _FCAST_FILE_RE.match(entry)
                     if match is not None:
                         available[int(match.group(1))] = entry
-                if target_hour not in available:
-                    continue  # run still publishing; fall back to an older one
+                if any(hour not in available for hour in wanted):
+                    # Still publishing / a file is missing — using it would
+                    # misattribute accumulated precipitation. Try an older run.
+                    continue
 
                 if previous is not None and previous.source == run_path:
                     _LOGGER.debug("Forecast run unchanged (%s); using cache", run_path)
@@ -339,10 +343,7 @@ class ShmuClient:
 
                 pairs: list[tuple[int, bytes]] = []
                 for hour in wanted:
-                    name = available.get(hour)
-                    if name is None:
-                        continue
-                    payload = await self._get(f"{run_path}/{quote(name)}")
+                    payload = await self._get(f"{run_path}/{quote(available[hour])}")
                     pairs.append((hour, payload))
 
                 run_dt = datetime.strptime(f"{day_dir}{run_dir}", "%Y%m%d%H%M").replace(
@@ -357,6 +358,6 @@ class ShmuClient:
                     fetched_at=datetime.now(UTC),
                 )
         raise ShmuDataError(
-            f"No complete ALADIN run (needs hour {target_hour:03d}) "
-            f"under {FORECAST_PATH}"
+            f"No ALADIN run with all {len(wanted)} requested hours "
+            f"(through {target_hour:03d}) under {FORECAST_PATH}"
         )
