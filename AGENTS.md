@@ -86,3 +86,25 @@ don't occur.
   # and ~all of yesterday's still-valid alerts. Compare identifier sets across
   # the last two issuance folders (expect them ~equal, not disjoint).
   ```
+- **Radar** (`weather/radar/composite/skcomp/<product>/YYYYMMDD/`): national
+  composite, **ODIM_H5 2.1** (HDF5), a new file every 5 min, ~32 days kept.
+  **Verified live 2026-05-17** across all four products (issue #6). Products:
+  `zmax`/`cappi2km` carry quantity **`DBZH`** as `u8` (gain/offset dBZ; raw
+  `0`=no echo, `255`=outside coverage — the two sentinels), `etop` `HGHT` u8,
+  `pac01` `RR`/`ACRR` as little-endian **`f32`**. Files use HDF5 **superblock
+  v0**, 8-byte offsets, classic symbol-table groups + local heap, **v1 object
+  headers (16-byte prefix = 12 + 4 pad)**, and the composite dataset is a
+  **single deflate chunk** spanning the whole 2270×1560 grid. Mercator
+  (`+proj=merc +lon_0=18.7 +lat_ts=48.43 +ellps=sphere`); corner lat/lon in
+  `/where`. Decoded by the vendored pure-Python `odim.py` (this exact subset
+  only — anything else raises loudly, same contract as `grib2.py`) and
+  rendered to a palette PNG by `radar.py` (stdlib `zlib` only; **no** h5py /
+  Pillow — same no-binary-deps reason GRIB2 libs were rejected). If a radar
+  read starts failing, re-verify the HDF5 structure of one file against this
+  list before changing the reader.
+- **Air quality**: `airQuality/` exists but serves **no data files** — every
+  leaf is a Windows `.url` shortcut to the EEA download webapp
+  (`eeadmz1-downloads-webapp.azurewebsites.net`) or SHMÚ web pages (verified
+  2026-05-17, issue #6). It is **out of scope**: consuming it would need the
+  EEA portal or scraping, both against the project's constraints. Don't add an
+  air-quality source here without revisiting that decision.

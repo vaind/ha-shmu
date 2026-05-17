@@ -43,6 +43,9 @@
     },
     "binary_sensor": {
       "weather_warning": { "name": "Meteorologická výstraha" }
+    },
+    "image": {
+      "radar": { "name": "Radar" }
     }
   }
 }

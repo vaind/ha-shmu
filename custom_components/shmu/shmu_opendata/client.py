@@ -25,10 +25,12 @@ import aiohttp
 
 from .const import (
     BASE_URL,
+    DEFAULT_RADAR_PRODUCT,
     DEFAULT_TIMEOUT,
     FORECAST_HOURS,
     FORECAST_PATH,
     OBSERVATIONS_PATH,
+    RADAR_PATH,
     USER_AGENT,
     WARNINGS_PATH,
 )
@@ -36,6 +38,7 @@ from .exceptions import ShmuConnectionError, ShmuDataError
 from .forecast import ForecastStep, grid_index, parse_forecast
 from .models import Observation, Warning
 from .parsers import list_directory, parse_cap_alert, parse_observations
+from .radar import RadarImage, render_radar
 from .website import WEBSITE_URL, WebCondition, parse_current_conditions
 
 _LOGGER = logging.getLogger(__name__)
@@ -45,6 +48,7 @@ _ISSUANCE_DIR_RE = re.compile(r"^\d{4}/$")
 _OBS_FILE_RE = re.compile(r"^aws1min .*\.json$")
 _CAP_FILE_RE = re.compile(r"^[^/]+\.cap\.xml$")
 _FCAST_FILE_RE = re.compile(r"^al-grib_sk_(\d{3})-(\d{8})-(\d{4})-nwp-\.grb$")
+_RADAR_FILE_RE = re.compile(r"^T_PA[A-Z]V22_C_LZIB_(\d{14})\.hdf$")
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,6 +103,23 @@ class ForecastSnapshot:
     run: datetime
     source: str
     grid_point: tuple[int, int]
+    fetched_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class RadarSnapshot:
+    """The newest ODIM radar composite, rendered to a PNG.
+
+    ``source`` is the ODIM file path and doubles as the cache identity: a
+    published frame never changes, so an unchanged ``source`` means the
+    ~0.3 MB HDF5 need not be re-fetched or re-rendered. ``valid_at`` is the
+    frame's nominal UTC time parsed from the filename.
+    """
+
+    image: RadarImage
+    product: str
+    source: str
+    valid_at: datetime
     fetched_at: datetime
 
 
@@ -360,4 +381,67 @@ class ShmuClient:
         raise ShmuDataError(
             f"No ALADIN run with all {len(wanted)} requested hours "
             f"(through {target_hour:03d}) under {FORECAST_PATH}"
+        )
+
+    async def _latest_radar_file(self, product: str) -> tuple[str, str, datetime]:
+        """Return ``(day_path, filename, valid_at)`` of the newest frame.
+
+        Mirrors :meth:`_latest_observation_file`: walks the two newest day
+        folders so a just-after-midnight gap (the new ``YYYYMMDD/`` folder
+        appears slightly before its first 5-minute file) does not raise.
+        """
+        product_path = f"{RADAR_PATH}/{product}"
+        days = sorted(
+            (e for e in await self._list(product_path) if _DAY_DIR_RE.match(e)),
+            reverse=True,
+        )
+        if not days:
+            raise ShmuDataError(f"No day folders in {product_path}")
+        for day in days[:2]:
+            day_path = f"{product_path}/{day.rstrip('/')}"
+            newest: tuple[str, str] | None = None
+            for entry in await self._list(day_path):
+                match = _RADAR_FILE_RE.match(entry)
+                if match is not None and (newest is None or entry > newest[0]):
+                    newest = (entry, match.group(1))
+            if newest is not None:
+                valid_at = datetime.strptime(newest[1], "%Y%m%d%H%M%S").replace(
+                    tzinfo=UTC
+                )
+                return day_path, newest[0], valid_at
+        raise ShmuDataError(
+            f"No radar files in the {len(days[:2])} newest day folders "
+            f"under {product_path}"
+        )
+
+    async def async_get_radar(
+        self,
+        product: str = DEFAULT_RADAR_PRODUCT,
+        *,
+        previous: RadarSnapshot | None = None,
+    ) -> RadarSnapshot:
+        """Fetch and render the newest ODIM radar composite.
+
+        Discovery reads only the small directory listing each call; the
+        ~0.3 MB HDF5 is downloaded and rendered solely when the newest frame
+        differs from ``previous`` (a published frame is immutable, so its
+        path is a stable cache key — the same politeness model as
+        :meth:`async_get_observations`).
+        """
+        day_path, filename, valid_at = await self._latest_radar_file(product)
+        source = f"{day_path}/{filename}"
+
+        if previous is not None and previous.source == source:
+            _LOGGER.debug("Radar unchanged (%s); using cache", source)
+            return previous
+
+        payload = await self._get(f"{day_path}/{quote(filename)}")
+        image = render_radar(payload)
+        _LOGGER.debug("Rendered %s radar frame from %s", product, source)
+        return RadarSnapshot(
+            image=image,
+            product=product,
+            source=source,
+            valid_at=valid_at,
+            fetched_at=datetime.now(UTC),
         )

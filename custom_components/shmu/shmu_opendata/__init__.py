@@ -9,6 +9,7 @@ from ._ssl import create_ssl_context
 from .client import (
     ForecastSnapshot,
     ObservationSnapshot,
+    RadarSnapshot,
     ShmuClient,
     WarningsSnapshot,
     WebConditionsSnapshot,
@@ -17,6 +18,7 @@ from .conditions import condition_from_weather_code
 from .exceptions import ShmuConnectionError, ShmuDataError, ShmuError
 from .forecast import ForecastStep
 from .models import Observation, Warning
+from .radar import RadarImage
 from .stations import (
     STATIONS,
     Station,
@@ -34,6 +36,8 @@ __all__ = [
     "ForecastStep",
     "Observation",
     "ObservationSnapshot",
+    "RadarImage",
+    "RadarSnapshot",
     "ShmuClient",
     "ShmuConnectionError",
     "ShmuDataError",

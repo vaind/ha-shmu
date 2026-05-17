@@ -35,6 +35,7 @@ async def async_get_config_entry_diagnostics(
     web_condition = web.conditions.get(station.ind_kli) if web is not None else None
 
     forecast = data.forecast
+    radar = data.radar
 
     # Shared resolver — exactly what the weather entity uses.
     condition, source = data.resolve_condition(station, served)
@@ -98,6 +99,22 @@ async def async_get_config_entry_diagnostics(
             "last_step": (
                 forecast.steps[-1].time.isoformat() if forecast.steps else None
             ),
+        },
+        "radar": None
+        if radar is None
+        else {
+            "source": radar.source,
+            "product": radar.product,
+            "valid_at": radar.valid_at.isoformat(),
+            "fetched_at": radar.fetched_at.isoformat(),
+            "size": [radar.image.width, radar.image.height],
+            "max_dbz": radar.image.max_dbz,
+            "bbox": [
+                radar.image.south,
+                radar.image.west,
+                radar.image.north,
+                radar.image.east,
+            ],
         },
         "warnings": None
         if data.warnings is None
