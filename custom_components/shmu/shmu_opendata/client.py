@@ -245,7 +245,7 @@ class ShmuClient:
         SHMÚ ever switches to incremental issuances, still-active earlier
         alerts would wrongly disappear; the fix would then be to union recent
         issuances within the active window. Re-check with the script in
-        CLAUDE.md if warnings behave oddly.
+        AGENTS.md if warnings behave oddly.
         """
         day = await self._latest_entry(WARNINGS_PATH, _DAY_DIR_RE)
         day_path = f"{WARNINGS_PATH}/{day.rstrip('/')}"
