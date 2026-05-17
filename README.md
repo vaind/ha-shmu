@@ -29,7 +29,9 @@ A Home Assistant integration for Slovak weather data published by the
 - **Weather warnings** — a binary sensor (with full alert details as
   attributes) that is on while a SHMÚ CAP alert covers your station, decided
   by the alert's own polygon.
-- One shared, cached fetch per cycle; the open-data server is polled politely.
+- One shared, change-detecting fetch per cycle, aligned to SHMÚ's upstream
+  publish grid (every 5 min on the UTC grid, a little after the boundary) so
+  data is fresh rather than up to a poll-interval behind.
 
 ## Installation (HACS)
 

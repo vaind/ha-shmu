@@ -18,7 +18,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
-from .const import CONF_IND_KLI, DOMAIN, UPDATE_INTERVAL
+from .const import CONF_IND_KLI, DOMAIN
 from .shmu_opendata import (
     ObservationSnapshot,
     ShmuClient,
@@ -122,13 +122,18 @@ class ShmuDataUpdateCoordinator(DataUpdateCoordinator[ShmuData]):
         config_entry: ShmuConfigEntry,
         client: ShmuClient,
     ) -> None:
-        """Initialise the coordinator."""
+        """Initialise the coordinator.
+
+        ``update_interval`` is left unset: polling is driven on the upstream
+        UTC 5-minute grid by ``async_setup_entry`` instead of a fixed period,
+        so we fetch each snapshot just after it is published rather than
+        drifting behind it.
+        """
         super().__init__(
             hass,
             _LOGGER,
             config_entry=config_entry,
             name=DOMAIN,
-            update_interval=UPDATE_INTERVAL,
         )
         self._client = client
         station = get_station(config_entry.data[CONF_IND_KLI])

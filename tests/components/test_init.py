@@ -73,6 +73,8 @@ async def test_setup_creates_entities(
         await hass.async_block_till_done()
 
     assert entry.state is ConfigEntryState.LOADED
+    # Polling is driven on the upstream UTC grid, not a fixed interval.
+    assert entry.runtime_data.update_interval is None
 
     weather = hass.states.get("weather.hurbanovo")
     assert weather is not None

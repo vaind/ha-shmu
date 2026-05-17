@@ -14,6 +14,7 @@ from typing import Any
 from homeassistant.core import HomeAssistant
 
 from . import shmu_opendata
+from .const import POLL_INTERVAL_MINUTES, POLL_OFFSET_SECONDS
 from .coordinator import ShmuConfigEntry
 
 
@@ -45,9 +46,7 @@ async def async_get_config_entry_diagnostics(
         },
         "coordinator": {
             "last_update_success": coordinator.last_update_success,
-            "update_interval_s": coordinator.update_interval.total_seconds()
-            if coordinator.update_interval
-            else None,
+            "poll": f"UTC */{POLL_INTERVAL_MINUTES}min +{POLL_OFFSET_SECONDS}s",
             "last_exception": repr(coordinator.last_exception)
             if coordinator.last_exception
             else None,
