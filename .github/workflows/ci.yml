@@ -23,12 +23,11 @@ jobs:
           python-version: "3.13"
           enable-cache: true
 
-      # Mirrors CONTRIBUTING.md exactly: dev deps come from the
+      # setup-uv (with python-version) already created and activated .venv,
+      # so we install straight into it. Dev deps come from the
       # [dependency-groups] table in pyproject.toml (single source of truth).
       - name: Install dev dependencies
-        run: |
-          uv venv
-          uv pip install --group dev
+        run: uv pip install --group dev
 
       - name: ruff check
         run: .venv/bin/ruff check custom_components/ tests/
