@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A new push to a PR branch cancels the previous, still-running CI for it.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality-gate:
+    name: Lint, type-check, tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up uv + Python 3.13
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.13"
+          enable-cache: true
+
+      # setup-uv (with python-version) already created and activated .venv,
+      # so we install straight into it. Dev deps come from the
+      # [dependency-groups] table in pyproject.toml (single source of truth).
+      - name: Install dev dependencies
+        run: uv pip install --group dev
+
+      - name: ruff check
+        run: .venv/bin/ruff check custom_components/ tests/
+
+      - name: ruff format --check
+        run: .venv/bin/ruff format --check custom_components/ tests/
+
+      - name: mypy (strict, vendored library)
+        run: .venv/bin/python -m mypy
+
+      - name: pytest (offline)
+        run: .venv/bin/python -m pytest tests/
+
+  hassfest:
+    name: Home Assistant hassfest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: home-assistant/actions/hassfest@master
+
+  hacs:
+    name: HACS validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: HACS Action
+        uses: hacs/action@main
+        with:
+          category: integration
+          # 'brands' requires the integration to be registered in
+          # home-assistant/brands, which only happens on a HA-core/HACS-default
+          # submission. This is an unpublished custom repo by design (see
+          # README "Why HACS"), so the brands check can never pass here and is
+          # unrelated to the lint/type/test quality gate.
+          ignore: brands
