@@ -43,9 +43,11 @@ records non-obvious constraints learned by reverse-engineering the source.
   `?id=meteo_apocasie_sk` (names). 27 synoptic stations.
 - **ALADIN forecast GRIB2** (`weather/nwp/aladin/sk/4.5km/YYYYMMDD/{0000,
   0600,1200,1800}/al-grib_sk_NNN-…-nwp-.grb`). **Verified 2026-05-17 on a
-  live file** (Phase-2a spike, issue #2): every field uses **Section 5 DRT
-  5.0 simple packing** (`nbits` 8/12/16) — *no* JPEG2000/PNG/CCSDS — so a
-  ~80-line stdlib decoder is sufficient and no C codec is ever needed. Grid
+  live file** (Phase-2a spike #2, refined in Phase-2b #3): forecast fields
+  use **Section 5 DRT 5.0 simple packing** (`nbits` 8/12/16); hour `000` also
+  carries the constant orography as one **DRT 5.4 IEEE float** message — both
+  are decoded (`grib2.py`), *no* JPEG2000/PNG/CCSDS, so no C codec is ever
+  needed. Anything else raises loudly rather than mis-decoding. Grid
   is **fixed**: Lambert conformal conic, Nx=94 Ny=48, Dx=Dy=4500 m,
   La1=47.74175 Lo1=16.849607, LaD=Latin1=Latin2=46.2447, LoV=17.0, spherical
   R=6 371 229 m, scan `0x40`, with a Section-6 **bitmap** (2479/4512 active).
@@ -72,19 +74,18 @@ records non-obvious constraints learned by reverse-engineering the source.
 ## Roadmap
 
 - **Phase 1 (this)**: current conditions + CAP warnings. Pure Python + scrape.
-- **Phase 2**: ALADIN forecast (GRIB2 edition 2). **Decided 2026-05-17
-  (issue #2 spike): vendored pure-Python simple-packing decoder** — *not*
-  `grib2io`/`cfgrib` (PyPI ships sdist-only, no HAOS aarch64/armv7 wheels;
-  building needs a C toolchain HAOS lacks). DRT 5.0 confirmed on a live file
-  (see data-source note above), so no C codec/`manifest.json` requirement and
-  the library stays HA-free + offline-testable. Phase 2b: `grib2.py` decoder
-  + Lambert forward projection (lat/lon→i,j, ~25 lines `math`, bitmap-aware)
-  + field→`Forecast` mapping (FORECAST_HOURLY *and* DAILY; TCC gives a
-  self-contained forecast condition, so scraping leaves the forecast path).
-  Fetch once per model run (~11 MB, ≈4×/day), gated on a new-run-folder
-  identity check like observations — *not* per coordinator poll. Website
-  meteogram (PNG/prose, no structured endpoint) is fallback-only. Still
-  HACS-only (current conditions still scrape via `website.py`).
+- **Phase 2 — done (issue #3)**: ALADIN daily & hourly forecast. Vendored
+  pure-Python GRIB2 decoder (`grib2.py`, DRT 5.0 + 5.4, bitmap-aware) +
+  fixed-grid Lambert forward projection & field map (`forecast.py`) +
+  `ShmuClient.async_get_forecast` (newest *complete* run only; cache identity
+  = run folder, so the ~11 MB GRIB2 set is fetched ≈4×/day, not per poll —
+  decision rationale in the #2 spike comment). The weather entity exposes
+  `FORECAST_DAILY|HOURLY`; forecast `condition` is model-derived (TCC + precip
+  + CAPE), so the forecast path needs **no scraping** — `website.py` is now
+  only the *current*-condition source. Still HACS-only (no `manifest.json`
+  requirement; lib stays HA-free + offline-tested via trimmed `*.grb`
+  fixtures). `grib2io`/`cfgrib` were rejected (PyPI sdist-only; no HAOS
+  aarch64/armv7 wheels). The website meteogram remains an unused fallback.
 - **Phase 3**: quality-scale polish, diagnostics, optional radar/air-quality.
 
 ## Dev commands

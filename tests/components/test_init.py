@@ -13,15 +13,20 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.shmu.const import CONF_IND_KLI, DOMAIN
 from custom_components.shmu.shmu_opendata import (
+    ForecastSnapshot,
     ObservationSnapshot,
     WarningsSnapshot,
     WebConditionsSnapshot,
 )
+from custom_components.shmu.shmu_opendata.forecast import grid_index, parse_forecast
 from custom_components.shmu.shmu_opendata.parsers import (
     parse_cap_alert,
     parse_observations,
 )
 from custom_components.shmu.shmu_opendata.website import parse_current_conditions
+
+#: Forecast hours backed by the trimmed real GRIB2 fixtures.
+_FCAST_FIXTURE_HOURS = (0, 1, 2, 24)
 
 
 class _FakeClient:
@@ -57,6 +62,23 @@ class _FakeClient:
             conditions=parse_current_conditions(
                 self._load("apocasie.html").decode("utf-8")
             ),
+            fetched_at=datetime.now(UTC),
+        )
+
+    async def async_get_forecast(
+        self,
+        latitude: float,
+        longitude: float,
+        *,
+        forecast_hours=None,
+        previous=None,
+    ) -> ForecastSnapshot:
+        files = [(h, self._load(f"aladin_{h:03d}.grb")) for h in _FCAST_FIXTURE_HOURS]
+        return ForecastSnapshot(
+            steps=parse_forecast(files, latitude, longitude),
+            run=datetime(2026, 5, 17, 12, tzinfo=UTC),
+            source="test-run/20260517/1200",
+            grid_point=grid_index(latitude, longitude),
             fetched_at=datetime.now(UTC),
         )
 
