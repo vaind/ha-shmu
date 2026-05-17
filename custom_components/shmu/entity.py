@@ -1,0 +1,47 @@
+"""Shared base entity for SHMÚ Weather."""
+
+from __future__ import annotations
+
+from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
+
+from .const import ATTRIBUTION, DOMAIN, MANUFACTURER
+from .coordinator import ShmuDataUpdateCoordinator
+from .shmu_opendata import Observation, Station
+
+
+class ShmuStationEntity(CoordinatorEntity[ShmuDataUpdateCoordinator]):
+    """Base entity tying all platforms to one station's device."""
+
+    _attr_attribution = ATTRIBUTION
+    _attr_has_entity_name = True
+
+    def __init__(
+        self, coordinator: ShmuDataUpdateCoordinator, station: Station
+    ) -> None:
+        """Initialise the entity for ``station``."""
+        super().__init__(coordinator)
+        self._station = station
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, str(station.ind_kli))},
+            name=station.name,
+            manufacturer=MANUFACTURER,
+            model="Synoptic station",
+            entry_type=DeviceEntryType.SERVICE,
+            configuration_url=(
+                f"https://www.shmu.sk/sk/?page=1&id=meteo_apocasie_sk"
+                f"&ii={station.ind_kli}"
+            ),
+        )
+
+    @property
+    def observation(self) -> Observation | None:
+        """This station's latest observation, if present in the feed."""
+        return self.coordinator.data.observations.observations.get(
+            self._station.ind_kli
+        )
+
+    @property
+    def available(self) -> bool:
+        """Available only when the station is present in the latest feed."""
+        return super().available and self.observation is not None

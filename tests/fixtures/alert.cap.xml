@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<alert xmlns="urn:oasis:names:tc:emergency:cap:1.2">
+<identifier>2.49.0.0.703.0.SK.260517035448.test_KM</identifier>
+<sender>http://www.shmu.sk</sender>
+<sent>2026-05-17T03:54:48-00:00</sent>
+<status>Actual</status>
+<msgType>Alert</msgType>
+<scope>Public</scope>
+<info>
+<language>en</language>
+<category>Met</category>
+<event>Rain warning</event>
+<severity>Moderate</severity>
+<certainty>Likely</certainty>
+<onset>2026-05-15T18:00:00-00:00</onset>
+<expires>2026-05-17T18:00:00-00:00</expires>
+<headline>English headline (should be ignored)</headline>
+<area><areaDesc>Whatever</areaDesc></area>
+</info>
+<info>
+<language>sk</language>
+<category>Met</category>
+<event>Výstraha pred dažďom</event>
+<responseType>None</responseType>
+<urgency>Future</urgency>
+<severity>Moderate</severity>
+<certainty>Likely</certainty>
+<effective>2026-05-15T08:11:00-00:00</effective>
+<onset>2026-05-15T18:00:00-00:00</onset>
+<expires>2026-05-17T18:00:00-00:00</expires>
+<senderName>Slovenský Hydrometeorologický ústav</senderName>
+<headline>Očakávame dážď</headline>
+<description>V okrese sa očakáva dážď.</description>
+<instruction>ZVÝŠTE POZORNOSŤ.</instruction>
+<web>http://www.shmu.sk/?page=987</web>
+<parameter><valueName>awareness_level</valueName><value>2; yellow; Moderate</value></parameter>
+<parameter><valueName>awareness_type</valueName><value>10; Rain</value></parameter>
+<area>
+<areaDesc>Bratislava</areaDesc>
+<polygon>48.10,17.00 48.10,17.25 48.25,17.25 48.25,17.00 48.10,17.00</polygon>
+</area>
+</info>
+</alert>

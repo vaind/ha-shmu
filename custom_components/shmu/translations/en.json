@@ -1,0 +1,45 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "SHMÚ Weather",
+        "description": "Unofficial integration — not affiliated with or endorsed by SHMÚ. Early version, use at your own risk. Choose a SHMÚ synoptic station; the nearest one to your Home Assistant location is preselected.",
+        "data": {
+          "ind_kli": "Station"
+        }
+      }
+    },
+    "abort": {
+      "already_configured": "This station is already configured."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "temperature": { "name": "Temperature" },
+      "humidity": { "name": "Humidity" },
+      "pressure": { "name": "Pressure" },
+      "wind_speed": { "name": "Wind speed" },
+      "wind_gust": { "name": "Wind gust" },
+      "wind_bearing": { "name": "Wind bearing" },
+      "precipitation": { "name": "Precipitation" },
+      "snow_depth": { "name": "Snow depth" },
+      "visibility": { "name": "Visibility" },
+      "ground_temperature": { "name": "Ground temperature" },
+      "global_radiation": { "name": "Global radiation" },
+      "weather_code": { "name": "Weather code" },
+      "warning_level": {
+        "name": "Warning level",
+        "state": {
+          "none": "None",
+          "green": "Green",
+          "yellow": "Yellow",
+          "orange": "Orange",
+          "red": "Red"
+        }
+      }
+    },
+    "binary_sensor": {
+      "weather_warning": { "name": "Weather warning" }
+    }
+  }
+}

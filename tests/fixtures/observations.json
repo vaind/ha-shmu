@@ -1,0 +1,14 @@
+{
+  "id": "test",
+  "dataset": "Automatic stations",
+  "interval": "1 minute",
+  "frequency": "5 minute",
+  "statistics": { "stations_count": 3, "records_count": 5 },
+  "data": [
+    {"ind_kli": 11858, "minuta": "2026-05-17T06:50:00", "t": 11.8, "vlh_rel": 68.2, "tlak": 1001.3, "vie_pr_rych": 5.9, "vie_max_rych": 7.3, "vie_pr_smer": 340.7, "zra_uhrn": 0.0, "dohl": 25000.0, "stav_poc": 61, "sneh_pokr": null, "tprz": 12.2, "zglo": 410.0},
+    {"ind_kli": 11858, "minuta": "2026-05-17T06:52:00", "t": 12.1, "vlh_rel": 67.0, "tlak": 1001.2, "vie_pr_rych": 6.0, "vie_max_rych": 8.0, "vie_pr_smer": 339.0, "zra_uhrn": 0.2, "dohl": 24000.0, "stav_poc": 61, "sneh_pokr": null, "tprz": 12.4, "zglo": 420.0},
+    {"ind_kli": 11858, "minuta": "2026-05-17T06:51:00", "t": 11.9, "vlh_rel": 67.5, "tlak": 1001.25, "vie_pr_rych": 5.95, "vie_max_rych": 7.6, "vie_pr_smer": 340.0, "zra_uhrn": 0.1, "dohl": 24500.0, "stav_poc": 61, "sneh_pokr": null, "tprz": 12.3, "zglo": 415.0},
+    {"ind_kli": 11816, "minuta": "2026-05-17T06:50:00", "t": 14.6, "vlh_rel": 57.0, "tlak": null, "vie_pr_rych": 7.7, "vie_max_rych": 10.0, "vie_pr_smer": 349.0, "zra_uhrn": 0.0, "dohl": null, "stav_poc": null, "sneh_pokr": null, "tprz": null, "zglo": null},
+    {"ind_kli": 11930, "minuta": "2026-05-17T06:50:00", "t": -1.9, "vlh_rel": 96.0, "tlak": 792.8, "vie_pr_rych": 9.0, "vie_max_rych": 10.8, "vie_pr_smer": 352.0, "zra_uhrn": null, "dohl": 150.0, "stav_poc": 30, "sneh_pokr": 12.0, "tprz": -2.1, "zglo": 5.0}
+  ]
+}

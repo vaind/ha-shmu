@@ -1,0 +1,45 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Počasie SHMÚ",
+        "description": "Neoficiálna integrácia — nie je spojená so SHMÚ ani ním schválená. Skorá verzia, použitie na vlastné riziko. Vyberte synoptickú stanicu SHMÚ; predvolená je stanica najbližšie k polohe vášho Home Assistant.",
+        "data": {
+          "ind_kli": "Stanica"
+        }
+      }
+    },
+    "abort": {
+      "already_configured": "Táto stanica je už nakonfigurovaná."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "temperature": { "name": "Teplota" },
+      "humidity": { "name": "Vlhkosť" },
+      "pressure": { "name": "Tlak" },
+      "wind_speed": { "name": "Rýchlosť vetra" },
+      "wind_gust": { "name": "Nárazy vetra" },
+      "wind_bearing": { "name": "Smer vetra" },
+      "precipitation": { "name": "Zrážky" },
+      "snow_depth": { "name": "Výška snehu" },
+      "visibility": { "name": "Dohľadnosť" },
+      "ground_temperature": { "name": "Prízemná teplota" },
+      "global_radiation": { "name": "Globálne žiarenie" },
+      "weather_code": { "name": "Kód počasia" },
+      "warning_level": {
+        "name": "Stupeň výstrahy",
+        "state": {
+          "none": "Žiadny",
+          "green": "Zelený",
+          "yellow": "Žltý",
+          "orange": "Oranžový",
+          "red": "Červený"
+        }
+      }
+    },
+    "binary_sensor": {
+      "weather_warning": { "name": "Meteorologická výstraha" }
+    }
+  }
+}

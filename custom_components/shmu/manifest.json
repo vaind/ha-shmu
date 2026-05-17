@@ -1,0 +1,13 @@
+{
+  "domain": "shmu",
+  "name": "SHMÚ Weather",
+  "codeowners": ["@vaind"],
+  "config_flow": true,
+  "documentation": "https://github.com/vaind/ha-shmu",
+  "integration_type": "service",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/vaind/ha-shmu/issues",
+  "loggers": ["custom_components.shmu"],
+  "requirements": [],
+  "version": "0.1.0"
+}
