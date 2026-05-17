@@ -41,6 +41,21 @@ records non-obvious constraints learned by reverse-engineering the source.
 - **Station catalogue** is hard-coded (`stations.py`); SHMÚ publishes none in
   machine form. Regenerate from `shmu.sk/sk/?page=318` (coords) +
   `?id=meteo_apocasie_sk` (names). 27 synoptic stations.
+- **ALADIN forecast GRIB2** (`weather/nwp/aladin/sk/4.5km/YYYYMMDD/{0000,
+  0600,1200,1800}/al-grib_sk_NNN-…-nwp-.grb`). **Verified 2026-05-17 on a
+  live file** (Phase-2a spike, issue #2): every field uses **Section 5 DRT
+  5.0 simple packing** (`nbits` 8/12/16) — *no* JPEG2000/PNG/CCSDS — so a
+  ~80-line stdlib decoder is sufficient and no C codec is ever needed. Grid
+  is **fixed**: Lambert conformal conic, Nx=94 Ny=48, Dx=Dy=4500 m,
+  La1=47.74175 Lo1=16.849607, LaD=Latin1=Latin2=46.2447, LoV=17.0, spherical
+  R=6 371 229 m, scan `0x40`, with a Section-6 **bitmap** (2479/4512 active).
+  The grid-definition-template octet reads `33` (no standard 3.33); the 3.30
+  Lambert layout decodes correctly — treat the number as a known ALADIN
+  encoder quirk and assume this one immutable grid. Each hour-file carries
+  all needed surface fields: `2t`(0,0,0@103), `10u/10v`(0,2,2/3@103), gusts
+  (0,2,23/24@103,pdt8), total-precip-accum(0,1,193@1,pdt8), TCC(192,128,
+  164@1), LCC/MCC(192,128,186/187@1), PRMSL(0,3,1@101), CAPE(0,7,6@1). Runs
+  cover forecast hours **000–102** (103 files/run, ≈161 KB each), 4 runs/day.
 - **Warnings**: CAP 1.2 XML; the Slovak `<info>` block is preferred; polygons
   are used for point-in-station relevance. **Verified 2026-05-17**: every
   `HHMM/` issuance folder republishes the *full* active set (not deltas),
@@ -57,10 +72,19 @@ records non-obvious constraints learned by reverse-engineering the source.
 ## Roadmap
 
 - **Phase 1 (this)**: current conditions + CAP warnings. Pure Python + scrape.
-- **Phase 2**: ALADIN forecast. Only available as **GRIB2** (edition 2). No
-  pure-Python GRIB2 reader exists (`pupygrib` is GRIB1 only); `grib2io`/`cfgrib`
-  need a C library. A spike must decide grib2io-wheel viability vs. website
-  meteogram fallback. This is the known gap that keeps v1 on HACS.
+- **Phase 2**: ALADIN forecast (GRIB2 edition 2). **Decided 2026-05-17
+  (issue #2 spike): vendored pure-Python simple-packing decoder** — *not*
+  `grib2io`/`cfgrib` (PyPI ships sdist-only, no HAOS aarch64/armv7 wheels;
+  building needs a C toolchain HAOS lacks). DRT 5.0 confirmed on a live file
+  (see data-source note above), so no C codec/`manifest.json` requirement and
+  the library stays HA-free + offline-testable. Phase 2b: `grib2.py` decoder
+  + Lambert forward projection (lat/lon→i,j, ~25 lines `math`, bitmap-aware)
+  + field→`Forecast` mapping (FORECAST_HOURLY *and* DAILY; TCC gives a
+  self-contained forecast condition, so scraping leaves the forecast path).
+  Fetch once per model run (~11 MB, ≈4×/day), gated on a new-run-folder
+  identity check like observations — *not* per coordinator poll. Website
+  meteogram (PNG/prose, no structured endpoint) is fallback-only. Still
+  HACS-only (current conditions still scrape via `website.py`).
 - **Phase 3**: quality-scale polish, diagnostics, optional radar/air-quality.
 
 ## Dev commands
