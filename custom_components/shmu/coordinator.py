@@ -31,6 +31,7 @@ from .const import (
     POLL_OFFSET_PAD_SECONDS,
 )
 from .shmu_opendata import (
+    ForecastSnapshot,
     Observation,
     ObservationSnapshot,
     ShmuClient,
@@ -82,6 +83,7 @@ class ShmuData:
     observations: ObservationSnapshot
     warnings: WarningsSnapshot | None
     web_conditions: WebConditionsSnapshot | None
+    forecast: ForecastSnapshot | None
 
     def active_warnings_for(self, station: Station) -> list[Warning]:
         """Active warnings whose area covers the station, worst severity first."""
@@ -314,11 +316,21 @@ class ShmuDataUpdateCoordinator(DataUpdateCoordinator[ShmuData]):
             previous=previous.warnings if previous else None
         )
         web_coro = self._client.async_get_web_conditions()
+        # Forecast discovery is cheap (small directory listings); the large
+        # GRIB2 set is re-downloaded only when the model run folder changes
+        # (~4x/day), so running this every observation cycle does not increase
+        # the heavy request rate — same identity-cache idea as observations.
+        forecast_coro = self._client.async_get_forecast(
+            self.station.latitude,
+            self.station.longitude,
+            previous=previous.forecast if previous else None,
+        )
 
-        observations, warnings, web = await asyncio.gather(
+        observations, warnings, web, forecast = await asyncio.gather(
             observations_coro,
             warnings_coro,
             web_coro,
+            forecast_coro,
             return_exceptions=True,
         )
 
@@ -338,9 +350,13 @@ class ShmuDataUpdateCoordinator(DataUpdateCoordinator[ShmuData]):
         web = _keep_previous(
             web, "website conditions", previous.web_conditions if previous else None
         )
+        forecast = _keep_previous(
+            forecast, "forecast", previous.forecast if previous else None
+        )
 
         return ShmuData(
             observations=observations,
             warnings=warnings,
             web_conditions=web,
+            forecast=forecast,
         )

@@ -15,6 +15,7 @@ from __future__ import annotations
 import logging
 import re
 import ssl
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
@@ -25,11 +26,14 @@ import aiohttp
 from .const import (
     BASE_URL,
     DEFAULT_TIMEOUT,
+    FORECAST_HOURS,
+    FORECAST_PATH,
     OBSERVATIONS_PATH,
     USER_AGENT,
     WARNINGS_PATH,
 )
 from .exceptions import ShmuConnectionError, ShmuDataError
+from .forecast import ForecastStep, grid_index, parse_forecast
 from .models import Observation, Warning
 from .parsers import list_directory, parse_cap_alert, parse_observations
 from .website import WEBSITE_URL, WebCondition, parse_current_conditions
@@ -40,6 +44,7 @@ _DAY_DIR_RE = re.compile(r"^\d{8}/$")
 _ISSUANCE_DIR_RE = re.compile(r"^\d{4}/$")
 _OBS_FILE_RE = re.compile(r"^aws1min .*\.json$")
 _CAP_FILE_RE = re.compile(r"^[^/]+\.cap\.xml$")
+_FCAST_FILE_RE = re.compile(r"^al-grib_sk_(\d{3})-(\d{8})-(\d{4})-nwp-\.grb$")
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,6 +80,25 @@ class WebConditionsSnapshot:
     """
 
     conditions: dict[int, WebCondition]
+    fetched_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class ForecastSnapshot:
+    """An ALADIN model run decoded at the configured location.
+
+    ``run`` is the model reference time (UTC); ``source`` is the run folder
+    path and doubles as the cache identity — a run never changes once
+    complete, so an unchanged ``source`` means the (large) GRIB2 set need not
+    be re-downloaded until SHMÚ publishes the next run. ``grid_point`` is the
+    projected ALADIN cell ``(i, j)`` for the location, surfaced for
+    diagnostics provenance.
+    """
+
+    steps: list[ForecastStep]
+    run: datetime
+    source: str
+    grid_point: tuple[int, int]
     fetched_at: datetime
 
 
@@ -261,4 +285,78 @@ class ShmuClient:
         return WebConditionsSnapshot(
             conditions=conditions,
             fetched_at=datetime.now(UTC),
+        )
+
+    async def async_get_forecast(
+        self,
+        latitude: float,
+        longitude: float,
+        *,
+        forecast_hours: Sequence[int] = FORECAST_HOURS,
+        previous: ForecastSnapshot | None = None,
+    ) -> ForecastSnapshot:
+        """Decode the newest *complete* ALADIN run at a location.
+
+        Run discovery mirrors the observation pattern: only small directory
+        listings are read each call; the large GRIB2 set is fetched solely
+        when the chosen run folder differs from ``previous``. A run is
+        immutable once complete, so its folder path is a stable cache key.
+        Only a run whose last requested hour is published is used — until
+        then ``previous`` keeps serving, so a half-published run never
+        truncates the forecast. Newest two days are scanned to bridge a
+        midnight rollover (same rationale as the observation walk).
+        """
+        wanted = sorted(set(forecast_hours))
+        if not wanted:
+            raise ShmuDataError("No forecast hours requested")
+        target_hour = wanted[-1]
+
+        days = sorted(
+            (e for e in await self._list(FORECAST_PATH) if _DAY_DIR_RE.match(e)),
+            reverse=True,
+        )
+        for day in days[:2]:
+            day_dir = day.rstrip("/")
+            day_path = f"{FORECAST_PATH}/{day_dir}"
+            runs = sorted(
+                (e for e in await self._list(day_path) if _ISSUANCE_DIR_RE.match(e)),
+                reverse=True,
+            )
+            for run in runs:
+                run_dir = run.rstrip("/")
+                run_path = f"{day_path}/{run_dir}"
+                available: dict[int, str] = {}
+                for entry in await self._list(run_path):
+                    match = _FCAST_FILE_RE.match(entry)
+                    if match is not None:
+                        available[int(match.group(1))] = entry
+                if target_hour not in available:
+                    continue  # run still publishing; fall back to an older one
+
+                if previous is not None and previous.source == run_path:
+                    _LOGGER.debug("Forecast run unchanged (%s); using cache", run_path)
+                    return previous
+
+                pairs: list[tuple[int, bytes]] = []
+                for hour in wanted:
+                    name = available.get(hour)
+                    if name is None:
+                        continue
+                    payload = await self._get(f"{run_path}/{quote(name)}")
+                    pairs.append((hour, payload))
+
+                run_dt = datetime.strptime(f"{day_dir}{run_dir}", "%Y%m%d%H%M").replace(
+                    tzinfo=UTC
+                )
+                _LOGGER.debug("Decoded %d forecast hours from %s", len(pairs), run_path)
+                return ForecastSnapshot(
+                    steps=parse_forecast(pairs, latitude, longitude),
+                    run=run_dt,
+                    source=run_path,
+                    grid_point=grid_index(latitude, longitude),
+                    fetched_at=datetime.now(UTC),
+                )
+        raise ShmuDataError(
+            f"No complete ALADIN run (needs hour {target_hour:03d}) "
+            f"under {FORECAST_PATH}"
         )

@@ -33,6 +33,8 @@ async def async_get_config_entry_diagnostics(
     web = data.web_conditions
     web_condition = web.conditions.get(station.ind_kli) if web is not None else None
 
+    forecast = data.forecast
+
     # Shared resolver — exactly what the weather entity uses.
     condition, source = data.resolve_condition(station, served)
 
@@ -80,6 +82,21 @@ async def async_get_config_entry_diagnostics(
                 "weather_text": web_condition.weather_text,
                 "condition": web_condition.condition,
             },
+        },
+        "forecast": None
+        if forecast is None
+        else {
+            "source": forecast.source,
+            "run": forecast.run.isoformat(),
+            "fetched_at": forecast.fetched_at.isoformat(),
+            "grid_point": list(forecast.grid_point),
+            "step_count": len(forecast.steps),
+            "first_step": (
+                forecast.steps[0].time.isoformat() if forecast.steps else None
+            ),
+            "last_step": (
+                forecast.steps[-1].time.isoformat() if forecast.steps else None
+            ),
         },
         "warnings": None
         if data.warnings is None

@@ -6,12 +6,21 @@ import aiohttp
 import pytest
 from aioresponses import aioresponses
 
-from custom_components.shmu.shmu_opendata import ShmuClient, ShmuConnectionError
+from custom_components.shmu.shmu_opendata import (
+    ShmuClient,
+    ShmuConnectionError,
+    ShmuDataError,
+)
 
 BASE = "https://opendata.shmu.sk"
 OBS = "/meteorology/climate/now/data"
 WARN = "/meteorology/weather/alerts/cap"
+FCAST = "/meteorology/weather/nwp/aladin/sk/4.5km"
 WEB = "https://www.shmu.sk/sk/?page=1&id=meteo_apocasie_sk"
+
+
+def _grib_name(hour: int, day: str = "20260517", run: str = "1200") -> str:
+    return f"al-grib_sk_{hour:03d}-{day}-{run}-nwp-.grb"
 
 
 def _listing(*entries: str) -> str:
@@ -101,3 +110,81 @@ async def test_connection_error_is_wrapped(session) -> None:
         client = ShmuClient(session)
         with pytest.raises(ShmuConnectionError):
             await client.async_get_observations()
+
+
+def _register_run(m, fixture, day: str, run: str, hours: list[int]) -> None:
+    """Register a forecast run folder listing plus its GRIB2 files."""
+    names = [_grib_name(h, day, run) for h in hours]
+    m.get(f"{BASE}{FCAST}/{day}/{run}/", body=_listing(*names), repeat=True)
+    for h, name in zip(hours, names, strict=True):
+        m.get(
+            f"{BASE}{FCAST}/{day}/{run}/{name}",
+            body=fixture(f"aladin_{h:03d}.grb"),
+        )
+
+
+async def test_get_forecast_discovers_and_decodes(session, fixture) -> None:
+    with aioresponses() as m:
+        m.get(f"{BASE}{FCAST}/", body=_listing("20260517/"), repeat=True)
+        m.get(f"{BASE}{FCAST}/20260517/", body=_listing("1200/"), repeat=True)
+        _register_run(m, fixture, "20260517", "1200", [0, 1, 2])
+
+        client = ShmuClient(session)
+        snap = await client.async_get_forecast(48.1717, 17.2, forecast_hours=(0, 1, 2))
+
+        assert snap.source == f"{FCAST}/20260517/1200"
+        assert snap.run.isoformat() == "2026-05-17T12:00:00+00:00"
+        assert len(snap.steps) == 3
+        assert snap.steps[0].time.isoformat() == "2026-05-17T12:00:00+00:00"
+        assert snap.steps[1].condition == "rainy"
+
+
+async def test_get_forecast_skips_incomplete_newest_run(session, fixture) -> None:
+    """The newest run is still publishing; fall back to the last complete one."""
+    with aioresponses() as m:
+        m.get(f"{BASE}{FCAST}/", body=_listing("20260517/"), repeat=True)
+        m.get(
+            f"{BASE}{FCAST}/20260517/",
+            body=_listing("1800/", "1200/"),
+            repeat=True,
+        )
+        # 1800 lacks the requested final hour -> not usable yet.
+        m.get(
+            f"{BASE}{FCAST}/20260517/1800/",
+            body=_listing(_grib_name(0, run="1800"), _grib_name(1, run="1800")),
+            repeat=True,
+        )
+        _register_run(m, fixture, "20260517", "1200", [0, 1, 2])
+
+        client = ShmuClient(session)
+        snap = await client.async_get_forecast(48.1717, 17.2, forecast_hours=(0, 1, 2))
+        assert snap.source == f"{FCAST}/20260517/1200"
+
+
+async def test_get_forecast_caches_by_run_folder(session, fixture) -> None:
+    with aioresponses() as m:
+        m.get(f"{BASE}{FCAST}/", body=_listing("20260517/"), repeat=True)
+        m.get(f"{BASE}{FCAST}/20260517/", body=_listing("1200/"), repeat=True)
+        # GRIB2 files registered ONCE: a second download would raise.
+        _register_run(m, fixture, "20260517", "1200", [0, 1, 2])
+
+        client = ShmuClient(session)
+        first = await client.async_get_forecast(48.1717, 17.2, forecast_hours=(0, 1, 2))
+        again = await client.async_get_forecast(
+            48.1717, 17.2, forecast_hours=(0, 1, 2), previous=first
+        )
+        assert again is first  # unchanged run -> cached, not re-downloaded
+
+
+async def test_get_forecast_no_complete_run_raises(session, fixture) -> None:
+    with aioresponses() as m:
+        m.get(f"{BASE}{FCAST}/", body=_listing("20260517/"), repeat=True)
+        m.get(f"{BASE}{FCAST}/20260517/", body=_listing("1200/"), repeat=True)
+        m.get(
+            f"{BASE}{FCAST}/20260517/1200/",
+            body=_listing(_grib_name(0), _grib_name(1)),
+            repeat=True,
+        )
+        client = ShmuClient(session)
+        with pytest.raises(ShmuDataError, match="No complete ALADIN run"):
+            await client.async_get_forecast(48.1717, 17.2, forecast_hours=(0, 1, 2))

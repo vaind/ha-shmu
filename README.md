@@ -6,8 +6,9 @@ A Home Assistant integration for Slovak weather data published by the
 [![CI](https://github.com/vaind/ha-shmu/actions/workflows/ci.yml/badge.svg)](https://github.com/vaind/ha-shmu/actions/workflows/ci.yml)
 [![HACS: Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://hacs.xyz/)
 
-> **Status: Phase 1 — early version.** Current conditions and weather
-> warnings. Forecast support is planned (see [Roadmap](#roadmap)).
+> **Status: Phase 2.** Current conditions, weather warnings, **and the
+> ALADIN/SHMÚ daily & hourly forecast** (decoded from GRIB2 in pure Python —
+> no native dependency). See [Roadmap](#roadmap).
 
 ## ⚠️ Disclaimer
 
@@ -79,11 +80,11 @@ Home-Assistant-free, so a future core-eligible path (Phase-2 ALADIN condition
 
 ## Roadmap
 
-| Phase | Scope |
-|------|-------|
-| 1 | Current conditions + CAP warnings (pure Python + website condition) |
-| 2 | ALADIN/SHMÚ forecast (GRIB2 — needs a decode-strategy spike) |
-| 3 | Quality-scale polish, diagnostics, optional radar / air quality |
+| Phase | Scope | Status |
+|------|-------|--------|
+| 1 | Current conditions + CAP warnings (pure Python + website condition) | ✅ done |
+| 2 | ALADIN/SHMÚ daily & hourly forecast (vendored pure-Python GRIB2 decoder) | ✅ done |
+| 3 | Quality-scale polish, diagnostics, optional radar / air quality | planned |
 
 ## Development
 

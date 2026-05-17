@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from ._ssl import create_ssl_context
 from .client import (
+    ForecastSnapshot,
     ObservationSnapshot,
     ShmuClient,
     WarningsSnapshot,
@@ -14,6 +15,7 @@ from .client import (
 )
 from .conditions import condition_from_weather_code
 from .exceptions import ShmuConnectionError, ShmuDataError, ShmuError
+from .forecast import ForecastStep
 from .models import Observation, Warning
 from .stations import (
     STATIONS,
@@ -28,6 +30,8 @@ __version__ = "0.1.0"
 
 __all__ = [
     "STATIONS",
+    "ForecastSnapshot",
+    "ForecastStep",
     "Observation",
     "ObservationSnapshot",
     "ShmuClient",
