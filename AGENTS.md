@@ -86,20 +86,3 @@ don't occur.
   # and ~all of yesterday's still-valid alerts. Compare identifier sets across
   # the last two issuance folders (expect them ~equal, not disjoint).
   ```
-
-## Roadmap
-
-- **Phase 1 (this)**: current conditions + CAP warnings. Pure Python + scrape.
-- **Phase 2 — done (issue #3)**: ALADIN daily & hourly forecast. Vendored
-  pure-Python GRIB2 decoder (`grib2.py`, DRT 5.0 + 5.4, bitmap-aware) +
-  fixed-grid Lambert forward projection & field map (`forecast.py`) +
-  `ShmuClient.async_get_forecast` (newest *complete* run only; cache identity
-  = run folder, so the ~11 MB GRIB2 set is fetched ≈4×/day, not per poll —
-  decision rationale in the #2 spike comment). The weather entity exposes
-  `FORECAST_DAILY|HOURLY`; forecast `condition` is model-derived (TCC + precip
-  + CAPE), so the forecast path needs **no scraping** — `website.py` is now
-  only the *current*-condition source. Still HACS-only (no `manifest.json`
-  requirement; lib stays HA-free + offline-tested via trimmed `*.grb`
-  fixtures). `grib2io`/`cfgrib` were rejected (PyPI sdist-only; no HAOS
-  aarch64/armv7 wheels). The website meteogram remains an unused fallback.
-- **Phase 3**: quality-scale polish, diagnostics, optional radar/air-quality.

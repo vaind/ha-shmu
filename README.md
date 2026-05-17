@@ -8,7 +8,7 @@ A Home Assistant integration for Slovak weather data published by the
 
 > **Status: Phase 2.** Current conditions, weather warnings, **and the
 > ALADIN/SHMÚ daily & hourly forecast** (decoded from GRIB2 in pure Python —
-> no native dependency). See [Roadmap](#roadmap).
+> no native dependency).
 
 ## ⚠️ Disclaimer
 
