@@ -31,10 +31,9 @@ from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.typing import StateType
 
-from .const import CONF_IND_KLI
 from .coordinator import ShmuConfigEntry
 from .entity import ShmuStationEntity
-from .shmu_opendata import Observation, get_station
+from .shmu_opendata import Observation
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -152,8 +151,7 @@ async def async_setup_entry(
 ) -> None:
     """Set up SHMÚ sensors from a config entry."""
     coordinator = entry.runtime_data
-    station = get_station(entry.data[CONF_IND_KLI])
-    assert station is not None
+    station = coordinator.station
     entities: list[SensorEntity] = [
         ShmuSensor(coordinator, station, description) for description in SENSORS
     ]

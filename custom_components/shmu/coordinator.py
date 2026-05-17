@@ -29,9 +29,28 @@ from .shmu_opendata import (
     WarningsSnapshot,
     WebConditionsSnapshot,
     condition_from_weather_code,
+    get_station,
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def _keep_previous[T](
+    result: T | BaseException, label: str, fallback: T | None
+) -> T | None:
+    """Resolve a supplementary fetch result for the coordinator.
+
+    Returns ``result`` on success, or ``fallback`` (the last good value) if it
+    failed with an ordinary ``Exception``. A non-``Exception`` ``BaseException``
+    — ``CancelledError`` from a gather() on shutdown/reload — is re-raised so
+    cooperative cancellation is never swallowed.
+    """
+    if isinstance(result, BaseException):
+        if not isinstance(result, Exception):
+            raise result
+        _LOGGER.warning("SHMÚ %s unavailable, keeping previous: %s", label, result)
+        return fallback
+    return result
 
 
 @dataclass(slots=True)
@@ -112,7 +131,10 @@ class ShmuDataUpdateCoordinator(DataUpdateCoordinator[ShmuData]):
             update_interval=UPDATE_INTERVAL,
         )
         self._client = client
-        self._ind_kli: int = config_entry.data[CONF_IND_KLI]
+        station = get_station(config_entry.data[CONF_IND_KLI])
+        assert station is not None  # value comes from the fixed station list
+        #: The configured station; platforms read this instead of re-resolving.
+        self.station: Station = station
         #: Tracks station-presence so we log only on transitions, not every poll.
         self._station_present = True
 
@@ -122,14 +144,15 @@ class ShmuDataUpdateCoordinator(DataUpdateCoordinator[ShmuData]):
         A synoptic station can drop out of a 5-minute snapshot; its entities
         then go unavailable. Without this an operator has no idea why.
         """
-        present = self._ind_kli in data.observations.observations
+        ind_kli = self.station.ind_kli
+        present = ind_kli in data.observations.observations
         if present and not self._station_present:
-            _LOGGER.info("SHMÚ station %s is reporting again", self._ind_kli)
+            _LOGGER.info("SHMÚ station %s is reporting again", ind_kli)
         elif not present and self._station_present:
             _LOGGER.info(
                 "SHMÚ station %s is not in the latest observation snapshot "
                 "(%s); its entities will be unavailable until it reports again",
-                self._ind_kli,
+                ind_kli,
                 data.observations.source,
             )
         self._station_present = present
@@ -160,22 +183,14 @@ class ShmuDataUpdateCoordinator(DataUpdateCoordinator[ShmuData]):
                 ) from observations
             raise observations
 
-        # Warnings & website conditions are supplementary — keep last good
-        # value on failure instead of blanking every entity. But never swallow
-        # cancellation/shutdown: gather() returns CancelledError as a result,
-        # so re-raise anything that isn't an ordinary Exception.
-        if isinstance(warnings, BaseException):
-            if not isinstance(warnings, Exception):
-                raise warnings
-            _LOGGER.warning("SHMÚ warnings unavailable, keeping previous: %s", warnings)
-            warnings = previous.warnings if previous else None
-        if isinstance(web, BaseException):
-            if not isinstance(web, Exception):
-                raise web
-            _LOGGER.warning(
-                "SHMÚ website conditions unavailable, keeping previous: %s", web
-            )
-            web = previous.web_conditions if previous else None
+        # Warnings & website conditions are supplementary — keep the last good
+        # value on an ordinary failure instead of blanking every entity.
+        warnings = _keep_previous(
+            warnings, "warnings", previous.warnings if previous else None
+        )
+        web = _keep_previous(
+            web, "website conditions", previous.web_conditions if previous else None
+        )
 
         data = ShmuData(
             observations=observations,

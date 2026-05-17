@@ -14,9 +14,7 @@ from typing import Any
 from homeassistant.core import HomeAssistant
 
 from . import shmu_opendata
-from .const import CONF_IND_KLI
 from .coordinator import ShmuConfigEntry
-from .shmu_opendata import get_station
 
 
 async def async_get_config_entry_diagnostics(
@@ -25,8 +23,7 @@ async def async_get_config_entry_diagnostics(
     """Return diagnostics for a config entry."""
     coordinator = entry.runtime_data
     data = coordinator.data
-    station = get_station(entry.data[CONF_IND_KLI])
-    assert station is not None
+    station = coordinator.station
 
     obs_snapshot = data.observations
     observation = obs_snapshot.observations.get(station.ind_kli)

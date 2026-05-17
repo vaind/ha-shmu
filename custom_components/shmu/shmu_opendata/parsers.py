@@ -176,13 +176,13 @@ def parse_cap_alert(payload: bytes | str) -> Warning:
         value = _cap_text(param.find(q("value")))
         if value is None:
             continue
+        # SHMÚ encodes these as "N; slug; Label"; pick the documented element.
+        parts = [p.strip() for p in value.split(";")]
         if name == "awareness_level":
             # e.g. "2; yellow; Moderate" -> "yellow"
-            parts = [p.strip() for p in value.split(";")]
             awareness_level = parts[1] if len(parts) > 1 else value
         elif name == "awareness_type":
             # e.g. "10; Rain" -> "Rain"
-            parts = [p.strip() for p in value.split(";")]
             awareness_type = parts[-1] if len(parts) > 1 else value
 
     areas: list[str] = []

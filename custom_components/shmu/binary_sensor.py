@@ -11,10 +11,8 @@ from homeassistant.components.binary_sensor import (
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
-from .const import CONF_IND_KLI
 from .coordinator import ShmuConfigEntry
 from .entity import ShmuStationEntity
-from .shmu_opendata import get_station
 
 
 async def async_setup_entry(
@@ -24,9 +22,7 @@ async def async_setup_entry(
 ) -> None:
     """Set up the SHMÚ warning binary sensor from a config entry."""
     coordinator = entry.runtime_data
-    station = get_station(entry.data[CONF_IND_KLI])
-    assert station is not None
-    async_add_entities([ShmuWarningBinarySensor(coordinator, station)])
+    async_add_entities([ShmuWarningBinarySensor(coordinator, coordinator.station)])
 
 
 class ShmuWarningBinarySensor(ShmuStationEntity, BinarySensorEntity):

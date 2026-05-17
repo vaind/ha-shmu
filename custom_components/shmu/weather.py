@@ -17,10 +17,8 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.sun import is_up
 
-from .const import CONF_IND_KLI
 from .coordinator import ShmuConfigEntry, ShmuDataUpdateCoordinator
 from .entity import ShmuStationEntity
-from .shmu_opendata import get_station
 
 
 async def async_setup_entry(
@@ -30,9 +28,7 @@ async def async_setup_entry(
 ) -> None:
     """Set up the SHMÚ weather entity from a config entry."""
     coordinator = entry.runtime_data
-    station = get_station(entry.data[CONF_IND_KLI])
-    assert station is not None
-    async_add_entities([ShmuWeather(coordinator, station)])
+    async_add_entities([ShmuWeather(coordinator, coordinator.station)])
 
 
 class ShmuWeather(ShmuStationEntity, WeatherEntity):
