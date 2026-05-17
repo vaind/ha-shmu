@@ -3,6 +3,9 @@
 A Home Assistant integration for Slovak weather data published by the
 **Slovak Hydrometeorological Institute (SHMÚ)**.
 
+[![CI](https://github.com/vaind/ha-shmu/actions/workflows/ci.yml/badge.svg)](https://github.com/vaind/ha-shmu/actions/workflows/ci.yml)
+[![HACS: Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://hacs.xyz/)
+
 > **Status: Phase 1 — early version.** Current conditions and weather
 > warnings. Forecast support is planned (see [Roadmap](#roadmap)).
 

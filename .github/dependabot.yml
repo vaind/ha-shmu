@@ -1,0 +1,16 @@
+version: 2
+updates:
+  # Keep CI action pins current (security fixes + new majors).
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+
+# Python dev deps are intentionally not tracked here: pyproject.toml is
+# tooling-only (no [project] table, no lockfile) and pins are loose lower
+# bounds managed via uv, so Dependabot's pip ecosystem has nothing
+# actionable to bump. See pyproject.toml header and CONTRIBUTING.md.
