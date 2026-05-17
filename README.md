@@ -54,6 +54,15 @@ distributed via HACS rather than Home Assistant core.
    station nearest your Home Assistant location is preselected; pick any of
    the 27 synoptic stations. Add the integration again for more stations.
 
+## Removing the integration
+
+1. *Settings → Devices & Services → SHMÚ Weather → ⋮ → Delete* for each
+   configured station. This removes its device, entities and history.
+2. Optionally, in HACS → *SHMÚ Weather* → ⋮ → *Remove*, then restart Home
+   Assistant to delete the integration files.
+
+No external account or credential exists, so nothing else needs cleaning up.
+
 ## Data source & attribution
 
 Weather and climate data © **Slovenský hydrometeorologický ústav (SHMÚ)**,

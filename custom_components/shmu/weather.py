@@ -27,6 +27,10 @@ from .coordinator import ShmuConfigEntry, ShmuDataUpdateCoordinator
 from .entity import ShmuStationEntity
 from .shmu_opendata import ForecastStep
 
+#: All entities read a single shared coordinator snapshot; there is no
+#: per-entity device I/O to rate-limit, so updates need not be serialised.
+PARALLEL_UPDATES = 0
+
 #: Worst-first ranking used to pick a single representative daily condition.
 _CONDITION_SEVERITY = {
     "lightning-rainy": 7,

@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import Any
 
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.device_registry import DeviceEntry
 
 from . import shmu_opendata
 from .const import POLL_INTERVAL_MINUTES
@@ -118,3 +119,15 @@ async def async_get_config_entry_diagnostics(
             ],
         },
     }
+
+
+async def async_get_device_diagnostics(
+    hass: HomeAssistant, entry: ShmuConfigEntry, device: DeviceEntry
+) -> dict[str, Any]:
+    """Return diagnostics for the station device.
+
+    Each config entry owns exactly one device (its station), so the
+    device-scoped dump is the config-entry dump — exposing the same
+    "Download diagnostics" button from the device page.
+    """
+    return await async_get_config_entry_diagnostics(hass, entry)

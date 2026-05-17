@@ -8,6 +8,7 @@
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/vaind/ha-shmu/issues",
   "loggers": ["custom_components.shmu"],
+  "quality_scale": "silver",
   "requirements": [],
   "version": "0.1.0"
 }

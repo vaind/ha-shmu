@@ -14,6 +14,10 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from .coordinator import ShmuConfigEntry
 from .entity import ShmuStationEntity
 
+#: All entities read a single shared coordinator snapshot; there is no
+#: per-entity device I/O to rate-limit, so updates need not be serialised.
+PARALLEL_UPDATES = 0
+
 
 async def async_setup_entry(
     hass: HomeAssistant,

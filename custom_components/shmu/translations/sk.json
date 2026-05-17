@@ -6,6 +6,9 @@
         "description": "Neoficiálna integrácia — nie je spojená so SHMÚ ani ním schválená. Skorá verzia, použitie na vlastné riziko. Vyberte synoptickú stanicu SHMÚ; predvolená je stanica najbližšie k polohe vášho Home Assistant.",
         "data": {
           "ind_kli": "Stanica"
+        },
+        "data_description": {
+          "ind_kli": "Synoptická stanica SHMÚ, z ktorej sa čítajú údaje o počasí. Ak chcete sledovať ďalšiu stanicu, pridajte túto integráciu znova — každá stanica je samostatné zariadenie."
         }
       }
     },

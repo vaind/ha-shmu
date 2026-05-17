@@ -35,6 +35,10 @@ from .coordinator import ShmuConfigEntry
 from .entity import ShmuStationEntity
 from .shmu_opendata import Observation
 
+#: All entities read a single shared coordinator snapshot; there is no
+#: per-entity device I/O to rate-limit, so updates need not be serialised.
+PARALLEL_UPDATES = 0
+
 
 @dataclass(frozen=True, kw_only=True)
 class ShmuSensorDescription(SensorEntityDescription):
