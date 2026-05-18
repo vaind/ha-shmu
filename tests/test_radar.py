@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import itertools
 import struct
 import zlib
 
@@ -15,7 +16,11 @@ from custom_components.shmu.shmu_opendata.radar import (
     _IDX_DOT,
     _IDX_LABEL_BG,
     _N_DBZ,
+    RadarImage,
+    _draw_label,
+    _draw_progress,
     _filtered_zstream,
+    _label_scale,
     _palette,
     _rows_from_zstream,
     encode_apng,
@@ -241,20 +246,58 @@ def _frame_streams(apng: bytes) -> list[bytes]:
     return out
 
 
-def test_loop_frames_carry_growing_step_markers(fixture) -> None:
-    frame = render_radar(fixture("radar_zmax.hdf"), _LAT, _LON)
-    apng = encode_apng([frame, frame, frame])
+def _blank_image(w: int, h: int) -> RadarImage:
+    z = _filtered_zstream([bytearray(w) for _ in range(h)])
+    return RadarImage(
+        png=b"",
+        width=w,
+        height=h,
+        south=0.0,
+        west=0.0,
+        north=1.0,
+        east=1.0,
+        center_lat=0.5,
+        center_lon=0.5,
+        product="MAX",
+        max_dbz=None,
+        zstream=z,
+    )
 
-    iw, ih = struct.unpack(">II", _png_chunks(apng)[b"IHDR"][:8])
-    streams = _frame_streams(apng)
+
+def test_encode_apng_stamps_a_distinct_marker_state_per_frame() -> None:
+    # Full-size synthetic frame so the width-spread markers are not clipped
+    # (the trimmed fixture crop is far too small for that).
+    img = _blank_image(520, 90)
+    streams = _frame_streams(encode_apng([img, img, img]))
+    # Same scene each frame, yet every stream differs: encode_apng stamped a
+    # different step-marker state onto each.
     assert len(streams) == 3
-    # Identical scene each frame, yet the streams differ: only the markers
-    # advanced (one hollow square filled in per frame).
     assert len(set(streams)) == 3
 
-    white = []
-    for z in streams:
-        rows = _rows_from_zstream(z, iw, ih)
-        white.append(sum(r.count(_IDX_DOT) for r in rows))
-    # Each step turns one outlined square solid, adding white pixels.
-    assert white[0] < white[1] < white[2]
+
+def test_progress_markers_match_timestamp_width_and_grow() -> None:
+    # Big synthetic canvas so nothing is clipped (the trimmed fixture crop is
+    # far too small for a 16-char stamp at readable scale).
+    w, h, total = 520, 90, 12
+    assert _label_scale(w) == 2  # the real-image scale this exercises
+
+    label = [bytearray(w) for _ in range(h)]
+    _draw_label(label, w, h, "2026-05-18 20:35")
+    lbl_cols = [x for r in label for x in range(w) if r[x] == _IDX_DOT]
+
+    full = [bytearray(w) for _ in range(h)]
+    _draw_progress(full, w, h, total - 1, total)
+    pr_cols = [x for r in full for x in range(w) if r[x] == _IDX_DOT]
+
+    # The marker row starts and ends on exactly the same columns as the time
+    # text — i.e. it is as long as the time bar.
+    assert min(pr_cols) == min(lbl_cols)
+    assert max(pr_cols) == max(lbl_cols)
+
+    # Each step fills one more square, so the white pixel count strictly grows.
+    counts = []
+    for i in range(total):
+        c = [bytearray(w) for _ in range(h)]
+        _draw_progress(c, w, h, i, total)
+        counts.append(sum(r.count(_IDX_DOT) for r in c))
+    assert all(a < b for a, b in itertools.pairwise(counts))

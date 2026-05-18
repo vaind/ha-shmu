@@ -116,6 +116,10 @@ _GLYPH_H = 5
 #: Pixels between glyphs and around the label box, before scaling.
 _LABEL_MARGIN = 4
 _LABEL_PAD = 2
+#: The localized timestamp is always ``YYYY-MM-DD HH:MM`` (16 chars — see the
+#: client's stamp format), so the progress markers can be sized to exactly
+#: the time text's width without the renderer knowing the actual string.
+_STAMP_LEN = 16
 
 #: Loop progress: a row of small squares under the timestamp, one per frame,
 #: solid up to the current frame and hollow after — so while the APNG rolls
@@ -228,6 +232,12 @@ def _label_scale(width: int) -> int:
     return max(1, width // 220)
 
 
+def _stamp_width(scale: int) -> int:
+    """Pixel width of the fixed-length timestamp text (matches the swatch
+    :func:`_draw_label` draws for a 16-char stamp, sans padding)."""
+    return _STAMP_LEN * (_GLYPH_W * scale + scale) - scale
+
+
 def _draw_label(rows: list[bytearray], w: int, h: int, text: str) -> None:
     """Stamp ``text`` (a pre-localized timestamp) top-left on a dark swatch.
 
@@ -284,27 +294,26 @@ def _draw_progress(
 ) -> None:
     """Stamp the per-frame step markers just below the timestamp swatch.
 
-    ``total`` squares on a dark swatch: solid (white) up to ``index``, hollow
-    (white outline) after — so the forever-rolling loop shows where "now" is
-    and snaps back on wrap. White-on-dark stays visible over any background.
-    Geometry mirrors :func:`_draw_label` so it sits directly under the time;
-    everything is clipped, so a tiny crop degrades gracefully.
+    ``total`` squares on a dark swatch the **same width and left edge as the
+    timestamp**: solid (white) up to ``index``, hollow (white outline) after —
+    so the forever-rolling loop shows where "now" is and snaps back on wrap.
+    Squares are spread evenly so the first/last align with the time text's
+    ends. White-on-dark stays visible over any background; everything is
+    clipped, so a tiny crop degrades gracefully.
     """
     scale = _label_scale(w)
     pad = _LABEL_PAD * scale
     margin = _LABEL_MARGIN * scale
     sq = _GLYPH_W * scale  # match the digit width for a tidy stack
-    gap = scale
+    track = _stamp_width(scale)  # exactly the timestamp text's width
     # Directly under the timestamp box (label height + a one-unit gap).
     box_y = margin + _GLYPH_H * scale + 2 * pad + scale
-    markers_w = total * (sq + gap) - gap
-    _fill_rect(
-        rows, w, h, margin, box_y, markers_w + 2 * pad, sq + 2 * pad, _IDX_LABEL_BG
-    )
+    _fill_rect(rows, w, h, margin, box_y, track + 2 * pad, sq + 2 * pad, _IDX_LABEL_BG)
 
     mx, my = margin + pad, box_y + pad
+    span = track - sq  # first square at 0, last ending flush at `track`
     for k in range(total):
-        x = mx + k * (sq + gap)
+        x = mx + (round(k * span / (total - 1)) if total > 1 else 0)
         if k <= index:
             _fill_rect(rows, w, h, x, my, sq, sq, _IDX_DOT)  # reached: solid
         elif sq >= 2:
