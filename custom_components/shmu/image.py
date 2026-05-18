@@ -83,6 +83,8 @@ class ShmuRadarImage(ShmuStationEntity, ImageEntity):
             "product": radar.product,
             "source": radar.source,
             "max_dbz": img.max_dbz,
+            "center_latitude": img.center_lat,
+            "center_longitude": img.center_lon,
             "bbox_south": img.south,
             "bbox_west": img.west,
             "bbox_north": img.north,

@@ -416,17 +416,21 @@ class ShmuClient:
 
     async def async_get_radar(
         self,
-        product: str = DEFAULT_RADAR_PRODUCT,
+        latitude: float,
+        longitude: float,
         *,
+        product: str = DEFAULT_RADAR_PRODUCT,
         previous: RadarSnapshot | None = None,
     ) -> RadarSnapshot:
-        """Fetch and render the newest ODIM radar composite.
+        """Fetch the newest ODIM composite, cropped to the station vicinity.
 
         Discovery reads only the small directory listing each call; the
         ~0.3 MB HDF5 is downloaded and rendered solely when the newest frame
         differs from ``previous`` (a published frame is immutable, so its
         path is a stable cache key — the same politeness model as
-        :meth:`async_get_observations`).
+        :meth:`async_get_observations`). The crop is centred on
+        ``(latitude, longitude)``; one config entry tracks one station, so
+        the location is constant and the source-path cache key stays valid.
         """
         day_path, filename, valid_at = await self._latest_radar_file(product)
         source = f"{day_path}/{filename}"
@@ -436,7 +440,7 @@ class ShmuClient:
             return previous
 
         payload = await self._get(f"{day_path}/{quote(filename)}")
-        image = render_radar(payload)
+        image = render_radar(payload, latitude, longitude)
         _LOGGER.debug("Rendered %s radar frame from %s", product, source)
         return RadarSnapshot(
             image=image,
