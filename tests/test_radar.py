@@ -15,7 +15,9 @@ from custom_components.shmu.shmu_opendata.radar import (
     _IDX_DOT,
     _IDX_LABEL_BG,
     _N_DBZ,
+    _filtered_zstream,
     _palette,
+    _rows_from_zstream,
     encode_apng,
     render_radar,
 )
@@ -217,3 +219,42 @@ def test_timestamp_label_is_stamped_and_distinguishes_frames(fixture) -> None:
     # loop's frames apart while it plays.
     assert a.png != b.png
     assert (a.width, a.height) == (plain.width, plain.height)
+
+
+def test_rows_from_zstream_round_trips(fixture) -> None:
+    img = render_radar(fixture("radar_zmax.hdf"), _LAT, _LON)
+    rows = _rows_from_zstream(img.zstream, img.width, img.height)
+    assert len(rows) == img.height
+    assert all(len(r) == img.width for r in rows)
+    # Deterministic level-6 deflate: re-packing the exact rows reproduces it.
+    assert _filtered_zstream(rows) == img.zstream
+
+
+def _frame_streams(apng: bytes) -> list[bytes]:
+    """Per-frame pixel zstream of each APNG frame (fdAT drops its 4B seq)."""
+    out: list[bytes] = []
+    for tag, body in _ordered_chunks(apng):
+        if tag == b"IDAT":
+            out.append(body)
+        elif tag == b"fdAT":
+            out.append(body[4:])
+    return out
+
+
+def test_loop_frames_carry_a_growing_progress_bar(fixture) -> None:
+    frame = render_radar(fixture("radar_zmax.hdf"), _LAT, _LON)
+    apng = encode_apng([frame, frame, frame])
+
+    iw, ih = struct.unpack(">II", _png_chunks(apng)[b"IHDR"][:8])
+    streams = _frame_streams(apng)
+    assert len(streams) == 3
+
+    # Identical scene each frame, yet the streams differ: only the bar grew.
+    assert len(set(streams)) == 3
+    bottom_fill = []
+    for z in streams:
+        rows = _rows_from_zstream(z, iw, ih)
+        bottom_fill.append(rows[ih - 1].count(_IDX_DOT))
+    assert bottom_fill[0] < bottom_fill[1] < bottom_fill[2]
+    # Last frame fills the whole width (fraction == 1).
+    assert bottom_fill[2] == iw

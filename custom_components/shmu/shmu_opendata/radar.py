@@ -117,6 +117,13 @@ _GLYPH_H = 5
 _LABEL_MARGIN = 4
 _LABEL_PAD = 2
 
+#: Loop progress bar: a thin full-width strip flush to the bottom edge whose
+#: fill grows with the frame's position in the sequence, so while the APNG
+#: rolls forever you can see where "now" sits in the shown hour and when it
+#: resets. Track reuses the dark label swatch, fill the white marker dot —
+#: no extra palette entries. Height is in pixels before label-scale.
+_PROGRESS_H = 3
+
 
 @dataclass(frozen=True, slots=True)
 class RadarImage:
@@ -262,6 +269,20 @@ def _draw_label(rows: list[bytearray], w: int, h: int, text: str) -> None:
                             prow[px] = _IDX_DOT
 
 
+def _draw_progress(rows: list[bytearray], w: int, h: int, fraction: float) -> None:
+    """Fill a bottom-edge strip ``fraction`` of the way across.
+
+    ``fraction`` is the frame's 1-based position over the frame count, so the
+    bar marches left→right and snaps back when the loop wraps. Clipped to the
+    frame so a tiny crop degrades gracefully."""
+    bar_h = max(1, _PROGRESS_H * _label_scale(w))
+    fill_w = max(0, min(w, round(fraction * w)))
+    for yy in range(max(0, h - bar_h), h):
+        row = rows[yy]
+        for xx in range(w):
+            row[xx] = _IDX_DOT if xx < fill_w else _IDX_LABEL_BG
+
+
 def _dbz_to_index(dbz: float) -> int:
     """Palette index (1-based) for a reflectivity value at/above ``_MIN_DBZ``."""
     for band, (bound, _rgb) in enumerate(_DBZ_RAMP):
@@ -292,6 +313,19 @@ def _filtered_zstream(rows: list[bytearray]) -> bytes:
     return zlib.compress(bytes(raw), 6)
 
 
+def _rows_from_zstream(zstream: bytes, width: int, height: int) -> list[bytearray]:
+    """Inverse of :func:`_filtered_zstream` — back to per-row palette indices.
+
+    Lets the loop stamp a per-frame overlay (the progress bar) without
+    keeping every frame's rows resident: the cheap cached ``zstream`` is the
+    single source of truth, expanded transiently only while the loop is
+    assembled.
+    """
+    raw = zlib.decompress(zstream)
+    stride = width + 1  # one filter byte per scanline
+    return [bytearray(raw[r * stride + 1 : r * stride + stride]) for r in range(height)]
+
+
 def _ihdr(width: int, height: int) -> bytes:
     return _png_chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 3, 0, 0, 0))
 
@@ -314,10 +348,15 @@ def encode_apng(images: Sequence[RadarImage], *, frame_ms: int = _FRAME_MS) -> b
     """Splice buffered :class:`RadarImage` frames into one animated PNG.
 
     Frames must share the palette and dimensions — they always do here: the
-    ODIM grid is fixed and the crop is centred on one constant station. Each
-    frame's cached ``zstream`` is reused as-is, so assembling the loop every
-    poll is pure chunk concatenation (no decode, no re-compression). A single
-    image yields a valid one-frame APNG, i.e. it degrades to a still.
+    ODIM grid is fixed and the crop is centred on one constant station. A
+    single image yields a valid one-frame APNG, i.e. it degrades to a still.
+
+    Each frame gets a bottom progress bar marking its place in the sequence,
+    so the forever-rolling loop is readable (you can see "now" advance and
+    reset). The bar is loop-only: the cached ``zstream`` (used by the still
+    and the scrubbed-frame image) is expanded, stamped and recompressed here
+    transiently — the costly ODIM decode/crop still runs once per frame, this
+    only adds a cheap zlib round-trip per frame at assembly time.
 
     APNG is a backward-compatible PNG superset (extra ``acTL``/``fcTL``/
     ``fdAT`` chunks), so the same ``image/png`` entity renders the animation
@@ -339,15 +378,19 @@ def encode_apng(images: Sequence[RadarImage], *, frame_ms: int = _FRAME_MS) -> b
         _png_chunk(b"acTL", struct.pack(">II", len(images), 0)),  # 0 = infinite
     ]
     seq = 0
+    total = len(images)
     for i, im in enumerate(images):
+        rows = _rows_from_zstream(im.zstream, width, height)
+        _draw_progress(rows, width, height, (i + 1) / total)
+        zstream = _filtered_zstream(rows)
         # fcTL: seq, w, h, x_off, y_off, delay_num, delay_den, dispose, blend.
         fctl = struct.pack(">IIIII", seq, width, height, 0, 0) + delay + b"\x00\x00"
         parts.append(_png_chunk(b"fcTL", fctl))
         seq += 1
         if i == 0:
-            parts.append(_png_chunk(b"IDAT", im.zstream))
+            parts.append(_png_chunk(b"IDAT", zstream))
         else:
-            parts.append(_png_chunk(b"fdAT", struct.pack(">I", seq) + im.zstream))
+            parts.append(_png_chunk(b"fdAT", struct.pack(">I", seq) + zstream))
             seq += 1
     parts.append(_png_chunk(b"IEND", b""))
     return b"".join(parts)
