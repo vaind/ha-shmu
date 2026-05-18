@@ -54,6 +54,12 @@ def test_unsupported_superblock_version_raises(fixture) -> None:
         read_odim(bytes(data))
 
 
+def test_missing_required_attribute_raises_loudly(fixture) -> None:
+    """A dropped scale/geo attribute must fail, not yield a mis-scaled image."""
+    with pytest.raises(ShmuDataError, match="required attribute 'gain'"):
+        read_odim(fixture("radar_missing_attr.hdf"))
+
+
 def test_unsupported_offset_size_raises() -> None:
     """A valid signature but a non-8 offset/length size fails cleanly."""
     payload = b"\x89HDF\r\n\x1a\n" + bytes(16)  # superblock v0, off/len = 0

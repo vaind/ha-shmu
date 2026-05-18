@@ -153,21 +153,23 @@ def render_radar(data: bytes) -> RadarImage:
             lut[raw_val] = _dbz_to_index(dbz)
 
     rows: list[bytearray] = []
-    max_index = 0
+    # Track the strongest *raw* byte that maps to a visible band so the
+    # reported peak is the actual decoded reflectivity of the rendered
+    # (downsampled) frame, not a palette-band boundary.
+    peak_raw = -1
     for oy in range(out_h):
         base = (oy * step) * src_w
         row = bytearray(out_w)
         for ox in range(out_w):
-            idx = lut[src[base + ox * step]]
+            raw_val = src[base + ox * step]
+            idx = lut[raw_val]
             row[ox] = idx
-            if idx > max_index:
-                max_index = idx
+            if idx and raw_val > peak_raw:
+                peak_raw = raw_val
         rows.append(row)
 
     png = _encode_indexed_png(out_w, out_h, rows, _palette())
-    max_dbz = None if max_index == 0 else _DBZ_RAMP[max_index - 1][0]
-    if max_dbz == float("inf"):
-        max_dbz = _DBZ_RAMP[-2][0]  # report the lower edge of the top band
+    max_dbz = None if peak_raw < 0 else round(offset + gain * peak_raw, 1)
     return RadarImage(
         png=png,
         width=out_w,

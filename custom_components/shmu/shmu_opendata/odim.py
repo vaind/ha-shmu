@@ -324,10 +324,22 @@ class _Hdf5File:
         chunk_size = _u(d, pos, 4)
         key_size = 8 + 8 * (rank + 1)
         chunk_addr = _u(d, pos + key_size, self._off)
-        raw = zlib.decompress(d[chunk_addr : chunk_addr + chunk_size])
-        if len(raw) != expected_bytes:
+        # The compressed bytes come from the network: cap inflation at the
+        # known grid size so a malformed / hostile file cannot zip-bomb the
+        # event loop. A correct file decompresses to exactly expected_bytes
+        # with nothing left over.
+        decompressor = zlib.decompressobj()
+        raw = decompressor.decompress(
+            d[chunk_addr : chunk_addr + chunk_size], expected_bytes
+        )
+        if (
+            len(raw) != expected_bytes
+            or decompressor.unconsumed_tail
+            or decompressor.decompress(b"", 1)
+        ):
             raise ShmuDataError(
-                f"Decompressed chunk is {len(raw)} bytes, expected {expected_bytes}"
+                f"Chunk does not decompress to the expected {expected_bytes} "
+                "bytes (truncated, oversized or corrupt)"
             )
         return raw
 
@@ -348,20 +360,36 @@ def read_odim(data: bytes) -> OdimComposite:
     except (IndexError, ValueError, struct.error, zlib.error) as err:
         raise ShmuDataError(f"Malformed ODIM_H5 file: {err}") from err
 
+    # Every field below is load-bearing for a correctly scaled and located
+    # image. Missing/typo'd attributes must fail loudly (the reader's
+    # contract) rather than silently defaulting to a plausible-but-wrong
+    # picture if SHMÚ changes the ODIM groups.
+    def _req_str(attrs: dict[str, AttrValue], key: str) -> str:
+        value = attrs.get(key)
+        if not isinstance(value, str) or value == "":
+            raise ShmuDataError(f"ODIM file missing required attribute {key!r}")
+        return value
+
+    def _req_num(attrs: dict[str, AttrValue], key: str) -> float:
+        value = attrs.get(key)
+        if not isinstance(value, int | float) or isinstance(value, bool):
+            raise ShmuDataError(f"ODIM file missing required attribute {key!r}")
+        return float(value)
+
     return OdimComposite(
-        quantity=str(what.get("quantity", "")),
-        product=str(what.get("product", "")),
+        quantity=_req_str(what, "quantity"),
+        product=_req_str(what, "product"),
         width=width,
         height=height,
-        gain=float(what.get("gain", 1.0)),
-        offset=float(what.get("offset", 0.0)),
-        nodata=float(what.get("nodata", float("nan"))),
-        undetect=float(what.get("undetect", float("nan"))),
-        ll_lat=float(where.get("LL_lat", 0.0)),
-        ll_lon=float(where.get("LL_lon", 0.0)),
-        ur_lat=float(where.get("UR_lat", 0.0)),
-        ur_lon=float(where.get("UR_lon", 0.0)),
-        projdef=str(where.get("projdef", "")),
+        gain=_req_num(what, "gain"),
+        offset=_req_num(what, "offset"),
+        nodata=_req_num(what, "nodata"),
+        undetect=_req_num(what, "undetect"),
+        ll_lat=_req_num(where, "LL_lat"),
+        ll_lon=_req_num(where, "LL_lon"),
+        ur_lat=_req_num(where, "UR_lat"),
+        ur_lon=_req_num(where, "UR_lon"),
+        projdef=_req_str(where, "projdef"),
         raw=raw,
         dtype=dtype,
     )

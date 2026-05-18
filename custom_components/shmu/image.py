@@ -13,12 +13,15 @@ from datetime import datetime
 
 from homeassistant.components.image import ImageEntity
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import ATTRIBUTION, DOMAIN, MANUFACTURER
 from .coordinator import ShmuConfigEntry, ShmuDataUpdateCoordinator
+from .entity import ShmuStationEntity
+
+# Coordinator-only entity: all I/O is the shared coordinator's, none per
+# entity. Matches the other SHMÚ platforms / the integration's
+# `parallel-updates: done` convention.
+PARALLEL_UPDATES = 0
 
 
 async def async_setup_entry(
@@ -31,34 +34,37 @@ async def async_setup_entry(
     async_add_entities([ShmuRadarImage(hass, coordinator)])
 
 
-class ShmuRadarImage(CoordinatorEntity[ShmuDataUpdateCoordinator], ImageEntity):
+class ShmuRadarImage(ShmuStationEntity, ImageEntity):
     """The latest SHMÚ radar reflectivity composite as a PNG image."""
 
-    _attr_attribution = ATTRIBUTION
-    _attr_has_entity_name = True
     _attr_translation_key = "radar"
     _attr_content_type = "image/png"
 
     def __init__(
         self, hass: HomeAssistant, coordinator: ShmuDataUpdateCoordinator
     ) -> None:
-        """Initialise the radar image entity."""
-        CoordinatorEntity.__init__(self, coordinator)
+        """Initialise the radar image entity.
+
+        Reuses :class:`ShmuStationEntity` for the station device (so the
+        ``configuration_url`` and device metadata stay in one place) and
+        layers in :class:`ImageEntity`'s machinery.
+        """
+        ShmuStationEntity.__init__(self, coordinator, coordinator.station)
         ImageEntity.__init__(self, hass)
-        station = coordinator.station
-        self._attr_unique_id = f"{station.ind_kli}_radar"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, str(station.ind_kli))},
-            name=station.name,
-            manufacturer=MANUFACTURER,
-            model="Synoptic station",
-            entry_type=DeviceEntryType.SERVICE,
-        )
+        self._attr_unique_id = f"{coordinator.station.ind_kli}_radar"
 
     @property
     def available(self) -> bool:
-        """Available whenever a radar frame is held (independent of station)."""
-        return super().available and self.coordinator.data.radar is not None
+        """Available while a radar frame is held — independent of the station.
+
+        Deliberately *not* ``ShmuStationEntity.available`` (which gates on a
+        fresh station observation): the radar mosaic is national data and
+        must survive a single station dropping out of an observation snapshot.
+        """
+        return (
+            self.coordinator.last_update_success
+            and self.coordinator.data.radar is not None
+        )
 
     @property
     def image_last_updated(self) -> datetime | None:

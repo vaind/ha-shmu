@@ -7,6 +7,7 @@ import struct
 import pytest
 
 from custom_components.shmu.shmu_opendata.exceptions import ShmuDataError
+from custom_components.shmu.shmu_opendata.odim import read_odim
 from custom_components.shmu.shmu_opendata.radar import render_radar
 
 _PNG_SIG = b"\x89PNG\r\n\x1a\n"
@@ -50,13 +51,30 @@ def test_extent_is_the_odim_corner_box(fixture) -> None:
     assert img.west < img.east
 
 
-def test_reports_strongest_echo(fixture) -> None:
-    img = render_radar(fixture("radar_zmax.hdf"))
-    # The fixture ramps raw bytes across the whole DBZH scale, so a strong
-    # echo is present and reported in dBZ.
-    assert img.max_dbz is not None
-    assert 5.0 <= img.max_dbz <= 70.0
+def test_reports_actual_strongest_echo_not_band_boundary(fixture) -> None:
+    """max_dbz must be the decoded reflectivity of the peak rendered pixel,
+    not the palette band's upper bound (PR #13 review)."""
+    raw_bytes = fixture("radar_zmax.hdf")
+    o = read_odim(raw_bytes)
+    img = render_radar(raw_bytes)
     assert img.product == "MAX"
+    assert img.max_dbz is not None
+
+    # Recompute the expected peak: strongest non-sentinel byte in the
+    # rendered (stride-sampled) grid that clears the visibility threshold.
+    step = max(1, (max(o.width, o.height) + 760 - 1) // 760)
+    peak_raw = -1
+    for y in range(0, o.height, step):
+        for x in range(0, o.width, step):
+            b = o.raw[y * o.width + x]
+            if b in (0, 255):
+                continue
+            if o.offset + o.gain * b >= 5.0 and b > peak_raw:
+                peak_raw = b
+    expected = round(o.offset + o.gain * peak_raw, 1)
+    assert img.max_dbz == expected
+    # Sanity: it is a genuine decoded value, not a band edge constant.
+    assert img.max_dbz != float("inf")
 
 
 def test_unsupported_product_raises_loudly(fixture) -> None:
