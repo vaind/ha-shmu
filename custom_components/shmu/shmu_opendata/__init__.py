@@ -9,6 +9,7 @@ from ._ssl import create_ssl_context
 from .client import (
     ForecastSnapshot,
     ObservationSnapshot,
+    RadarFrame,
     RadarSnapshot,
     ShmuClient,
     WarningsSnapshot,
@@ -36,6 +37,7 @@ __all__ = [
     "ForecastStep",
     "Observation",
     "ObservationSnapshot",
+    "RadarFrame",
     "RadarImage",
     "RadarSnapshot",
     "ShmuClient",

@@ -210,37 +210,104 @@ async def test_get_forecast_rejects_run_missing_intermediate_hour(
             await client.async_get_forecast(48.1717, 17.2, forecast_hours=(0, 1, 2))
 
 
-_RADAR_OLD = "T_PABV22_C_LZIB_20260517201500.hdf"
+_RADAR_OLD = "T_PABV22_C_LZIB_20260517201000.hdf"
+_RADAR_MID = "T_PABV22_C_LZIB_20260517201500.hdf"
 _RADAR_NEW = "T_PABV22_C_LZIB_20260517202000.hdf"
+_RADAR_NEWER = "T_PABV22_C_LZIB_20260517202500.hdf"
 
 
-async def test_get_radar_discovers_and_renders(session, fixture) -> None:
+def _is_apng(data: bytes) -> bool:
+    return data[:8] == b"\x89PNG\r\n\x1a\n" and b"acTL" in data
+
+
+async def test_get_radar_backfills_a_loop(session, fixture) -> None:
     with aioresponses() as m:
         m.get(f"{BASE}{RADAR}/", body=_listing("20260517/"), repeat=True)
         m.get(
             f"{BASE}{RADAR}/20260517/",
-            body=_listing(_RADAR_OLD, _RADAR_NEW),
+            body=_listing(_RADAR_OLD, _RADAR_MID, _RADAR_NEW),
             repeat=True,
         )
-        # The ~0.3 MB HDF5 is registered ONCE: a second GET would raise.
-        m.get(
-            f"{BASE}{RADAR}/20260517/{_RADAR_NEW}",
-            body=fixture("radar_zmax.hdf"),
-        )
+        # Each ~0.3 MB HDF5 is registered ONCE: a re-fetch would raise.
+        for name in (_RADAR_OLD, _RADAR_MID, _RADAR_NEW):
+            m.get(f"{BASE}{RADAR}/20260517/{name}", body=fixture("radar_zmax.hdf"))
 
         client = ShmuClient(session)
         snap = await client.async_get_radar(48.1686, 17.1106)
+
+        # The newest frame drives the still picture / max_dbz.
         assert snap.source == f"{RADAR}/20260517/{_RADAR_NEW}"
         assert snap.product == "zmax"
         assert snap.valid_at.isoformat() == "2026-05-17T20:20:00+00:00"
         assert snap.image.png[:8] == b"\x89PNG\r\n\x1a\n"
-        # Cropped to the station vicinity, so smaller than the fixture grid.
         assert 0 < snap.image.width < 64
         assert (snap.image.center_lat, snap.image.center_lon) == (48.1686, 17.1106)
+        # The loop is the whole backfilled buffer, oldest -> newest.
+        assert [f.source for f in snap.frames] == [
+            f"{RADAR}/20260517/{_RADAR_OLD}",
+            f"{RADAR}/20260517/{_RADAR_MID}",
+            f"{RADAR}/20260517/{_RADAR_NEW}",
+        ]
+        assert [f.valid_at for f in snap.frames] == sorted(
+            f.valid_at for f in snap.frames
+        )
+        assert _is_apng(snap.loop_png)
 
-        # Same newest frame -> cached, the body is not fetched again.
+        # Nothing new published -> every frame reused, no body fetched again.
         again = await client.async_get_radar(48.1686, 17.1106, previous=snap)
         assert again is snap
+
+
+async def test_get_radar_appends_only_the_new_frame(session, fixture) -> None:
+    with aioresponses() as m:
+        m.get(f"{BASE}{RADAR}/", body=_listing("20260517/"), repeat=True)
+        # Listing grows by one between the two polls (sequential responses).
+        m.get(
+            f"{BASE}{RADAR}/20260517/",
+            body=_listing(_RADAR_OLD, _RADAR_MID, _RADAR_NEW),
+        )
+        m.get(
+            f"{BASE}{RADAR}/20260517/",
+            body=_listing(_RADAR_OLD, _RADAR_MID, _RADAR_NEW, _RADAR_NEWER),
+        )
+        # Every body registered ONCE: the reused frames must NOT be re-fetched.
+        for name in (_RADAR_OLD, _RADAR_MID, _RADAR_NEW, _RADAR_NEWER):
+            m.get(f"{BASE}{RADAR}/20260517/{name}", body=fixture("radar_zmax.hdf"))
+
+        client = ShmuClient(session)
+        first = await client.async_get_radar(48.1686, 17.1106)
+        second = await client.async_get_radar(48.1686, 17.1106, previous=first)
+
+        assert second is not first
+        assert second.source == f"{RADAR}/20260517/{_RADAR_NEWER}"
+        assert len(second.frames) == 4
+        # Carried-over frames are the very same objects (reused, not refetched).
+        for old, new in zip(first.frames, second.frames[:3], strict=True):
+            assert old is new
+
+
+async def test_get_radar_loop_is_a_rolling_window(
+    session, fixture, monkeypatch
+) -> None:
+    monkeypatch.setattr(
+        "custom_components.shmu.shmu_opendata.client.RADAR_LOOP_FRAMES", 2
+    )
+    with aioresponses() as m:
+        m.get(f"{BASE}{RADAR}/", body=_listing("20260517/"), repeat=True)
+        m.get(
+            f"{BASE}{RADAR}/20260517/",
+            body=_listing(_RADAR_OLD, _RADAR_MID, _RADAR_NEW),
+            repeat=True,
+        )
+        # Only the two newest are fetched; the oldest is outside the window.
+        for name in (_RADAR_MID, _RADAR_NEW):
+            m.get(f"{BASE}{RADAR}/20260517/{name}", body=fixture("radar_zmax.hdf"))
+
+        snap = await ShmuClient(session).async_get_radar(48.1686, 17.1106)
+        assert [f.source for f in snap.frames] == [
+            f"{RADAR}/20260517/{_RADAR_MID}",
+            f"{RADAR}/20260517/{_RADAR_NEW}",
+        ]
 
 
 async def test_get_radar_falls_back_to_previous_day_folder(session, fixture) -> None:
@@ -255,6 +322,8 @@ async def test_get_radar_falls_back_to_previous_day_folder(session, fixture) -> 
 
         snap = await ShmuClient(session).async_get_radar(48.1686, 17.1106)
         assert snap.source == f"{RADAR}/20260517/{_RADAR_NEW}"
+        assert len(snap.frames) == 1
+        assert _is_apng(snap.loop_png)
 
 
 async def test_get_radar_no_files_raises(session) -> None:

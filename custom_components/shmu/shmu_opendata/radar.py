@@ -11,6 +11,12 @@ standard library (``zlib`` + ``math``), so the vendored library stays
 HA-free, dependency-free and offline-testable — the same reason
 :mod:`grib2` hand-rolls its decoder instead of pulling a binary wheel.
 
+:func:`encode_apng` splices a buffer of recent frames into one animated PNG
+(APNG — a backward-compatible PNG superset) so the same image entity can
+show a **loop** of how the precipitation is moving. Each frame's compressed
+pixel stream is cached on its :class:`RadarImage`, so building the loop is
+just chunk concatenation — the costly per-pixel pass runs once per frame.
+
 Scope (verified live 2026-05-17, issue #6): the reflectivity products
 ``MAX`` (column-maximum, the default "is it raining / storms" picture) and
 ``CAPPI`` carry ODIM quantity ``DBZH`` as ``u8`` with a ``gain``/``offset``
@@ -23,6 +29,7 @@ from __future__ import annotations
 
 import struct
 import zlib
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from .borders import BORDERS
@@ -51,6 +58,9 @@ _BORDER_RGB = (205, 205, 205)
 _MARKER_RING_RGB = (10, 10, 10)
 _MARKER_DOT_RGB = (255, 255, 255)
 _MARKER_RADIUS_PX = 4
+#: Playback time per loop frame, in milliseconds (the real frames are 5 min
+#: apart; the loop is a fast replay so the motion is readable at a glance).
+_FRAME_MS = 500
 
 #: dBZ colour ramp: ``(upper_bound, (r, g, b))``, scanned low→high. A standard
 #: weather-radar scale (cyan → green → yellow → red → magenta → white).
@@ -88,6 +98,11 @@ class RadarImage:
     Home Assistant map overlay); ``center_lat/center_lon`` is the station the
     crop is centred on. ``max_dbz`` is the strongest echo in the (downsampled)
     frame, or ``None`` when echo-free — handy as an "is it raining" signal.
+
+    ``zstream`` is the zlib-compressed, PNG-filtered pixel stream backing
+    ``png``. It is cached so :func:`encode_apng` can splice this frame into a
+    radar **loop** without re-rendering or re-compressing it — the per-pixel
+    pass already ran once when the frame was decoded.
     """
 
     png: bytes
@@ -101,6 +116,7 @@ class RadarImage:
     center_lon: float
     product: str
     max_dbz: float | None
+    zstream: bytes
 
 
 def _palette() -> bytes:
@@ -183,25 +199,78 @@ def _png_chunk(tag: bytes, payload: bytes) -> bytes:
     )
 
 
-def _encode_indexed_png(
-    width: int, height: int, rows: list[bytearray], palette: bytes
-) -> bytes:
-    """Encode an 8-bit palette PNG (index 0 fully transparent)."""
-    ihdr = struct.pack(">IIBBBBB", width, height, 8, 3, 0, 0, 0)
+def _filtered_zstream(rows: list[bytearray]) -> bytes:
+    """zlib-compress the scanlines (PNG filter type 0 / None per row).
+
+    The result is reused verbatim as a still PNG ``IDAT`` *and* as an APNG
+    frame body, so a buffered loop frame is never re-rendered or re-compressed.
+    """
     raw = bytearray()
     for row in rows:
         raw.append(0)  # filter type 0 (None)
         raw += row
+    return zlib.compress(bytes(raw), 6)
+
+
+def _ihdr(width: int, height: int) -> bytes:
+    return _png_chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 3, 0, 0, 0))
+
+
+def _encode_png(width: int, height: int, zstream: bytes, palette: bytes) -> bytes:
+    """Encode an 8-bit palette PNG (index 0 fully transparent)."""
     return b"".join(
         (
             b"\x89PNG\r\n\x1a\n",
-            _png_chunk(b"IHDR", ihdr),
+            _ihdr(width, height),
             _png_chunk(b"PLTE", palette),
             _png_chunk(b"tRNS", b"\x00"),  # only index 0 is transparent
-            _png_chunk(b"IDAT", zlib.compress(bytes(raw), 6)),
+            _png_chunk(b"IDAT", zstream),
             _png_chunk(b"IEND", b""),
         )
     )
+
+
+def encode_apng(images: Sequence[RadarImage], *, frame_ms: int = _FRAME_MS) -> bytes:
+    """Splice buffered :class:`RadarImage` frames into one animated PNG.
+
+    Frames must share the palette and dimensions — they always do here: the
+    ODIM grid is fixed and the crop is centred on one constant station. Each
+    frame's cached ``zstream`` is reused as-is, so assembling the loop every
+    poll is pure chunk concatenation (no decode, no re-compression). A single
+    image yields a valid one-frame APNG, i.e. it degrades to a still.
+
+    APNG is a backward-compatible PNG superset (extra ``acTL``/``fcTL``/
+    ``fdAT`` chunks), so the same ``image/png`` entity renders the animation
+    with no frontend change. ``num_plays`` 0 means loop forever; every frame
+    repaints the whole canvas (dispose ``NONE`` + blend ``SOURCE``).
+    """
+    if not images:
+        raise ShmuDataError("Cannot build a radar loop from zero frames")
+    width, height = images[0].width, images[0].height
+    if any((im.width, im.height) != (width, height) for im in images):
+        raise ShmuDataError("Radar loop frames differ in size")
+
+    delay = struct.pack(">HH", frame_ms, 1000)  # delay_num / delay_den (s)
+    parts = [
+        b"\x89PNG\r\n\x1a\n",
+        _ihdr(width, height),
+        _png_chunk(b"PLTE", _palette()),
+        _png_chunk(b"tRNS", b"\x00"),
+        _png_chunk(b"acTL", struct.pack(">II", len(images), 0)),  # 0 = infinite
+    ]
+    seq = 0
+    for i, im in enumerate(images):
+        # fcTL: seq, w, h, x_off, y_off, delay_num, delay_den, dispose, blend.
+        fctl = struct.pack(">IIIII", seq, width, height, 0, 0) + delay + b"\x00\x00"
+        parts.append(_png_chunk(b"fcTL", fctl))
+        seq += 1
+        if i == 0:
+            parts.append(_png_chunk(b"IDAT", im.zstream))
+        else:
+            parts.append(_png_chunk(b"fdAT", struct.pack(">I", seq) + im.zstream))
+            seq += 1
+    parts.append(_png_chunk(b"IEND", b""))
+    return b"".join(parts)
 
 
 def render_radar(
@@ -274,7 +343,8 @@ def render_radar(
     mx, my = to_out(longitude, latitude)
     _draw_marker(rows, out_w, out_h, mx, my)
 
-    png = _encode_indexed_png(out_w, out_h, rows, _palette())
+    zstream = _filtered_zstream(rows)
+    png = _encode_png(out_w, out_h, zstream, _palette())
     max_dbz = None if peak_raw < 0 else round(offset + gain * peak_raw, 1)
     west, north = pixel_to_lonlat(composite, col0, row0)
     east, south = pixel_to_lonlat(composite, col1, row1)
@@ -290,4 +360,5 @@ def render_radar(
         center_lon=longitude,
         product=composite.product,
         max_dbz=max_dbz,
+        zstream=zstream,
     )

@@ -15,6 +15,7 @@ from custom_components.shmu.shmu_opendata.radar import (
     _IDX_DOT,
     _N_DBZ,
     _palette,
+    encode_apng,
     render_radar,
 )
 
@@ -127,3 +128,74 @@ def test_unsupported_product_raises_loudly(fixture) -> None:
 def test_non_hdf5_payload_raises() -> None:
     with pytest.raises(ShmuDataError):
         render_radar(b"not an hdf5 file at all", _LAT, _LON)
+
+
+def _ordered_chunks(png: bytes) -> list[tuple[bytes, bytes]]:
+    """Every chunk in file order (APNG repeats ``fcTL``/``fdAT``)."""
+    assert png[:8] == _PNG_SIG
+    chunks: list[tuple[bytes, bytes]] = []
+    pos = 8
+    while pos < len(png):
+        (length,) = struct.unpack_from(">I", png, pos)
+        tag = png[pos + 4 : pos + 8]
+        chunks.append((tag, png[pos + 8 : pos + 8 + length]))
+        pos += 12 + length
+    return chunks
+
+
+def test_encode_apng_assembles_a_valid_animation(fixture) -> None:
+    frame = render_radar(fixture("radar_zmax.hdf"), _LAT, _LON)
+    apng = encode_apng([frame, frame, frame])
+
+    chunks = _ordered_chunks(apng)
+    tags = [t for t, _ in chunks]
+    # APNG control chunks precede the first frame; IEND closes the file.
+    assert tags[:4] == [b"IHDR", b"PLTE", b"tRNS", b"acTL"]
+    assert tags[-1] == b"IEND"
+
+    payload = dict(chunks)
+    num_frames, num_plays = struct.unpack(">II", payload[b"acTL"])
+    assert num_frames == 3
+    assert num_plays == 0  # 0 == loop forever
+
+    assert tags.count(b"fcTL") == 3
+    assert tags.count(b"IDAT") == 1  # frame 0 is a plain IDAT
+    assert tags.count(b"fdAT") == 2  # frames 1.. are fdAT
+    # The single shared sequence counter is contiguous from 0.
+    seqs = [
+        struct.unpack_from(">I", body)[0]
+        for tag, body in chunks
+        if tag in (b"fcTL", b"fdAT")
+    ]
+    assert seqs == [0, 1, 2, 3, 4]
+    # Each frame spans the whole canvas (size matches IHDR).
+    iw, ih = struct.unpack(">II", payload[b"IHDR"][:8])
+    for tag, body in chunks:
+        if tag == b"fcTL":
+            _seq, w, h, x, y = struct.unpack_from(">IIIII", body)
+            assert (w, h, x, y) == (iw, ih, 0, 0)
+
+
+def test_encode_apng_single_frame_degrades_to_one_frame(fixture) -> None:
+    frame = render_radar(fixture("radar_zmax.hdf"), _LAT, _LON)
+    apng = encode_apng([frame])
+    chunks = _ordered_chunks(apng)
+    tags = [t for t, _ in chunks]
+    assert dict(chunks)[b"acTL"][:4] == struct.pack(">I", 1)  # num_frames == 1
+    assert tags.count(b"fcTL") == 1
+    assert tags.count(b"fdAT") == 0
+    assert tags.count(b"IDAT") == 1
+
+
+def test_encode_apng_rejects_empty() -> None:
+    with pytest.raises(ShmuDataError, match="zero frames"):
+        encode_apng([])
+
+
+def test_encode_apng_rejects_mismatched_frame_sizes(fixture) -> None:
+    data = fixture("radar_zmax.hdf")
+    small = render_radar(data, _LAT, _LON, radius_km=60.0)
+    large = render_radar(data, _LAT, _LON, radius_km=150.0)
+    assert (small.width, small.height) != (large.width, large.height)
+    with pytest.raises(ShmuDataError, match="differ in size"):
+        encode_apng([small, large])

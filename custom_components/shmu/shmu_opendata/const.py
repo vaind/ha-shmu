@@ -25,6 +25,13 @@ RADAR_PATH: Final = "/meteorology/weather/radar/composite/skcomp"
 #: reflectivity product; both decode identically (ODIM quantity ``DBZH``).
 DEFAULT_RADAR_PRODUCT: Final = "zmax"
 
+#: How many consecutive 5-minute frames the radar loop keeps — the animation
+#: that lets you watch precipitation move. 12 frames ≈ the **last hour**. The
+#: steady-state cost is unchanged (only the one new frame is fetched each
+#: poll); this only bounds the one-time backfill on the first poll and the
+#: in-memory buffer.
+RADAR_LOOP_FRAMES: Final = 12
+
 #: Forecast hours to fetch per run: hourly to +48 h, then 3-hourly to +102 h
 #: (the model's horizon). ≈67 files (~11 MB) once per run — *not* per
 #: observation poll. Trimmed if a run does not publish the full set.

@@ -30,6 +30,7 @@ from .const import (
     FORECAST_HOURS,
     FORECAST_PATH,
     OBSERVATIONS_PATH,
+    RADAR_LOOP_FRAMES,
     RADAR_PATH,
     USER_AGENT,
     WARNINGS_PATH,
@@ -38,7 +39,7 @@ from .exceptions import ShmuConnectionError, ShmuDataError
 from .forecast import ForecastStep, grid_index, parse_forecast
 from .models import Observation, Warning
 from .parsers import list_directory, parse_cap_alert, parse_observations
-from .radar import RadarImage, render_radar
+from .radar import RadarImage, encode_apng, render_radar
 from .website import WEBSITE_URL, WebCondition, parse_current_conditions
 
 _LOGGER = logging.getLogger(__name__)
@@ -107,13 +108,32 @@ class ForecastSnapshot:
 
 
 @dataclass(frozen=True, slots=True)
-class RadarSnapshot:
-    """The newest ODIM radar composite, rendered to a PNG.
+class RadarFrame:
+    """One decoded radar composite in the loop buffer.
 
-    ``source`` is the ODIM file path and doubles as the cache identity: a
-    published frame never changes, so an unchanged ``source`` means the
-    ~0.3 MB HDF5 need not be re-fetched or re-rendered. ``valid_at`` is the
-    frame's nominal UTC time parsed from the filename.
+    ``source`` is the ODIM file path. A published frame never changes, so its
+    path is a stable cache identity: the next poll reuses this frame instead
+    of re-fetching and re-rendering the ~0.3 MB HDF5. ``valid_at`` is the
+    frame's nominal UTC time parsed from the filename; frames are ordered by
+    it (oldest→newest).
+    """
+
+    image: RadarImage
+    source: str
+    valid_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class RadarSnapshot:
+    """The recent ODIM composites: the newest frame plus a short loop.
+
+    ``image``/``source``/``valid_at`` describe the **newest** frame — the
+    still picture and the "is it raining" ``max_dbz`` signal. ``frames`` is
+    the rolling buffer of the last :data:`RADAR_LOOP_FRAMES` composites
+    (oldest→newest) and ``loop_png`` is them spliced into one animated PNG so
+    the precipitation's movement is visible at a glance. Frame identity by
+    ``source`` means a poll re-fetches only the one newly published composite
+    and reuses the rest.
     """
 
     image: RadarImage
@@ -121,6 +141,26 @@ class RadarSnapshot:
     source: str
     valid_at: datetime
     fetched_at: datetime
+    frames: tuple[RadarFrame, ...]
+    loop_png: bytes
+
+
+def _radar_snapshot(frames: Sequence[RadarFrame], product: str) -> RadarSnapshot:
+    """Assemble a :class:`RadarSnapshot` from buffered frames (oldest→newest).
+
+    Shared by the client and the test doubles so the snapshot shape stays in
+    one place.
+    """
+    newest = frames[-1]
+    return RadarSnapshot(
+        image=newest.image,
+        product=product,
+        source=newest.source,
+        valid_at=newest.valid_at,
+        fetched_at=datetime.now(UTC),
+        frames=tuple(frames),
+        loop_png=encode_apng([f.image for f in frames]),
+    )
 
 
 class ShmuClient:
@@ -383,12 +423,19 @@ class ShmuClient:
             f"(through {target_hour:03d}) under {FORECAST_PATH}"
         )
 
-    async def _latest_radar_file(self, product: str) -> tuple[str, str, datetime]:
-        """Return ``(day_path, filename, valid_at)`` of the newest frame.
+    async def _recent_radar_files(
+        self, product: str, count: int
+    ) -> list[tuple[str, str, datetime]]:
+        """The newest ``count`` frames as ``(day_path, filename, valid_at)``,
+        oldest→newest.
 
-        Mirrors :meth:`_latest_observation_file`: walks the two newest day
-        folders so a just-after-midnight gap (the new ``YYYYMMDD/`` folder
-        appears slightly before its first 5-minute file) does not raise.
+        Walks day folders newest-first only until ``count`` frames are seen,
+        so steady state reads just the top-level listing and the newest day
+        folder. A loop that straddles midnight (or the brief post-midnight
+        gap before the new ``YYYYMMDD/`` folder gets its first file) is filled
+        from the previous day. The embedded timestamp is absolute, so the
+        final sort by ``valid_at`` is chronological regardless of listing
+        order.
         """
         product_path = f"{RADAR_PATH}/{product}"
         days = sorted(
@@ -397,22 +444,24 @@ class ShmuClient:
         )
         if not days:
             raise ShmuDataError(f"No day folders in {product_path}")
-        for day in days[:2]:
+        found: list[tuple[str, str, datetime]] = []
+        for day in days:
             day_path = f"{product_path}/{day.rstrip('/')}"
-            newest: tuple[str, str] | None = None
             for entry in await self._list(day_path):
                 match = _RADAR_FILE_RE.match(entry)
-                if match is not None and (newest is None or entry > newest[0]):
-                    newest = (entry, match.group(1))
-            if newest is not None:
-                valid_at = datetime.strptime(newest[1], "%Y%m%d%H%M%S").replace(
-                    tzinfo=UTC
-                )
-                return day_path, newest[0], valid_at
-        raise ShmuDataError(
-            f"No radar files in the {len(days[:2])} newest day folders "
-            f"under {product_path}"
-        )
+                if match is not None:
+                    valid_at = datetime.strptime(
+                        match.group(1), "%Y%m%d%H%M%S"
+                    ).replace(tzinfo=UTC)
+                    found.append((day_path, entry, valid_at))
+            if len(found) >= count:
+                break
+        if not found:
+            raise ShmuDataError(
+                f"No radar files in the {len(days)} day folders under {product_path}"
+            )
+        found.sort(key=lambda f: f[2])
+        return found[-count:]
 
     async def async_get_radar(
         self,
@@ -422,30 +471,49 @@ class ShmuClient:
         product: str = DEFAULT_RADAR_PRODUCT,
         previous: RadarSnapshot | None = None,
     ) -> RadarSnapshot:
-        """Fetch the newest ODIM composite, cropped to the station vicinity.
+        """Fetch the recent ODIM composites as a short loop, cropped to the
+        station vicinity.
 
-        Discovery reads only the small directory listing each call; the
-        ~0.3 MB HDF5 is downloaded and rendered solely when the newest frame
-        differs from ``previous`` (a published frame is immutable, so its
-        path is a stable cache key — the same politeness model as
-        :meth:`async_get_observations`). The crop is centred on
-        ``(latitude, longitude)``; one config entry tracks one station, so
-        the location is constant and the source-path cache key stays valid.
+        Discovery reads only small directory listings. A frame's ~0.3 MB HDF5
+        is downloaded and rendered **once**: a published frame is immutable,
+        so any frame already in ``previous`` is reused untouched and only the
+        newly published composite is fetched each poll (the same politeness
+        model as :meth:`async_get_observations`). Just the first poll
+        backfills up to :data:`RADAR_LOOP_FRAMES` frames. The crop is centred
+        on ``(latitude, longitude)``; one config entry tracks one station, so
+        the location, grid and crop box are constant across frames.
         """
-        day_path, filename, valid_at = await self._latest_radar_file(product)
-        source = f"{day_path}/{filename}"
+        wanted = await self._recent_radar_files(product, RADAR_LOOP_FRAMES)
+        cached = {f.source: f for f in previous.frames} if previous else {}
 
-        if previous is not None and previous.source == source:
-            _LOGGER.debug("Radar unchanged (%s); using cache", source)
+        frames: list[RadarFrame] = []
+        fetched = 0
+        for day_path, filename, valid_at in wanted:
+            source = f"{day_path}/{filename}"
+            reused = cached.get(source)
+            if reused is not None:
+                frames.append(reused)
+                continue
+            payload = await self._get(f"{day_path}/{quote(filename)}")
+            image = render_radar(payload, latitude, longitude)
+            frames.append(RadarFrame(image=image, source=source, valid_at=valid_at))
+            fetched += 1
+
+        if (
+            previous is not None
+            and len(frames) == len(previous.frames)
+            and all(
+                f.source == p.source
+                for f, p in zip(frames, previous.frames, strict=True)
+            )
+        ):
+            _LOGGER.debug("Radar loop unchanged (%d frames); using cache", len(frames))
             return previous
 
-        payload = await self._get(f"{day_path}/{quote(filename)}")
-        image = render_radar(payload, latitude, longitude)
-        _LOGGER.debug("Rendered %s radar frame from %s", product, source)
-        return RadarSnapshot(
-            image=image,
-            product=product,
-            source=source,
-            valid_at=valid_at,
-            fetched_at=datetime.now(UTC),
+        _LOGGER.debug(
+            "Radar loop: %d frames, %d newly fetched (newest %s)",
+            len(frames),
+            fetched,
+            frames[-1].source,
         )
+        return _radar_snapshot(frames, product)
