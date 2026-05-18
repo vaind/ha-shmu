@@ -16,6 +16,7 @@ from .test_init import _FakeClient
 
 _ENTITY = "image.hurbanovo_radar"
 _LOOP_ENTITY = "image.hurbanovo_radar_loop"
+_FRAME_ENTITY = "image.hurbanovo_radar_frame"
 
 
 @pytest.fixture
@@ -89,6 +90,22 @@ async def test_radar_loop_serves_apng(
     assert b"acTL" in image.content
 
 
+async def test_radar_frame_image_defaults_to_live(
+    hass: HomeAssistant, setup_entry: MockConfigEntry
+) -> None:
+    state = hass.states.get(_FRAME_ENTITY)
+    assert state is not None
+    attrs = state.attributes
+    # Offset 0 == newest frame (matches the still / stays roll-stable).
+    assert attrs["frame_offset"] == 0
+    assert attrs["frame_count"] == 3
+    assert attrs["valid_at"] == "2026-05-17T20:20:00+00:00"
+
+    image = await async_get_image(hass, _FRAME_ENTITY)
+    assert image.content_type == "image/png"
+    assert image.content[:8] == b"\x89PNG\r\n\x1a\n"
+
+
 async def test_radar_in_diagnostics(
     hass: HomeAssistant, setup_entry: MockConfigEntry
 ) -> None:
@@ -103,6 +120,7 @@ async def test_radar_in_diagnostics(
     assert radar["loop_frames"] == 3
     assert radar["loop_start"] == "2026-05-17T20:10:00+00:00"
     assert radar["loop_end"] == "2026-05-17T20:20:00+00:00"
+    assert radar["selected_offset"] == 0
     w, h = radar["size"]
     assert 0 < w < 64 and 0 < h < 48  # cropped to the station vicinity
     assert radar["center"] == [47.8733, 18.1944]

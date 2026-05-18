@@ -18,7 +18,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from .coordinator import ShmuConfigEntry, ShmuDataUpdateCoordinator
-from .entity import ShmuStationEntity
+from .entity import ShmuRadarEntity
 
 # Coordinator-only entity: all I/O is the shared coordinator's, none per
 # entity. Matches the other SHMÚ platforms / the integration's
@@ -34,44 +34,31 @@ async def async_setup_entry(
     """Set up the SHMÚ radar image entities from a config entry."""
     coordinator = entry.runtime_data
     async_add_entities(
-        [ShmuRadarImage(hass, coordinator), ShmuRadarLoopImage(hass, coordinator)]
+        [
+            ShmuRadarImage(hass, coordinator),
+            ShmuRadarLoopImage(hass, coordinator),
+            ShmuRadarFrameImage(hass, coordinator),
+        ]
     )
 
 
-class _ShmuRadarImageBase(ShmuStationEntity, ImageEntity):
-    """Shared device wiring and national-data availability for the radar
-    images.
+class _ShmuRadarImageBase(ShmuRadarEntity, ImageEntity):
+    """Shared device wiring for the radar image entities.
 
-    Reuses :class:`ShmuStationEntity` for the station device (so the
-    ``configuration_url`` and device metadata stay in one place) and layers
-    in :class:`ImageEntity`'s machinery. Subclasses set the translation key,
-    the unique-id suffix and what bytes to serve.
+    :class:`ShmuRadarEntity` supplies the station device, the national-data
+    availability and the unique id; this layers in :class:`ImageEntity`'s
+    machinery. Subclasses set the translation key, the unique-id suffix and
+    what bytes to serve.
     """
 
     _attr_content_type = "image/png"
-    #: Distinguishes the entities under one station device.
-    _unique_id_suffix: str
 
     def __init__(
         self, hass: HomeAssistant, coordinator: ShmuDataUpdateCoordinator
     ) -> None:
         """Initialise the radar image entity."""
-        ShmuStationEntity.__init__(self, coordinator, coordinator.station)
+        ShmuRadarEntity.__init__(self, coordinator, coordinator.station)
         ImageEntity.__init__(self, hass)
-        self._attr_unique_id = f"{coordinator.station.ind_kli}_{self._unique_id_suffix}"
-
-    @property
-    def available(self) -> bool:
-        """Available while a radar frame is held — independent of the station.
-
-        Deliberately *not* ``ShmuStationEntity.available`` (which gates on a
-        fresh station observation): the radar mosaic is national data and
-        must survive a single station dropping out of an observation snapshot.
-        """
-        return (
-            self.coordinator.last_update_success
-            and self.coordinator.data.radar is not None
-        )
 
     @property
     def image_last_updated(self) -> datetime | None:
@@ -147,3 +134,48 @@ class ShmuRadarLoopImage(_ShmuRadarImageBase):
         """Return the animated PNG loop, or ``None`` if no frame is held."""
         radar = self.coordinator.data.radar
         return None if radar is None else radar.loop_png
+
+
+class ShmuRadarFrameImage(_ShmuRadarImageBase):
+    """A single buffered radar frame, chosen by the "Radar frame" number.
+
+    Lets a dashboard slider scrub the loop manually: the companion number
+    entity sets :attr:`ShmuDataUpdateCoordinator.radar_frame_offset` and this
+    serves that frame. ``image_last_updated`` tracks the *selected* frame's
+    time, so moving the slider (or new data arriving) re-fetches the picture.
+    """
+
+    _attr_translation_key = "radar_frame"
+    _unique_id_suffix = "radar_frame"
+
+    @property
+    def image_last_updated(self) -> datetime | None:
+        """The selected frame's time — changes on scrub *and* on new data."""
+        frame = self.coordinator.selected_radar_frame()
+        return None if frame is None else frame.valid_at
+
+    @property
+    def extra_state_attributes(self) -> dict[str, str | float | None]:
+        """Which frame is shown plus the shared geographic extent."""
+        radar = self.coordinator.data.radar
+        frame = self.coordinator.selected_radar_frame()
+        if radar is None or frame is None:
+            return {}
+        img = frame.image
+        return {
+            "product": radar.product,
+            "frame_offset": self.coordinator.radar_frame_offset,
+            "frame_count": len(radar.frames),
+            "valid_at": frame.valid_at.isoformat(),
+            "center_latitude": img.center_lat,
+            "center_longitude": img.center_lon,
+            "bbox_south": img.south,
+            "bbox_west": img.west,
+            "bbox_north": img.north,
+            "bbox_east": img.east,
+        }
+
+    async def async_image(self) -> bytes | None:
+        """Return the selected frame's PNG, or ``None`` if none is held."""
+        frame = self.coordinator.selected_radar_frame()
+        return None if frame is None else frame.image.png

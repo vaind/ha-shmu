@@ -110,6 +110,7 @@ async def async_get_config_entry_diagnostics(
             "loop_frames": len(radar.frames),
             "loop_start": radar.frames[0].valid_at.isoformat(),
             "loop_end": radar.frames[-1].valid_at.isoformat(),
+            "selected_offset": coordinator.radar_frame_offset,
             "size": [radar.image.width, radar.image.height],
             "max_dbz": radar.image.max_dbz,
             "center": [radar.image.center_lat, radar.image.center_lon],
