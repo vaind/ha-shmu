@@ -2,9 +2,13 @@
 
 :mod:`shmu_opendata.odim` decodes the raw HDF5; this module knows what the
 SHMÚ ``skcomp`` reflectivity composite *means* and turns it into a small,
-map-overlayable PNG with a standard dBZ colour scale. Both the colour mapping
-and the PNG encoder are pure standard library (``zlib`` only), so the vendored
-library stays HA-free, dependency-free and offline-testable — the same reason
+map-overlayable PNG with a standard dBZ colour scale. The frame is cropped to
+the **vicinity of the configured station** (the full mosaic spans ~Central
+Europe, which is rarely what a user wants) and overlaid with **country
+borders** and a **marker at the station** so the picture is self-locating.
+Colour mapping, projection, border drawing and the PNG encoder are all pure
+standard library (``zlib`` + ``math``), so the vendored library stays
+HA-free, dependency-free and offline-testable — the same reason
 :mod:`grib2` hand-rolls its decoder instead of pulling a binary wheel.
 
 Scope (verified live 2026-05-17, issue #6): the reflectivity products
@@ -21,7 +25,9 @@ import struct
 import zlib
 from dataclasses import dataclass
 
+from .borders import BORDERS
 from .exceptions import ShmuDataError
+from .geo import lonlat_to_pixel, pixel_to_lonlat, vicinity_box
 from .odim import OdimComposite, read_odim
 
 #: ODIM quantity this renderer understands.
@@ -31,11 +37,20 @@ _RAW_NO_ECHO = 0
 _RAW_NO_DATA = 255
 #: Reflectivity below this (dBZ) is drawn transparent (speckle / clutter).
 _MIN_DBZ = 5.0
-#: Longest output edge after downsampling (source is 2270x1560 ≈ 3.5 MP; a
-#: pure-Python per-pixel pass over the full grid would be needlessly slow for
-#: an at-a-glance overlay). Stride sampling can thin a very small cell — an
-#: accepted trade-off for an overview image refreshed every 5 minutes.
+#: Longest output edge after downsampling. The cropped window is already a
+#: fraction of the 2270x1560 mosaic; this bounds the pure-Python per-pixel
+#: pass. Stride sampling can thin a very small cell — an accepted trade-off
+#: for an overview image refreshed every 5 minutes.
 _MAX_EDGE = 760
+#: Default crop: ~150 km around the station (≈300 km across) — local, but you
+#: still see weather approaching from outside the immediate area.
+_DEFAULT_RADIUS_KM = 150.0
+#: Overlay colours (no pure grey/black/white in the dBZ ramp, so these stay
+#: unambiguous over both echo and the transparent background).
+_BORDER_RGB = (205, 205, 205)
+_MARKER_RING_RGB = (10, 10, 10)
+_MARKER_DOT_RGB = (255, 255, 255)
+_MARKER_RADIUS_PX = 4
 
 #: dBZ colour ramp: ``(upper_bound, (r, g, b))``, scanned low→high. A standard
 #: weather-radar scale (cyan → green → yellow → red → magenta → white).
@@ -56,15 +71,23 @@ _DBZ_RAMP: tuple[tuple[float, tuple[int, int, int]], ...] = (
     (float("inf"), (245, 245, 245)),
 )
 
+#: Palette layout: 0 = transparent, 1..N = dBZ bands, then the overlay colours.
+_N_DBZ = len(_DBZ_RAMP)
+_IDX_BORDER = _N_DBZ + 1
+_IDX_RING = _N_DBZ + 2
+_IDX_DOT = _N_DBZ + 3
+
 
 @dataclass(frozen=True, slots=True)
 class RadarImage:
     """A rendered radar frame plus the geographic box it covers.
 
-    ``png`` is an 8-bit palette PNG (index 0 transparent). The extent is the
-    ODIM corner bounding box in WGS84 degrees, ready for a Home Assistant map
-    overlay. ``max_dbz`` is the strongest echo in the (downsampled) frame, or
-    ``None`` when the frame is echo-free — handy as an "is it raining" signal.
+    ``png`` is an 8-bit palette PNG (index 0 transparent) cropped to the
+    station vicinity, with country borders and a station marker drawn on.
+    ``south/west/north/east`` is that crop's WGS84 bounding box (ready for a
+    Home Assistant map overlay); ``center_lat/center_lon`` is the station the
+    crop is centred on. ``max_dbz`` is the strongest echo in the (downsampled)
+    frame, or ``None`` when echo-free — handy as an "is it raining" signal.
     """
 
     png: bytes
@@ -74,6 +97,8 @@ class RadarImage:
     west: float
     north: float
     east: float
+    center_lat: float
+    center_lon: float
     product: str
     max_dbz: float | None
 
@@ -82,7 +107,63 @@ def _palette() -> bytes:
     plte = bytearray(b"\x00\x00\x00")  # index 0: transparent placeholder
     for _bound, (r, g, b) in _DBZ_RAMP:
         plte += bytes((r, g, b))
+    plte += bytes(_BORDER_RGB)
+    plte += bytes(_MARKER_RING_RGB)
+    plte += bytes(_MARKER_DOT_RGB)
     return bytes(plte)
+
+
+def _draw_line(
+    rows: list[bytearray],
+    w: int,
+    h: int,
+    p0: tuple[int, int],
+    p1: tuple[int, int],
+    idx: int,
+) -> None:
+    """Bresenham line, per-pixel clipped to the frame.
+
+    Segments wholly off one side are skipped so projecting the full border
+    set (most of it outside a vicinity crop) stays cheap.
+    """
+    x0, y0 = p0
+    x1, y1 = p1
+    if (x0 < 0 and x1 < 0) or (x0 >= w and x1 >= w):
+        return
+    if (y0 < 0 and y1 < 0) or (y0 >= h and y1 >= h):
+        return
+    dx = abs(x1 - x0)
+    dy = -abs(y1 - y0)
+    sx = 1 if x0 < x1 else -1
+    sy = 1 if y0 < y1 else -1
+    err = dx + dy
+    while True:
+        if 0 <= x0 < w and 0 <= y0 < h:
+            rows[y0][x0] = idx
+        if x0 == x1 and y0 == y1:
+            break
+        e2 = 2 * err
+        if e2 >= dy:
+            err += dy
+            x0 += sx
+        if e2 <= dx:
+            err += dx
+            y0 += sy
+
+
+def _draw_marker(rows: list[bytearray], w: int, h: int, cx: int, cy: int) -> None:
+    """A dark ring + white centre dot — a location pin readable on any
+    background and not confusable with the weather colours."""
+    r = _MARKER_RADIUS_PX
+    inner, outer = (r - 0.8) ** 2, (r + 0.8) ** 2
+    for yy in range(cy - r - 1, cy + r + 2):
+        if not 0 <= yy < h:
+            continue
+        for xx in range(cx - r - 1, cx + r + 2):
+            if 0 <= xx < w and inner <= (xx - cx) ** 2 + (yy - cy) ** 2 <= outer:
+                rows[yy][xx] = _IDX_RING
+    if 0 <= cx < w and 0 <= cy < h:
+        rows[cy][cx] = _IDX_DOT
 
 
 def _dbz_to_index(dbz: float) -> int:
@@ -123,8 +204,16 @@ def _encode_indexed_png(
     )
 
 
-def render_radar(data: bytes) -> RadarImage:
-    """Decode a SHMÚ ODIM reflectivity composite and render it to a PNG.
+def render_radar(
+    data: bytes,
+    latitude: float,
+    longitude: float,
+    *,
+    radius_km: float = _DEFAULT_RADIUS_KM,
+) -> RadarImage:
+    """Decode a SHMÚ ODIM reflectivity composite, crop it to ``radius_km``
+    around ``(latitude, longitude)``, overlay borders + a station marker and
+    render it to a PNG.
 
     Raises :class:`ShmuDataError` for a non-reflectivity product so an
     upstream change is loud rather than silently mis-coloured.
@@ -137,10 +226,12 @@ def render_radar(data: bytes) -> RadarImage:
         )
 
     src = composite.raw
-    src_w, src_h = composite.width, composite.height
-    step = max(1, (max(src_w, src_h) + _MAX_EDGE - 1) // _MAX_EDGE)
-    out_w = (src_w + step - 1) // step
-    out_h = (src_h + step - 1) // step
+    src_w = composite.width
+    col0, row0, col1, row1 = vicinity_box(composite, latitude, longitude, radius_km)
+    crop_w, crop_h = col1 - col0, row1 - row0
+    step = max(1, (max(crop_w, crop_h) + _MAX_EDGE - 1) // _MAX_EDGE)
+    out_w = (crop_w + step - 1) // step
+    out_h = (crop_h + step - 1) // step
 
     gain, offset = composite.gain, composite.offset
     # Precompute raw byte → palette index (256 entries; sentinels → 0).
@@ -158,26 +249,45 @@ def render_radar(data: bytes) -> RadarImage:
     # (downsampled) frame, not a palette-band boundary.
     peak_raw = -1
     for oy in range(out_h):
-        base = (oy * step) * src_w
+        sy = min(row0 + oy * step, composite.height - 1)
+        base = sy * src_w
         row = bytearray(out_w)
         for ox in range(out_w):
-            raw_val = src[base + ox * step]
+            raw_val = src[base + min(col0 + ox * step, src_w - 1)]
             idx = lut[raw_val]
             row[ox] = idx
             if idx and raw_val > peak_raw:
                 peak_raw = raw_val
         rows.append(row)
 
+    # Borders & marker: project geo → full-grid px → cropped/downsampled px.
+    def to_out(lon: float, lat: float) -> tuple[int, int]:
+        col, r = lonlat_to_pixel(composite, lon, lat)
+        return round((col - col0) / step), round((r - row0) / step)
+
+    for line in BORDERS:
+        prev = to_out(*line[0])
+        for lon, lat in line[1:]:
+            cur = to_out(lon, lat)
+            _draw_line(rows, out_w, out_h, prev, cur, _IDX_BORDER)
+            prev = cur
+    mx, my = to_out(longitude, latitude)
+    _draw_marker(rows, out_w, out_h, mx, my)
+
     png = _encode_indexed_png(out_w, out_h, rows, _palette())
     max_dbz = None if peak_raw < 0 else round(offset + gain * peak_raw, 1)
+    west, north = pixel_to_lonlat(composite, col0, row0)
+    east, south = pixel_to_lonlat(composite, col1, row1)
     return RadarImage(
         png=png,
         width=out_w,
         height=out_h,
-        south=composite.ll_lat,
-        west=composite.ll_lon,
-        north=composite.ur_lat,
-        east=composite.ur_lon,
+        south=south,
+        west=west,
+        north=north,
+        east=east,
+        center_lat=latitude,
+        center_lon=longitude,
         product=composite.product,
         max_dbz=max_dbz,
     )

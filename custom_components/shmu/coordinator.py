@@ -331,6 +331,8 @@ class ShmuDataUpdateCoordinator(DataUpdateCoordinator[ShmuData]):
         # re-fetched only when a new composite is published (its path is the
         # cache key) — same identity-cache idea as observations.
         radar_coro = self._client.async_get_radar(
+            self.station.latitude,
+            self.station.longitude,
             previous=previous.radar if previous else None,
         )
 

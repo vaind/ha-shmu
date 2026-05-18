@@ -229,15 +229,17 @@ async def test_get_radar_discovers_and_renders(session, fixture) -> None:
         )
 
         client = ShmuClient(session)
-        snap = await client.async_get_radar()
+        snap = await client.async_get_radar(48.1686, 17.1106)
         assert snap.source == f"{RADAR}/20260517/{_RADAR_NEW}"
         assert snap.product == "zmax"
         assert snap.valid_at.isoformat() == "2026-05-17T20:20:00+00:00"
         assert snap.image.png[:8] == b"\x89PNG\r\n\x1a\n"
-        assert (snap.image.width, snap.image.height) == (64, 48)
+        # Cropped to the station vicinity, so smaller than the fixture grid.
+        assert 0 < snap.image.width < 64
+        assert (snap.image.center_lat, snap.image.center_lon) == (48.1686, 17.1106)
 
         # Same newest frame -> cached, the body is not fetched again.
-        again = await client.async_get_radar(previous=snap)
+        again = await client.async_get_radar(48.1686, 17.1106, previous=snap)
         assert again is snap
 
 
@@ -251,7 +253,7 @@ async def test_get_radar_falls_back_to_previous_day_folder(session, fixture) -> 
             body=fixture("radar_zmax.hdf"),
         )
 
-        snap = await ShmuClient(session).async_get_radar()
+        snap = await ShmuClient(session).async_get_radar(48.1686, 17.1106)
         assert snap.source == f"{RADAR}/20260517/{_RADAR_NEW}"
 
 
@@ -260,4 +262,4 @@ async def test_get_radar_no_files_raises(session) -> None:
         m.get(f"{BASE}{RADAR}/", body=_listing("20260517/"))
         m.get(f"{BASE}{RADAR}/20260517/", body=_listing())
         with pytest.raises(ShmuDataError, match="No radar files"):
-            await ShmuClient(session).async_get_radar()
+            await ShmuClient(session).async_get_radar(48.1686, 17.1106)

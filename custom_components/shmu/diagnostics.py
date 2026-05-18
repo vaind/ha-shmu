@@ -109,6 +109,7 @@ async def async_get_config_entry_diagnostics(
             "fetched_at": radar.fetched_at.isoformat(),
             "size": [radar.image.width, radar.image.height],
             "max_dbz": radar.image.max_dbz,
+            "center": [radar.image.center_lat, radar.image.center_lon],
             "bbox": [
                 radar.image.south,
                 radar.image.west,

@@ -43,9 +43,15 @@ async def test_radar_image_entity_created(
     attrs = state.attributes
     assert attrs["product"] == "zmax"
     assert attrs["max_dbz"] is not None
-    # ODIM corner box over Slovakia/Central Europe.
-    assert 45.0 < attrs["bbox_south"] < 47.0
-    assert 23.0 < attrs["bbox_east"] < 24.0
+    # Cropped to the configured station (Hurbanovo, 47.87 N / 18.19 E);
+    # the crop box must be centred on and contain it.
+    assert attrs["center_latitude"] == 47.8733
+    assert attrs["center_longitude"] == 18.1944
+    assert attrs["bbox_south"] <= 47.8733 <= attrs["bbox_north"]
+    assert attrs["bbox_west"] <= 18.1944 <= attrs["bbox_east"]
+    # ...and a strict sub-box of the full ODIM domain (~46-50.7 N).
+    assert attrs["bbox_south"] > 46.04
+    assert attrs["bbox_north"] < 50.7
 
 
 async def test_radar_image_serves_png(
@@ -67,6 +73,8 @@ async def test_radar_in_diagnostics(
     radar = diag["radar"]
     assert radar is not None
     assert radar["product"] == "zmax"
-    assert radar["size"] == [64, 48]
+    w, h = radar["size"]
+    assert 0 < w < 64 and 0 < h < 48  # cropped to the station vicinity
+    assert radar["center"] == [47.8733, 18.1944]
     assert len(radar["bbox"]) == 4
     assert "png" not in radar  # never dump the image bytes
