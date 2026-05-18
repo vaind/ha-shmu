@@ -34,6 +34,7 @@ from .shmu_opendata import (
     ForecastSnapshot,
     Observation,
     ObservationSnapshot,
+    RadarSnapshot,
     ShmuClient,
     ShmuConnectionError,
     ShmuDataError,
@@ -84,6 +85,7 @@ class ShmuData:
     warnings: WarningsSnapshot | None
     web_conditions: WebConditionsSnapshot | None
     forecast: ForecastSnapshot | None
+    radar: RadarSnapshot | None
 
     def active_warnings_for(self, station: Station) -> list[Warning]:
         """Active warnings whose area covers the station, worst severity first."""
@@ -325,12 +327,19 @@ class ShmuDataUpdateCoordinator(DataUpdateCoordinator[ShmuData]):
             self.station.longitude,
             previous=previous.forecast if previous else None,
         )
+        # Radar discovery is a small listing too; the ~0.3 MB ODIM frame is
+        # re-fetched only when a new composite is published (its path is the
+        # cache key) — same identity-cache idea as observations.
+        radar_coro = self._client.async_get_radar(
+            previous=previous.radar if previous else None,
+        )
 
-        observations, warnings, web, forecast = await asyncio.gather(
+        observations, warnings, web, forecast, radar = await asyncio.gather(
             observations_coro,
             warnings_coro,
             web_coro,
             forecast_coro,
+            radar_coro,
             return_exceptions=True,
         )
 
@@ -353,10 +362,12 @@ class ShmuDataUpdateCoordinator(DataUpdateCoordinator[ShmuData]):
         forecast = _keep_previous(
             forecast, "forecast", previous.forecast if previous else None
         )
+        radar = _keep_previous(radar, "radar", previous.radar if previous else None)
 
         return ShmuData(
             observations=observations,
             warnings=warnings,
             web_conditions=web,
             forecast=forecast,
+            radar=radar,
         )

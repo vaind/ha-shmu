@@ -16,6 +16,7 @@ BASE = "https://opendata.shmu.sk"
 OBS = "/meteorology/climate/now/data"
 WARN = "/meteorology/weather/alerts/cap"
 FCAST = "/meteorology/weather/nwp/aladin/sk/4.5km"
+RADAR = "/meteorology/weather/radar/composite/skcomp/zmax"
 WEB = "https://www.shmu.sk/sk/?page=1&id=meteo_apocasie_sk"
 
 
@@ -207,3 +208,56 @@ async def test_get_forecast_rejects_run_missing_intermediate_hour(
         client = ShmuClient(session)
         with pytest.raises(ShmuDataError, match="No ALADIN run with all"):
             await client.async_get_forecast(48.1717, 17.2, forecast_hours=(0, 1, 2))
+
+
+_RADAR_OLD = "T_PABV22_C_LZIB_20260517201500.hdf"
+_RADAR_NEW = "T_PABV22_C_LZIB_20260517202000.hdf"
+
+
+async def test_get_radar_discovers_and_renders(session, fixture) -> None:
+    with aioresponses() as m:
+        m.get(f"{BASE}{RADAR}/", body=_listing("20260517/"), repeat=True)
+        m.get(
+            f"{BASE}{RADAR}/20260517/",
+            body=_listing(_RADAR_OLD, _RADAR_NEW),
+            repeat=True,
+        )
+        # The ~0.3 MB HDF5 is registered ONCE: a second GET would raise.
+        m.get(
+            f"{BASE}{RADAR}/20260517/{_RADAR_NEW}",
+            body=fixture("radar_zmax.hdf"),
+        )
+
+        client = ShmuClient(session)
+        snap = await client.async_get_radar()
+        assert snap.source == f"{RADAR}/20260517/{_RADAR_NEW}"
+        assert snap.product == "zmax"
+        assert snap.valid_at.isoformat() == "2026-05-17T20:20:00+00:00"
+        assert snap.image.png[:8] == b"\x89PNG\r\n\x1a\n"
+        assert (snap.image.width, snap.image.height) == (64, 48)
+
+        # Same newest frame -> cached, the body is not fetched again.
+        again = await client.async_get_radar(previous=snap)
+        assert again is snap
+
+
+async def test_get_radar_falls_back_to_previous_day_folder(session, fixture) -> None:
+    with aioresponses() as m:
+        m.get(f"{BASE}{RADAR}/", body=_listing("20260518/", "20260517/"))
+        m.get(f"{BASE}{RADAR}/20260518/", body=_listing())  # empty new day
+        m.get(f"{BASE}{RADAR}/20260517/", body=_listing(_RADAR_NEW))
+        m.get(
+            f"{BASE}{RADAR}/20260517/{_RADAR_NEW}",
+            body=fixture("radar_zmax.hdf"),
+        )
+
+        snap = await ShmuClient(session).async_get_radar()
+        assert snap.source == f"{RADAR}/20260517/{_RADAR_NEW}"
+
+
+async def test_get_radar_no_files_raises(session) -> None:
+    with aioresponses() as m:
+        m.get(f"{BASE}{RADAR}/", body=_listing("20260517/"))
+        m.get(f"{BASE}{RADAR}/20260517/", body=_listing())
+        with pytest.raises(ShmuDataError, match="No radar files"):
+            await ShmuClient(session).async_get_radar()

@@ -15,6 +15,7 @@ from custom_components.shmu.const import CONF_IND_KLI, DOMAIN
 from custom_components.shmu.shmu_opendata import (
     ForecastSnapshot,
     ObservationSnapshot,
+    RadarSnapshot,
     WarningsSnapshot,
     WebConditionsSnapshot,
 )
@@ -23,6 +24,7 @@ from custom_components.shmu.shmu_opendata.parsers import (
     parse_cap_alert,
     parse_observations,
 )
+from custom_components.shmu.shmu_opendata.radar import render_radar
 from custom_components.shmu.shmu_opendata.website import parse_current_conditions
 
 #: Forecast hours backed by the trimmed real GRIB2 fixtures.
@@ -79,6 +81,15 @@ class _FakeClient:
             run=datetime(2026, 5, 17, 12, tzinfo=UTC),
             source="test-run/20260517/1200",
             grid_point=grid_index(latitude, longitude),
+            fetched_at=datetime.now(UTC),
+        )
+
+    async def async_get_radar(self, product="zmax", *, previous=None) -> RadarSnapshot:
+        return RadarSnapshot(
+            image=render_radar(self._load("radar_zmax.hdf")),
+            product=product,
+            source="test-run/20260517/T_PABV22_C_LZIB_20260517202000.hdf",
+            valid_at=datetime(2026, 5, 17, 20, 20, tzinfo=UTC),
             fetched_at=datetime.now(UTC),
         )
 
