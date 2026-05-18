@@ -241,20 +241,20 @@ def _frame_streams(apng: bytes) -> list[bytes]:
     return out
 
 
-def test_loop_frames_carry_a_growing_progress_bar(fixture) -> None:
+def test_loop_frames_carry_growing_step_markers(fixture) -> None:
     frame = render_radar(fixture("radar_zmax.hdf"), _LAT, _LON)
     apng = encode_apng([frame, frame, frame])
 
     iw, ih = struct.unpack(">II", _png_chunks(apng)[b"IHDR"][:8])
     streams = _frame_streams(apng)
     assert len(streams) == 3
-
-    # Identical scene each frame, yet the streams differ: only the bar grew.
+    # Identical scene each frame, yet the streams differ: only the markers
+    # advanced (one hollow square filled in per frame).
     assert len(set(streams)) == 3
-    bottom_fill = []
+
+    white = []
     for z in streams:
         rows = _rows_from_zstream(z, iw, ih)
-        bottom_fill.append(rows[ih - 1].count(_IDX_DOT))
-    assert bottom_fill[0] < bottom_fill[1] < bottom_fill[2]
-    # Last frame fills the whole width (fraction == 1).
-    assert bottom_fill[2] == iw
+        white.append(sum(r.count(_IDX_DOT) for r in rows))
+    # Each step turns one outlined square solid, adding white pixels.
+    assert white[0] < white[1] < white[2]

@@ -117,12 +117,12 @@ _GLYPH_H = 5
 _LABEL_MARGIN = 4
 _LABEL_PAD = 2
 
-#: Loop progress bar: a thin full-width strip flush to the bottom edge whose
-#: fill grows with the frame's position in the sequence, so while the APNG
-#: rolls forever you can see where "now" sits in the shown hour and when it
-#: resets. Track reuses the dark label swatch, fill the white marker dot —
-#: no extra palette entries. Height is in pixels before label-scale.
-_PROGRESS_H = 3
+#: Loop progress: a row of small squares under the timestamp, one per frame,
+#: solid up to the current frame and hollow after — so while the APNG rolls
+#: forever you can see where "now" sits in the shown hour and when it resets.
+#: Sitting on the same dark label swatch (white markers) keeps it readable
+#: over any background, unlike a bottom bar that vanished on dark map areas.
+#: Both colours reuse existing palette entries (no palette growth).
 
 
 @dataclass(frozen=True, slots=True)
@@ -269,18 +269,49 @@ def _draw_label(rows: list[bytearray], w: int, h: int, text: str) -> None:
                             prow[px] = _IDX_DOT
 
 
-def _draw_progress(rows: list[bytearray], w: int, h: int, fraction: float) -> None:
-    """Fill a bottom-edge strip ``fraction`` of the way across.
-
-    ``fraction`` is the frame's 1-based position over the frame count, so the
-    bar marches left→right and snaps back when the loop wraps. Clipped to the
-    frame so a tiny crop degrades gracefully."""
-    bar_h = max(1, _PROGRESS_H * _label_scale(w))
-    fill_w = max(0, min(w, round(fraction * w)))
-    for yy in range(max(0, h - bar_h), h):
+def _fill_rect(
+    rows: list[bytearray], w: int, h: int, x: int, y: int, bw: int, bh: int, idx: int
+) -> None:
+    """Fill a ``bw`` by ``bh`` rectangle at ``(x, y)``, clipped to the frame."""
+    for yy in range(max(0, y), min(y + bh, h)):
         row = rows[yy]
-        for xx in range(w):
-            row[xx] = _IDX_DOT if xx < fill_w else _IDX_LABEL_BG
+        for xx in range(max(0, x), min(x + bw, w)):
+            row[xx] = idx
+
+
+def _draw_progress(
+    rows: list[bytearray], w: int, h: int, index: int, total: int
+) -> None:
+    """Stamp the per-frame step markers just below the timestamp swatch.
+
+    ``total`` squares on a dark swatch: solid (white) up to ``index``, hollow
+    (white outline) after — so the forever-rolling loop shows where "now" is
+    and snaps back on wrap. White-on-dark stays visible over any background.
+    Geometry mirrors :func:`_draw_label` so it sits directly under the time;
+    everything is clipped, so a tiny crop degrades gracefully.
+    """
+    scale = _label_scale(w)
+    pad = _LABEL_PAD * scale
+    margin = _LABEL_MARGIN * scale
+    sq = _GLYPH_W * scale  # match the digit width for a tidy stack
+    gap = scale
+    # Directly under the timestamp box (label height + a one-unit gap).
+    box_y = margin + _GLYPH_H * scale + 2 * pad + scale
+    markers_w = total * (sq + gap) - gap
+    _fill_rect(
+        rows, w, h, margin, box_y, markers_w + 2 * pad, sq + 2 * pad, _IDX_LABEL_BG
+    )
+
+    mx, my = margin + pad, box_y + pad
+    for k in range(total):
+        x = mx + k * (sq + gap)
+        if k <= index:
+            _fill_rect(rows, w, h, x, my, sq, sq, _IDX_DOT)  # reached: solid
+        elif sq >= 2:
+            _fill_rect(rows, w, h, x, my, sq, sq, _IDX_DOT)  # outline...
+            _fill_rect(rows, w, h, x + 1, my + 1, sq - 2, sq - 2, _IDX_LABEL_BG)
+        else:
+            _fill_rect(rows, w, h, x, my, sq, sq, _IDX_DOT)
 
 
 def _dbz_to_index(dbz: float) -> int:
@@ -351,12 +382,13 @@ def encode_apng(images: Sequence[RadarImage], *, frame_ms: int = _FRAME_MS) -> b
     ODIM grid is fixed and the crop is centred on one constant station. A
     single image yields a valid one-frame APNG, i.e. it degrades to a still.
 
-    Each frame gets a bottom progress bar marking its place in the sequence,
-    so the forever-rolling loop is readable (you can see "now" advance and
-    reset). The bar is loop-only: the cached ``zstream`` (used by the still
-    and the scrubbed-frame image) is expanded, stamped and recompressed here
-    transiently — the costly ODIM decode/crop still runs once per frame, this
-    only adds a cheap zlib round-trip per frame at assembly time.
+    Each frame gets a row of step markers under the timestamp marking its
+    place in the sequence, so the forever-rolling loop is readable (you can
+    see "now" advance and reset). It is loop-only: the cached ``zstream``
+    (used by the still and the scrubbed-frame image) is expanded, stamped and
+    recompressed here transiently — the costly ODIM decode/crop still runs
+    once per frame, this only adds a cheap zlib round-trip per frame at
+    assembly time.
 
     APNG is a backward-compatible PNG superset (extra ``acTL``/``fcTL``/
     ``fdAT`` chunks), so the same ``image/png`` entity renders the animation
@@ -381,7 +413,7 @@ def encode_apng(images: Sequence[RadarImage], *, frame_ms: int = _FRAME_MS) -> b
     total = len(images)
     for i, im in enumerate(images):
         rows = _rows_from_zstream(im.zstream, width, height)
-        _draw_progress(rows, width, height, (i + 1) / total)
+        _draw_progress(rows, width, height, i, total)
         zstream = _filtered_zstream(rows)
         # fcTL: seq, w, h, x_off, y_off, delay_num, delay_den, dispose, blend.
         fctl = struct.pack(">IIIII", seq, width, height, 0, 0) + delay + b"\x00\x00"
