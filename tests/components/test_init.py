@@ -84,9 +84,11 @@ class _FakeClient:
             fetched_at=datetime.now(UTC),
         )
 
-    async def async_get_radar(self, product="zmax", *, previous=None) -> RadarSnapshot:
+    async def async_get_radar(
+        self, latitude, longitude, *, product="zmax", previous=None
+    ) -> RadarSnapshot:
         return RadarSnapshot(
-            image=render_radar(self._load("radar_zmax.hdf")),
+            image=render_radar(self._load("radar_zmax.hdf"), latitude, longitude),
             product=product,
             source="test-run/20260517/T_PABV22_C_LZIB_20260517202000.hdf",
             valid_at=datetime(2026, 5, 17, 20, 20, tzinfo=UTC),
