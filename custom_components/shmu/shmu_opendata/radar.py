@@ -81,11 +81,41 @@ _DBZ_RAMP: tuple[tuple[float, tuple[int, int, int]], ...] = (
     (float("inf"), (245, 245, 245)),
 )
 
+#: Background swatch behind the baked-in timestamp so it stays legible over
+#: both echo and the (transparent) no-echo background.
+_LABEL_BG_RGB = (15, 15, 15)
+
 #: Palette layout: 0 = transparent, 1..N = dBZ bands, then the overlay colours.
 _N_DBZ = len(_DBZ_RAMP)
 _IDX_BORDER = _N_DBZ + 1
 _IDX_RING = _N_DBZ + 2
 _IDX_DOT = _N_DBZ + 3
+_IDX_LABEL_BG = _N_DBZ + 4
+
+#: 3x5 bitmap font, just the glyphs a localized ``valid_at`` needs
+#: (``YYYY-MM-DD HH:MM``). Each row is 3 bits, MSB = leftmost pixel; a
+#: hand-rolled font keeps the renderer pure-stdlib (no Pillow), the same
+#: no-binary-deps reason borders/markers are hand-drawn.
+_FONT_3X5: dict[str, tuple[int, int, int, int, int]] = {
+    "0": (0b111, 0b101, 0b101, 0b101, 0b111),
+    "1": (0b010, 0b110, 0b010, 0b010, 0b111),
+    "2": (0b111, 0b001, 0b111, 0b100, 0b111),
+    "3": (0b111, 0b001, 0b111, 0b001, 0b111),
+    "4": (0b101, 0b101, 0b111, 0b001, 0b001),
+    "5": (0b111, 0b100, 0b111, 0b001, 0b111),
+    "6": (0b111, 0b100, 0b111, 0b101, 0b111),
+    "7": (0b111, 0b001, 0b010, 0b010, 0b010),
+    "8": (0b111, 0b101, 0b111, 0b101, 0b111),
+    "9": (0b111, 0b101, 0b111, 0b001, 0b111),
+    ":": (0b000, 0b010, 0b000, 0b010, 0b000),
+    "-": (0b000, 0b000, 0b111, 0b000, 0b000),
+    " ": (0b000, 0b000, 0b000, 0b000, 0b000),
+}
+_GLYPH_W = 3
+_GLYPH_H = 5
+#: Pixels between glyphs and around the label box, before scaling.
+_LABEL_MARGIN = 4
+_LABEL_PAD = 2
 
 
 @dataclass(frozen=True, slots=True)
@@ -126,6 +156,7 @@ def _palette() -> bytes:
     plte += bytes(_BORDER_RGB)
     plte += bytes(_MARKER_RING_RGB)
     plte += bytes(_MARKER_DOT_RGB)
+    plte += bytes(_LABEL_BG_RGB)
     return bytes(plte)
 
 
@@ -180,6 +211,55 @@ def _draw_marker(rows: list[bytearray], w: int, h: int, cx: int, cy: int) -> Non
                 rows[yy][xx] = _IDX_RING
     if 0 <= cx < w and 0 <= cy < h:
         rows[cy][cx] = _IDX_DOT
+
+
+def _label_scale(width: int) -> int:
+    """Integer glyph scale so the stamp stays readable but small.
+
+    ~1 px per 220 px of crop width: 1 on the trimmed test grid, 2 on a real
+    ~450 px vicinity crop."""
+    return max(1, width // 220)
+
+
+def _draw_label(rows: list[bytearray], w: int, h: int, text: str) -> None:
+    """Stamp ``text`` (a pre-localized timestamp) top-left on a dark swatch.
+
+    The string is already formatted by the caller — this only knows how to
+    paint glyphs, so the renderer stays HA-free. Pixels outside the frame are
+    clipped, so an over-narrow crop degrades gracefully instead of raising.
+    """
+    scale = _label_scale(w)
+    glyph_w, glyph_h = _GLYPH_W * scale, _GLYPH_H * scale
+    advance = glyph_w + scale  # one blank column between glyphs
+    text_w = len(text) * advance - scale if text else 0
+    pad = _LABEL_PAD * scale
+    x0 = y0 = _LABEL_MARGIN * scale
+
+    # Opaque swatch behind the text for guaranteed contrast.
+    for yy in range(y0, min(y0 + glyph_h + 2 * pad, h)):
+        row = rows[yy]
+        for xx in range(x0, min(x0 + text_w + 2 * pad, w)):
+            row[xx] = _IDX_LABEL_BG
+
+    tx, ty = x0 + pad, y0 + pad
+    for ci, ch in enumerate(text):
+        glyph = _FONT_3X5.get(ch)
+        if glyph is None:
+            continue
+        gx = tx + ci * advance
+        for ry, bits in enumerate(glyph):
+            for rx in range(_GLYPH_W):
+                if not bits & (1 << (_GLYPH_W - 1 - rx)):
+                    continue
+                for sy in range(scale):
+                    py = ty + ry * scale + sy
+                    if not 0 <= py < h:
+                        continue
+                    prow = rows[py]
+                    for sx in range(scale):
+                        px = gx + rx * scale + sx
+                        if 0 <= px < w:
+                            prow[px] = _IDX_DOT
 
 
 def _dbz_to_index(dbz: float) -> int:
@@ -279,10 +359,16 @@ def render_radar(
     longitude: float,
     *,
     radius_km: float = _DEFAULT_RADIUS_KM,
+    label: str | None = None,
 ) -> RadarImage:
     """Decode a SHMÚ ODIM reflectivity composite, crop it to ``radius_km``
     around ``(latitude, longitude)``, overlay borders + a station marker and
     render it to a PNG.
+
+    ``label``, when given, is stamped top-left as an opaque timestamp so the
+    frames are tellable apart while the loop plays. It is drawn verbatim:
+    timezone conversion / formatting is the caller's job, keeping this
+    renderer free of any Home Assistant (locale/tz) coupling.
 
     Raises :class:`ShmuDataError` for a non-reflectivity product so an
     upstream change is loud rather than silently mis-coloured.
@@ -342,6 +428,8 @@ def render_radar(
             prev = cur
     mx, my = to_out(longitude, latitude)
     _draw_marker(rows, out_w, out_h, mx, my)
+    if label:
+        _draw_label(rows, out_w, out_h, label)
 
     zstream = _filtered_zstream(rows)
     png = _encode_png(out_w, out_h, zstream, _palette())

@@ -334,6 +334,7 @@ class ShmuDataUpdateCoordinator(DataUpdateCoordinator[ShmuData]):
             self.station.latitude,
             self.station.longitude,
             previous=previous.radar if previous else None,
+            tz=self.hass.config.time_zone,
         )
 
         observations, warnings, web, forecast, radar = await asyncio.gather(

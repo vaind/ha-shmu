@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import aiohttp
 import pytest
 from aioresponses import aioresponses
@@ -11,6 +13,7 @@ from custom_components.shmu.shmu_opendata import (
     ShmuConnectionError,
     ShmuDataError,
 )
+from custom_components.shmu.shmu_opendata.client import _frame_label
 
 BASE = "https://opendata.shmu.sk"
 OBS = "/meteorology/climate/now/data"
@@ -332,3 +335,12 @@ async def test_get_radar_no_files_raises(session) -> None:
         m.get(f"{BASE}{RADAR}/20260517/", body=_listing())
         with pytest.raises(ShmuDataError, match="No radar files"):
             await ShmuClient(session).async_get_radar(48.1686, 17.1106)
+
+
+def test_frame_label_uses_the_ha_timezone() -> None:
+    ts = datetime(2026, 5, 18, 17, 20, tzinfo=UTC)
+    # Europe/Bratislava is CEST (UTC+2) in May.
+    assert _frame_label(ts, "Europe/Bratislava") == "2026-05-18 19:20"
+    # No / unknown zone -> UTC, so the picture still carries a real time.
+    assert _frame_label(ts, None) == "2026-05-18 17:20"
+    assert _frame_label(ts, "Not/AZone") == "2026-05-18 17:20"

@@ -13,6 +13,7 @@ from custom_components.shmu.shmu_opendata.odim import read_odim
 from custom_components.shmu.shmu_opendata.radar import (
     _IDX_BORDER,
     _IDX_DOT,
+    _IDX_LABEL_BG,
     _N_DBZ,
     _palette,
     encode_apng,
@@ -61,9 +62,9 @@ def test_renders_valid_cropped_indexed_png(fixture) -> None:
     assert colour_type == 3  # palette
     assert chunks[b"tRNS"] == b"\x00"  # only index 0 is transparent
     assert b"IEND" in chunks
-    # Palette = transparent + dBZ ramp + border + marker ring + marker dot.
-    assert len(chunks[b"PLTE"]) == (1 + _N_DBZ + 3) * 3
-    assert len(_palette()) == (1 + _N_DBZ + 3) * 3
+    # Palette = transparent + dBZ ramp + border + ring + dot + label bg.
+    assert len(chunks[b"PLTE"]) == (1 + _N_DBZ + 4) * 3
+    assert len(_palette()) == (1 + _N_DBZ + 4) * 3
     # Cropped to the station vicinity, so smaller than the 64x48 fixture grid.
     assert 0 < img.width < 64
     assert 0 < img.height < 48
@@ -199,3 +200,20 @@ def test_encode_apng_rejects_mismatched_frame_sizes(fixture) -> None:
     assert (small.width, small.height) != (large.width, large.height)
     with pytest.raises(ShmuDataError, match="differ in size"):
         encode_apng([small, large])
+
+
+def test_timestamp_label_is_stamped_and_distinguishes_frames(fixture) -> None:
+    data = fixture("radar_zmax.hdf")
+    plain = render_radar(data, _LAT, _LON)
+    # Leading digit differs so the change is visible even on the trimmed
+    # fixture crop (a long stamp's tail is clipped on such a tiny grid).
+    a = render_radar(data, _LAT, _LON, label="2026-05-18 17:20")
+    b = render_radar(data, _LAT, _LON, label="1026-05-18 17:20")
+
+    # The stamp adds its opaque swatch; the unlabeled frame has none.
+    assert _IDX_LABEL_BG in _indexed_pixels(a.png, _png_chunks(a.png))
+    assert _IDX_LABEL_BG not in _indexed_pixels(plain.png, _png_chunks(plain.png))
+    # A different timestamp -> different pixels, so a viewer can tell the
+    # loop's frames apart while it plays.
+    assert a.png != b.png
+    assert (a.width, a.height) == (plain.width, plain.height)

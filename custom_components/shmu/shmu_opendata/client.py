@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from urllib.parse import quote
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import aiohttp
 
@@ -143,6 +144,27 @@ class RadarSnapshot:
     fetched_at: datetime
     frames: tuple[RadarFrame, ...]
     loop_png: bytes
+
+
+#: Stamp format for a frame's ``valid_at`` — unambiguous, fixed-width, and
+#: covered by the renderer's tiny digit font (no locale letters needed).
+_LABEL_FMT = "%Y-%m-%d %H:%M"
+
+
+def _frame_label(valid_at: datetime, tz: str | None) -> str:
+    """``valid_at`` formatted for the baked-in stamp, in the HA-configured
+    zone.
+
+    ``tz`` is an IANA name; an unknown/empty one falls back to UTC so the
+    picture still carries a (correct, if not local) time rather than failing.
+    """
+    zone: ZoneInfo | None = None
+    if tz:
+        try:
+            zone = ZoneInfo(tz)
+        except (ZoneInfoNotFoundError, ValueError):
+            zone = None
+    return valid_at.astimezone(zone or UTC).strftime(_LABEL_FMT)
 
 
 def _radar_snapshot(frames: Sequence[RadarFrame], product: str) -> RadarSnapshot:
@@ -470,6 +492,7 @@ class ShmuClient:
         *,
         product: str = DEFAULT_RADAR_PRODUCT,
         previous: RadarSnapshot | None = None,
+        tz: str | None = None,
     ) -> RadarSnapshot:
         """Fetch the recent ODIM composites as a short loop, cropped to the
         station vicinity.
@@ -482,6 +505,13 @@ class ShmuClient:
         backfills up to :data:`RADAR_LOOP_FRAMES` frames. The crop is centred
         on ``(latitude, longitude)``; one config entry tracks one station, so
         the location, grid and crop box are constant across frames.
+
+        ``tz`` is the IANA zone (``hass.config.time_zone``) the per-frame
+        timestamp is stamped in; passing it stays inside stdlib ``zoneinfo``
+        so the library keeps no Home Assistant coupling. A frame's label is
+        baked in at render time and the frame is then immutable, so changing
+        ``tz`` only affects frames rendered afterwards — the buffer rolls
+        over within :data:`RADAR_LOOP_FRAMES` polls anyway.
         """
         wanted = await self._recent_radar_files(product, RADAR_LOOP_FRAMES)
         cached = {f.source: f for f in previous.frames} if previous else {}
@@ -495,7 +525,12 @@ class ShmuClient:
                 frames.append(reused)
                 continue
             payload = await self._get(f"{day_path}/{quote(filename)}")
-            image = render_radar(payload, latitude, longitude)
+            image = render_radar(
+                payload,
+                latitude,
+                longitude,
+                label=_frame_label(valid_at, tz),
+            )
             frames.append(RadarFrame(image=image, source=source, valid_at=valid_at))
             fetched += 1
 
