@@ -45,7 +45,12 @@
       "weather_warning": { "name": "Weather warning" }
     },
     "image": {
-      "radar": { "name": "Radar" }
+      "radar": { "name": "Radar" },
+      "radar_loop": { "name": "Radar loop" },
+      "radar_frame": { "name": "Radar frame" }
+    },
+    "number": {
+      "radar_frame": { "name": "Radar frame selector" }
     }
   }
 }

@@ -34,6 +34,7 @@ from .shmu_opendata import (
     ForecastSnapshot,
     Observation,
     ObservationSnapshot,
+    RadarFrame,
     RadarSnapshot,
     ShmuClient,
     ShmuConnectionError,
@@ -185,6 +186,11 @@ class ShmuDataUpdateCoordinator(DataUpdateCoordinator[ShmuData]):
         #: Grid scheduling state.
         self._next_refresh_at: datetime | None = None
         self._unsub_refresh: CALLBACK_TYPE | None = None
+        #: UI scrub position for the radar loop: how many 5-minute frames back
+        #: from the newest one to show (0 = live). Set by the "Radar frame"
+        #: number entity, read by the selectable-frame image; runtime-only,
+        #: roll-stable (0 always = the latest frame as the buffer rotates).
+        self.radar_frame_offset: int = 0
 
     @property
     def observation(self) -> Observation | None:
@@ -214,6 +220,21 @@ class ShmuDataUpdateCoordinator(DataUpdateCoordinator[ShmuData]):
     def next_refresh_at(self) -> datetime | None:
         """When the next grid-aligned refresh is scheduled (UTC)."""
         return self._next_refresh_at
+
+    def selected_radar_frame(self) -> RadarFrame | None:
+        """The buffered radar frame the UI scrubber points at.
+
+        Resolves :attr:`radar_frame_offset` against the current loop buffer,
+        clamped so it stays valid as the buffer grows/rotates. ``None`` when
+        no radar is held. Shared by the "Radar frame" number and the
+        selectable-frame image so they never disagree on which frame is
+        shown.
+        """
+        radar = self.data.radar if self.data else None
+        if radar is None or not radar.frames:
+            return None
+        offset = max(0, min(self.radar_frame_offset, len(radar.frames) - 1))
+        return radar.frames[-1 - offset]
 
     def _offset_seconds(self) -> int:
         """Auto-tuned delay after the grid boundary.
@@ -334,6 +355,7 @@ class ShmuDataUpdateCoordinator(DataUpdateCoordinator[ShmuData]):
             self.station.latitude,
             self.station.longitude,
             previous=previous.radar if previous else None,
+            tz=self.hass.config.time_zone,
         )
 
         observations, warnings, web, forecast, radar = await asyncio.gather(

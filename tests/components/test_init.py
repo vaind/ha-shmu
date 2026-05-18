@@ -15,10 +15,12 @@ from custom_components.shmu.const import CONF_IND_KLI, DOMAIN
 from custom_components.shmu.shmu_opendata import (
     ForecastSnapshot,
     ObservationSnapshot,
+    RadarFrame,
     RadarSnapshot,
     WarningsSnapshot,
     WebConditionsSnapshot,
 )
+from custom_components.shmu.shmu_opendata.client import _frame_label, _radar_snapshot
 from custom_components.shmu.shmu_opendata.forecast import grid_index, parse_forecast
 from custom_components.shmu.shmu_opendata.parsers import (
     parse_cap_alert,
@@ -85,15 +87,24 @@ class _FakeClient:
         )
 
     async def async_get_radar(
-        self, latitude, longitude, *, product="zmax", previous=None
+        self, latitude, longitude, *, product="zmax", previous=None, tz=None
     ) -> RadarSnapshot:
-        return RadarSnapshot(
-            image=render_radar(self._load("radar_zmax.hdf"), latitude, longitude),
-            product=product,
-            source="test-run/20260517/T_PABV22_C_LZIB_20260517202000.hdf",
-            valid_at=datetime(2026, 5, 17, 20, 20, tzinfo=UTC),
-            fetched_at=datetime.now(UTC),
-        )
+        frames = []
+        for m in ("10", "15", "20"):
+            valid_at = datetime(2026, 5, 17, 20, int(m), tzinfo=UTC)
+            frames.append(
+                RadarFrame(
+                    image=render_radar(
+                        self._load("radar_zmax.hdf"),
+                        latitude,
+                        longitude,
+                        label=_frame_label(valid_at, tz),
+                    ),
+                    source=f"test-run/20260517/T_PABV22_C_LZIB_2026051720{m}00.hdf",
+                    valid_at=valid_at,
+                )
+            )
+        return _radar_snapshot(frames, product)
 
 
 @pytest.fixture

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import itertools
 import struct
 import zlib
 
@@ -13,8 +14,16 @@ from custom_components.shmu.shmu_opendata.odim import read_odim
 from custom_components.shmu.shmu_opendata.radar import (
     _IDX_BORDER,
     _IDX_DOT,
+    _IDX_LABEL_BG,
     _N_DBZ,
+    RadarImage,
+    _draw_label,
+    _draw_progress,
+    _filtered_zstream,
+    _label_scale,
     _palette,
+    _rows_from_zstream,
+    encode_apng,
     render_radar,
 )
 
@@ -60,9 +69,9 @@ def test_renders_valid_cropped_indexed_png(fixture) -> None:
     assert colour_type == 3  # palette
     assert chunks[b"tRNS"] == b"\x00"  # only index 0 is transparent
     assert b"IEND" in chunks
-    # Palette = transparent + dBZ ramp + border + marker ring + marker dot.
-    assert len(chunks[b"PLTE"]) == (1 + _N_DBZ + 3) * 3
-    assert len(_palette()) == (1 + _N_DBZ + 3) * 3
+    # Palette = transparent + dBZ ramp + border + ring + dot + label bg.
+    assert len(chunks[b"PLTE"]) == (1 + _N_DBZ + 4) * 3
+    assert len(_palette()) == (1 + _N_DBZ + 4) * 3
     # Cropped to the station vicinity, so smaller than the 64x48 fixture grid.
     assert 0 < img.width < 64
     assert 0 < img.height < 48
@@ -127,3 +136,168 @@ def test_unsupported_product_raises_loudly(fixture) -> None:
 def test_non_hdf5_payload_raises() -> None:
     with pytest.raises(ShmuDataError):
         render_radar(b"not an hdf5 file at all", _LAT, _LON)
+
+
+def _ordered_chunks(png: bytes) -> list[tuple[bytes, bytes]]:
+    """Every chunk in file order (APNG repeats ``fcTL``/``fdAT``)."""
+    assert png[:8] == _PNG_SIG
+    chunks: list[tuple[bytes, bytes]] = []
+    pos = 8
+    while pos < len(png):
+        (length,) = struct.unpack_from(">I", png, pos)
+        tag = png[pos + 4 : pos + 8]
+        chunks.append((tag, png[pos + 8 : pos + 8 + length]))
+        pos += 12 + length
+    return chunks
+
+
+def test_encode_apng_assembles_a_valid_animation(fixture) -> None:
+    frame = render_radar(fixture("radar_zmax.hdf"), _LAT, _LON)
+    apng = encode_apng([frame, frame, frame])
+
+    chunks = _ordered_chunks(apng)
+    tags = [t for t, _ in chunks]
+    # APNG control chunks precede the first frame; IEND closes the file.
+    assert tags[:4] == [b"IHDR", b"PLTE", b"tRNS", b"acTL"]
+    assert tags[-1] == b"IEND"
+
+    payload = dict(chunks)
+    num_frames, num_plays = struct.unpack(">II", payload[b"acTL"])
+    assert num_frames == 3
+    assert num_plays == 0  # 0 == loop forever
+
+    assert tags.count(b"fcTL") == 3
+    assert tags.count(b"IDAT") == 1  # frame 0 is a plain IDAT
+    assert tags.count(b"fdAT") == 2  # frames 1.. are fdAT
+    # The single shared sequence counter is contiguous from 0.
+    seqs = [
+        struct.unpack_from(">I", body)[0]
+        for tag, body in chunks
+        if tag in (b"fcTL", b"fdAT")
+    ]
+    assert seqs == [0, 1, 2, 3, 4]
+    # Each frame spans the whole canvas (size matches IHDR).
+    iw, ih = struct.unpack(">II", payload[b"IHDR"][:8])
+    for tag, body in chunks:
+        if tag == b"fcTL":
+            _seq, w, h, x, y = struct.unpack_from(">IIIII", body)
+            assert (w, h, x, y) == (iw, ih, 0, 0)
+
+
+def test_encode_apng_single_frame_degrades_to_one_frame(fixture) -> None:
+    frame = render_radar(fixture("radar_zmax.hdf"), _LAT, _LON)
+    apng = encode_apng([frame])
+    chunks = _ordered_chunks(apng)
+    tags = [t for t, _ in chunks]
+    assert dict(chunks)[b"acTL"][:4] == struct.pack(">I", 1)  # num_frames == 1
+    assert tags.count(b"fcTL") == 1
+    assert tags.count(b"fdAT") == 0
+    assert tags.count(b"IDAT") == 1
+
+
+def test_encode_apng_rejects_empty() -> None:
+    with pytest.raises(ShmuDataError, match="zero frames"):
+        encode_apng([])
+
+
+def test_encode_apng_rejects_mismatched_frame_sizes(fixture) -> None:
+    data = fixture("radar_zmax.hdf")
+    small = render_radar(data, _LAT, _LON, radius_km=60.0)
+    large = render_radar(data, _LAT, _LON, radius_km=150.0)
+    assert (small.width, small.height) != (large.width, large.height)
+    with pytest.raises(ShmuDataError, match="differ in size"):
+        encode_apng([small, large])
+
+
+def test_timestamp_label_is_stamped_and_distinguishes_frames(fixture) -> None:
+    data = fixture("radar_zmax.hdf")
+    plain = render_radar(data, _LAT, _LON)
+    # Leading digit differs so the change is visible even on the trimmed
+    # fixture crop (a long stamp's tail is clipped on such a tiny grid).
+    a = render_radar(data, _LAT, _LON, label="2026-05-18 17:20")
+    b = render_radar(data, _LAT, _LON, label="1026-05-18 17:20")
+
+    # The stamp adds its opaque swatch; the unlabeled frame has none.
+    assert _IDX_LABEL_BG in _indexed_pixels(a.png, _png_chunks(a.png))
+    assert _IDX_LABEL_BG not in _indexed_pixels(plain.png, _png_chunks(plain.png))
+    # A different timestamp -> different pixels, so a viewer can tell the
+    # loop's frames apart while it plays.
+    assert a.png != b.png
+    assert (a.width, a.height) == (plain.width, plain.height)
+
+
+def test_rows_from_zstream_round_trips(fixture) -> None:
+    img = render_radar(fixture("radar_zmax.hdf"), _LAT, _LON)
+    rows = _rows_from_zstream(img.zstream, img.width, img.height)
+    assert len(rows) == img.height
+    assert all(len(r) == img.width for r in rows)
+    # Deterministic level-6 deflate: re-packing the exact rows reproduces it.
+    assert _filtered_zstream(rows) == img.zstream
+
+
+def _frame_streams(apng: bytes) -> list[bytes]:
+    """Per-frame pixel zstream of each APNG frame (fdAT drops its 4B seq)."""
+    out: list[bytes] = []
+    for tag, body in _ordered_chunks(apng):
+        if tag == b"IDAT":
+            out.append(body)
+        elif tag == b"fdAT":
+            out.append(body[4:])
+    return out
+
+
+def _blank_image(w: int, h: int) -> RadarImage:
+    z = _filtered_zstream([bytearray(w) for _ in range(h)])
+    return RadarImage(
+        png=b"",
+        width=w,
+        height=h,
+        south=0.0,
+        west=0.0,
+        north=1.0,
+        east=1.0,
+        center_lat=0.5,
+        center_lon=0.5,
+        product="MAX",
+        max_dbz=None,
+        zstream=z,
+    )
+
+
+def test_encode_apng_stamps_a_distinct_marker_state_per_frame() -> None:
+    # Full-size synthetic frame so the width-spread markers are not clipped
+    # (the trimmed fixture crop is far too small for that).
+    img = _blank_image(520, 90)
+    streams = _frame_streams(encode_apng([img, img, img]))
+    # Same scene each frame, yet every stream differs: encode_apng stamped a
+    # different step-marker state onto each.
+    assert len(streams) == 3
+    assert len(set(streams)) == 3
+
+
+def test_progress_markers_match_timestamp_width_and_grow() -> None:
+    # Big synthetic canvas so nothing is clipped (the trimmed fixture crop is
+    # far too small for a 16-char stamp at readable scale).
+    w, h, total = 520, 90, 12
+    assert _label_scale(w) == 2  # the real-image scale this exercises
+
+    label = [bytearray(w) for _ in range(h)]
+    _draw_label(label, w, h, "2026-05-18 20:35")
+    lbl_cols = [x for r in label for x in range(w) if r[x] == _IDX_DOT]
+
+    full = [bytearray(w) for _ in range(h)]
+    _draw_progress(full, w, h, total - 1, total)
+    pr_cols = [x for r in full for x in range(w) if r[x] == _IDX_DOT]
+
+    # The marker row starts and ends on exactly the same columns as the time
+    # text — i.e. it is as long as the time bar.
+    assert min(pr_cols) == min(lbl_cols)
+    assert max(pr_cols) == max(lbl_cols)
+
+    # Each step fills one more square, so the white pixel count strictly grows.
+    counts = []
+    for i in range(total):
+        c = [bytearray(w) for _ in range(h)]
+        _draw_progress(c, w, h, i, total)
+        counts.append(sum(r.count(_IDX_DOT) for r in c))
+    assert all(a < b for a, b in itertools.pairwise(counts))

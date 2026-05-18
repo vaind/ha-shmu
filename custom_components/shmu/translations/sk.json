@@ -45,7 +45,12 @@
       "weather_warning": { "name": "Meteorologická výstraha" }
     },
     "image": {
-      "radar": { "name": "Radar" }
+      "radar": { "name": "Radar" },
+      "radar_loop": { "name": "Radarová slučka" },
+      "radar_frame": { "name": "Snímka radaru" }
+    },
+    "number": {
+      "radar_frame": { "name": "Výber snímky radaru" }
     }
   }
 }
