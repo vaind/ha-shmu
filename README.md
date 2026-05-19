@@ -34,11 +34,54 @@ A Home Assistant integration for Slovak weather data published by the
 - **Weather warnings** — a binary sensor (with full alert details as
   attributes) that is on while a SHMÚ CAP alert covers your station, decided
   by the alert's own polygon.
+- **Radar** — the national reflectivity composite cropped to your station,
+  as a still image, an autoplaying ~1-hour loop, and a slider-scrubbable
+  frame (see [Radar](#radar)).
 - One shared, change-detecting fetch per cycle, aligned to SHMÚ's upstream
   UTC 5-minute publish grid with an offset that auto-tunes to the observed
   publish lag, so data is fresh rather than up to a poll-interval behind.
   A station that drops out of one snapshot keeps its last reading (no
   flicker) until it is genuinely stale.
+
+## Radar
+
+The SHMÚ national radar reflectivity composite (ODIM_H5, a new frame every
+~5 min), decoded in pure Python — no native dependency — and cropped to the
+vicinity of your configured station, with country borders and a station
+marker drawn on so the picture is self-locating. It is **national data**, so
+the radar entities stay available even if your station momentarily drops out
+of an observation snapshot. The colour ramp is reflectivity (rain/storm
+intensity); this is *not* cloud cover.
+
+Entities (grouped under the station device; `<station>` is your station's
+slug, e.g. `bratislava_letisko`):
+
+| Entity | What it shows |
+|---|---|
+| `image.<station>_radar` | The **latest** single frame. Attributes: `product`, `max_dbz` (peak reflectivity — a handy "is it raining?" signal), `center_*` and `bbox_*` for map overlays. |
+| `image.<station>_radar_loop` | An **autoplaying ~1-hour loop** (the last 12 frames, animated PNG). Every frame is stamped with its valid time in your Home Assistant timezone, plus a row of step markers under it that fills in across the hour and resets when the loop wraps. |
+| `image.<station>_radar_frame` | A **single buffered frame**, chosen by the scrubber below — for manually stepping through the loop. |
+| `number.<station>_radar_frame_selector` | The **scrubber** (slider). Reads like a timeline: `0` on the **right** is live/newest; drag **left** into the past — `-1` ≈ 5 min ago … down to `-(frames-1)` for the oldest buffered frame. |
+
+### Example dashboard card
+
+A plain Lovelace card — no custom frontend resources — pairing the
+scrubbable frame with its slider:
+
+```yaml
+type: vertical-stack
+cards:
+  - type: picture-entity
+    entity: image.<station>_radar_frame
+    show_state: false
+    show_name: false
+  - type: entities
+    entities:
+      - entity: number.<station>_radar_frame_selector
+```
+
+For a hands-off "just watch it move" view, use `image.<station>_radar_loop`
+in a plain `picture-entity` card instead — it animates on its own.
 
 ## Installation (HACS)
 
