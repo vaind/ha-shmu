@@ -1,0 +1,59 @@
+name: Release
+
+# Tag-triggered: the GitHub Release is published from the matching
+# CHANGELOG.md section, so the hand-curated changelog stays the single
+# source of truth. The job also fails fast if the tag and the bundled
+# manifest version disagree (HACS resolves the integration by tag, so a
+# mismatch would ship the wrong version string).
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Publish GitHub release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+
+      - name: Verify tag matches manifest version
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME#v}"
+          manifest="$(jq -r .version custom_components/shmu/manifest.json)"
+          if [ "$tag" != "$manifest" ]; then
+            echo "::error::Tag '${GITHUB_REF_NAME}' (=${tag}) != manifest version '${manifest}'. Bump custom_components/shmu/manifest.json before tagging."
+            exit 1
+          fi
+
+      - name: Extract release notes from CHANGELOG.md
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          awk -v h="## [${version}]" '
+            index($0, h) == 1 { flag = 1; next }
+            flag && /^## \[/ { exit }
+            flag && /^\[[^][]+\]: / { exit }
+            flag { print }
+          ' CHANGELOG.md | sed -e '/./,$!d' > release_notes.md
+          if [ ! -s release_notes.md ]; then
+            echo "::error::No CHANGELOG.md section for ${version}. Add a '## [${version}] - <date>' entry."
+            exit 1
+          fi
+          echo "----- release notes -----"
+          cat release_notes.md
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          gh release create "${GITHUB_REF_NAME}"
+          --repo "${GITHUB_REPOSITORY}"
+          --title "${GITHUB_REF_NAME}"
+          --notes-file release_notes.md
+          --verify-tag
