@@ -57,17 +57,21 @@ class ShmuRadarFrameNumber(ShmuRadarEntity, NumberEntity):
         radar = self.coordinator.data.radar
         return 0 if radar is None else len(radar.frames)
 
+    def _max_back(self) -> int:
+        """Largest valid "frames back" offset (oldest buffered frame)."""
+        return max(0, self._frame_count() - 1)
+
     @property
     def native_min_value(self) -> float:
         """Oldest selectable position = minus (buffered frame count - 1)."""
-        return float(-max(0, self._frame_count() - 1))
+        return float(-self._max_back())
 
     @property
     def native_value(self) -> float | None:
         """Current position as a signed offset (0 = live, negative = older)."""
         if self._frame_count() == 0:
             return None
-        back = max(0, min(self.coordinator.radar_frame_offset, self._frame_count() - 1))
+        back = max(0, min(self.coordinator.radar_frame_offset, self._max_back()))
         return float(-back)
 
     @property
@@ -87,8 +91,5 @@ class ShmuRadarFrameNumber(ShmuRadarEntity, NumberEntity):
         listeners is what makes the ``radar_frame`` image refetch: its
         ``image_last_updated`` follows the newly selected frame.
         """
-        count = self._frame_count()
-        self.coordinator.radar_frame_offset = max(
-            0, min(-int(value), count - 1 if count else 0)
-        )
+        self.coordinator.radar_frame_offset = max(0, min(-int(value), self._max_back()))
         self.coordinator.async_update_listeners()
