@@ -11,7 +11,7 @@ repeated here**. `CLAUDE.md` is a symlink to this file for tool compatibility.
 
 ## Markdown: don't hard-wrap prose
 
-Write Markdown prose one sentence (or list item) per line — do **not** wrap it to a column width. The ~80-col limit is a *code* convention; applying it to Markdown splits real sentences, and GitHub renders single newlines in release notes / issue / PR bodies as hard line breaks. `CHANGELOG.md` is the live example: `release.yml` feeds its `## [x.y.z]` section verbatim into the GitHub Release, so column-wrapped entries show ragged mid-sentence breaks in the published notes. Let lines run long; wrap only between sentences if at all.
+Write Markdown prose one sentence (or list item) per line — do **not** wrap it to a column width. Line-length limits apply to *code* only (enforced by `ruff`; the value lives in `pyproject.toml` — don't infer a number from this note or apply it to prose). Column-wrapping Markdown splits real sentences, and GitHub renders single newlines in release notes / issue / PR bodies as hard line breaks. `CHANGELOG.md` is the live example: `release.yml` feeds its `## [x.y.z]` section verbatim into the GitHub Release, so column-wrapped entries show ragged mid-sentence breaks in the published notes. Let lines run long; wrap only between sentences if at all.
 
 ## The rule specific to this data source
 
