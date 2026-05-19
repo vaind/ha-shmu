@@ -32,17 +32,21 @@ async def async_setup_entry(
 
 
 class ShmuRadarFrameNumber(ShmuRadarEntity, NumberEntity):
-    """Slider selecting how many frames back from live the radar shows.
+    """Slider selecting which buffered radar frame the image shows.
 
-    ``0`` is the latest frame (so the default matches the still image and
-    stays meaningful as the buffer rotates); the maximum tracks the number of
-    buffered frames so the slider spans exactly what is available.
+    Reads like a timeline: **``0`` (rightmost) is live/newest**, negative
+    values step back into the past (``-1`` = 5 min ago … ``-(N-1)`` = oldest
+    on the left). The default ``0`` matches the still image and stays
+    meaningful as the buffer rotates; the minimum tracks the buffered frame
+    count so the slider spans exactly what is available. Internally the
+    coordinator keeps a non-negative "frames back" offset; this entity is the
+    signed, timeline-oriented face of it.
     """
 
     _attr_translation_key = "radar_frame"
     _unique_id_suffix = "radar_frame"
     _attr_mode = NumberMode.SLIDER
-    _attr_native_min_value = 0
+    _attr_native_max_value = 0
     _attr_native_step = 1
 
     def __init__(self, coordinator: ShmuDataUpdateCoordinator) -> None:
@@ -54,18 +58,17 @@ class ShmuRadarFrameNumber(ShmuRadarEntity, NumberEntity):
         return 0 if radar is None else len(radar.frames)
 
     @property
-    def native_max_value(self) -> float:
-        """Oldest selectable offset = buffered frame count minus one."""
-        return float(max(0, self._frame_count() - 1))
+    def native_min_value(self) -> float:
+        """Oldest selectable position = minus (buffered frame count - 1)."""
+        return float(-max(0, self._frame_count() - 1))
 
     @property
     def native_value(self) -> float | None:
-        """The current offset, clamped to what the buffer currently holds."""
+        """Current position as a signed offset (0 = live, negative = older)."""
         if self._frame_count() == 0:
             return None
-        return float(
-            max(0, min(self.coordinator.radar_frame_offset, self._frame_count() - 1))
-        )
+        back = max(0, min(self.coordinator.radar_frame_offset, self._frame_count() - 1))
+        return float(-back)
 
     @property
     def extra_state_attributes(self) -> dict[str, str | int | None]:
@@ -79,12 +82,13 @@ class ShmuRadarFrameNumber(ShmuRadarEntity, NumberEntity):
     async def async_set_native_value(self, value: float) -> None:
         """Move the scrubber and re-render the selectable-frame image.
 
-        Notifying the coordinator's listeners is what makes the
-        ``radar_frame`` image refetch: its ``image_last_updated`` follows the
-        newly selected frame.
+        The signed slider value is folded back to the coordinator's
+        non-negative "frames back" offset. Notifying the coordinator's
+        listeners is what makes the ``radar_frame`` image refetch: its
+        ``image_last_updated`` follows the newly selected frame.
         """
         count = self._frame_count()
         self.coordinator.radar_frame_offset = max(
-            0, min(int(value), count - 1 if count else 0)
+            0, min(-int(value), count - 1 if count else 0)
         )
         self.coordinator.async_update_listeners()
