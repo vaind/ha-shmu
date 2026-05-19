@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 256">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2d83f0"/>
+      <stop offset="1" stop-color="#0a3a86"/>
+    </linearGradient>
+    <linearGradient id="cloud" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#e3edff"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="256" height="256" rx="58" fill="url(#sky)"/>
+  <g transform="scale(0.5)">
+    <g transform="translate(0,-18)">
+      <g fill="none" stroke="#86d5ff" stroke-linecap="round">
+        <path d="M196 338 Q 256 380 316 338" stroke-width="18" opacity="0.85"/>
+        <path d="M168 360 Q 256 416 344 360" stroke-width="16" opacity="0.55"/>
+        <path d="M144 382 Q 256 448 368 382" stroke-width="14" opacity="0.35"/>
+      </g>
+      <g fill="url(#cloud)">
+        <circle cx="206" cy="222" r="58"/>
+        <circle cx="292" cy="190" r="80"/>
+        <circle cx="356" cy="236" r="54"/>
+        <rect x="150" y="230" width="232" height="80" rx="40"/>
+      </g>
+    </g>
+  </g>
+  <text x="312" y="176" font-family="'Helvetica Neue',Helvetica,Arial,sans-serif" font-size="132" font-weight="700" fill="#eef4ff">SHM&#xDA; Weather</text>
+</svg>

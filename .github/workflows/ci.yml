@@ -59,7 +59,10 @@ jobs:
         uses: hacs/action@dcb30e72781db3f207d5236b861172774ab0b485 # main
         with:
           category: integration
-          # 'brands' can never pass here: it requires registration in
-          # home-assistant/brands, which only happens on HACS-default/HA-core
-          # submission, and this is an unpublished custom repo by design.
+          # home-assistant/brands no longer accepts custom-component PRs
+          # (HA 2026.3 Brands Proxy API, 2026-02-24): icons now ship in
+          # custom_components/shmu/brand/ and HA serves them locally. The
+          # HACS Action's 'brands' check still queries the brands CDN,
+          # which has no entry for a bundled custom repo, so it stays
+          # ignored rather than failing on an obsolete requirement.
           ignore: brands

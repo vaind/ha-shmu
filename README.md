@@ -6,9 +6,8 @@ A Home Assistant integration for Slovak weather data published by the
 [![CI](https://github.com/vaind/ha-shmu/actions/workflows/ci.yml/badge.svg)](https://github.com/vaind/ha-shmu/actions/workflows/ci.yml)
 [![HACS: Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://hacs.xyz/)
 
-> **Status: Phase 2.** Current conditions, weather warnings, **and the
-> ALADIN/SHMÚ daily & hourly forecast** (decoded from GRIB2 in pure Python —
-> no native dependency).
+> Current conditions, weather warnings, and the ALADIN/SHMÚ daily & hourly
+> forecast — decoded from GRIB2 in pure Python, with no native dependency.
 
 ## ⚠️ Disclaimer
 
@@ -16,8 +15,6 @@ A Home Assistant integration for Slovak weather data published by the
   developed by, endorsed by, or supported by the Slovak Hydrometeorological
   Institute (SHMÚ)** in any way. "SHMÚ" is used only to identify the data
   source.
-- This is an **early version** under active development. Behaviour, entity
-  names and data may change without notice between releases.
 - The integration reads data from public SHMÚ endpoints that have no stable
   API contract; it can break if SHMÚ changes them.
 - Provided **"as is", without warranty of any kind. Use at your own risk.**
