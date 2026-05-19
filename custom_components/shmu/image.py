@@ -19,11 +19,28 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from .coordinator import ShmuConfigEntry, ShmuDataUpdateCoordinator
 from .entity import ShmuRadarEntity
+from .shmu_opendata import RadarImage
 
 # Coordinator-only entity: all I/O is the shared coordinator's, none per
 # entity. Matches the other SHMÚ platforms / the integration's
 # `parallel-updates: done` convention.
 PARALLEL_UPDATES = 0
+
+
+def _geo_extent(img: RadarImage) -> dict[str, float]:
+    """The frame's centre + WGS84 bounding box, for map-overlay attributes.
+
+    Shared by every radar image entity so the attribute keys/values can never
+    drift between the still, loop and scrubbed-frame pictures.
+    """
+    return {
+        "center_latitude": img.center_lat,
+        "center_longitude": img.center_lon,
+        "bbox_south": img.south,
+        "bbox_west": img.west,
+        "bbox_north": img.north,
+        "bbox_east": img.east,
+    }
 
 
 async def async_setup_entry(
@@ -85,12 +102,7 @@ class ShmuRadarImage(_ShmuRadarImageBase):
             "product": radar.product,
             "source": radar.source,
             "max_dbz": img.max_dbz,
-            "center_latitude": img.center_lat,
-            "center_longitude": img.center_lon,
-            "bbox_south": img.south,
-            "bbox_west": img.west,
-            "bbox_north": img.north,
-            "bbox_east": img.east,
+            **_geo_extent(img),
         }
 
     async def async_image(self) -> bytes | None:
@@ -122,12 +134,7 @@ class ShmuRadarLoopImage(_ShmuRadarImageBase):
             "frame_count": len(radar.frames),
             "loop_start": radar.frames[0].valid_at.isoformat(),
             "loop_end": radar.frames[-1].valid_at.isoformat(),
-            "center_latitude": img.center_lat,
-            "center_longitude": img.center_lon,
-            "bbox_south": img.south,
-            "bbox_west": img.west,
-            "bbox_north": img.north,
-            "bbox_east": img.east,
+            **_geo_extent(img),
         }
 
     async def async_image(self) -> bytes | None:
@@ -161,18 +168,12 @@ class ShmuRadarFrameImage(_ShmuRadarImageBase):
         frame = self.coordinator.selected_radar_frame()
         if radar is None or frame is None:
             return {}
-        img = frame.image
         return {
             "product": radar.product,
             "frame_offset": self.coordinator.radar_frame_offset,
             "frame_count": len(radar.frames),
             "valid_at": frame.valid_at.isoformat(),
-            "center_latitude": img.center_lat,
-            "center_longitude": img.center_lon,
-            "bbox_south": img.south,
-            "bbox_west": img.west,
-            "bbox_north": img.north,
-            "bbox_east": img.east,
+            **_geo_extent(frame.image),
         }
 
     async def async_image(self) -> bytes | None:

@@ -121,13 +121,6 @@ _LABEL_PAD = 2
 #: the time text's width without the renderer knowing the actual string.
 _STAMP_LEN = 16
 
-#: Loop progress: a row of small squares under the timestamp, one per frame,
-#: solid up to the current frame and hollow after — so while the APNG rolls
-#: forever you can see where "now" sits in the shown hour and when it resets.
-#: Sitting on the same dark label swatch (white markers) keeps it readable
-#: over any background, unlike a bottom bar that vanished on dark map areas.
-#: Both colours reuse existing palette entries (no palette growth).
-
 
 @dataclass(frozen=True, slots=True)
 class RadarImage:
@@ -299,7 +292,9 @@ def _draw_progress(
     so the forever-rolling loop shows where "now" is and snaps back on wrap.
     Squares are spread evenly so the first/last align with the time text's
     ends. White-on-dark stays visible over any background; everything is
-    clipped, so a tiny crop degrades gracefully.
+    clipped, so a tiny crop degrades gracefully. It rides the timestamp's
+    dark swatch rather than a bottom bar, which vanished on dark map areas,
+    and reuses the existing label/dot palette entries (no palette growth).
     """
     scale = _label_scale(w)
     pad = _LABEL_PAD * scale
@@ -314,13 +309,11 @@ def _draw_progress(
     span = track - sq  # first square at 0, last ending flush at `track`
     for k in range(total):
         x = mx + (round(k * span / (total - 1)) if total > 1 else 0)
-        if k <= index:
-            _fill_rect(rows, w, h, x, my, sq, sq, _IDX_DOT)  # reached: solid
-        elif sq >= 2:
-            _fill_rect(rows, w, h, x, my, sq, sq, _IDX_DOT)  # outline...
+        _fill_rect(rows, w, h, x, my, sq, sq, _IDX_DOT)
+        # Unreached squares are hollowed to an outline (only when the square
+        # is big enough to have an interior; below that they stay solid).
+        if k > index and sq >= 2:
             _fill_rect(rows, w, h, x + 1, my + 1, sq - 2, sq - 2, _IDX_LABEL_BG)
-        else:
-            _fill_rect(rows, w, h, x, my, sq, sq, _IDX_DOT)
 
 
 def _dbz_to_index(dbz: float) -> int:
