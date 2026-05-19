@@ -23,17 +23,24 @@ A Home Assistant integration for Slovak weather data published by the
 
 ## Screenshots
 
-**Weather entity — current conditions, attributes and the daily / hourly
-forecast:**
+<table>
+<tr>
+<td align="center" width="50%">
 
-![SHMÚ Weather entity card for Bratislava – Koliba: Sunny 14.3 °C, air
-pressure, humidity, wind speed, visibility, and a five-day forecast](docs/weather-card.png)
+<img src="docs/weather-card.png" width="100%" alt="SHMÚ Weather entity card for Bratislava – Koliba: Sunny 14.3 °C with air pressure, humidity, wind speed, visibility and a five-day forecast">
 
-**Radar — the national reflectivity composite cropped to your station, with
-country borders and a station marker:**
+<sub>**Weather entity** — current conditions, attributes & the daily / hourly forecast</sub>
 
-![SHMÚ national radar reflectivity composite, cropped to the station vicinity
-with country borders and a station marker overlay](docs/radar.png)
+</td>
+<td align="center" width="50%">
+
+<img src="docs/radar.png" width="100%" alt="SHMÚ national radar reflectivity composite cropped to the station vicinity, with country borders and a station marker">
+
+<sub>**Radar** — national reflectivity composite cropped to your station</sub>
+
+</td>
+</tr>
+</table>
 
 ## Features
 
