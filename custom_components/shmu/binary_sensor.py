@@ -42,8 +42,12 @@ class ShmuWarningBinarySensor(ShmuStationEntity, BinarySensorEntity):
 
     @property
     def available(self) -> bool:
-        """Available whenever the coordinator has data (independent of obs)."""
-        return self.coordinator.last_update_success
+        """Available while a recent successful fetch backs the cached warnings.
+
+        Independent of the station's reading, but still gated on a recent
+        coordinator success so a multi-cycle outage eventually surfaces.
+        """
+        return self.coordinator.has_recent_success
 
     @property
     def is_on(self) -> bool:

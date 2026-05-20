@@ -4,6 +4,12 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- Entities now ride out a brief upstream blip instead of flipping every value to *Unavailable* the moment a single poll fails. Last good readings, warnings and radar frames are served for up to `OBSERVATION_STALE_AFTER` (30 minutes) after the most recent successful fetch; the diagnostics dump still shows `last_update_success`, `last_update` and `failures_since_success` for visibility, and a multi-cycle outage tips entities to unavailable as before.
+
 ## [0.5.1] - 2026-05-19
 
 ### Changed

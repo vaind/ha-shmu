@@ -217,6 +217,19 @@ class ShmuDataUpdateCoordinator(DataUpdateCoordinator[ShmuData]):
         return self._failures_since_success
 
     @property
+    def has_recent_success(self) -> bool:
+        """Whether the last successful update is still within the freshness window.
+
+        Drives entity availability so a single failed cycle does not blank the
+        UI: cached supplementary data (warnings, radar) is shown for up to
+        ``OBSERVATION_STALE_AFTER`` after the last good fetch. Only a genuine
+        multi-cycle outage tips entities to *unavailable*.
+        """
+        if self._last_success_at is None:
+            return False
+        return dt_util.utcnow() - self._last_success_at <= OBSERVATION_STALE_AFTER
+
+    @property
     def next_refresh_at(self) -> datetime | None:
         """When the next grid-aligned refresh is scheduled (UTC)."""
         return self._next_refresh_at
@@ -328,6 +341,23 @@ class ShmuDataUpdateCoordinator(DataUpdateCoordinator[ShmuData]):
             self._last_observation_at = self._last_success_at
         self._log_station_presence(data)
         return data
+
+    async def _async_refresh(self, *args: object, **kwargs: object) -> None:
+        """Refresh data, then force-notify on consecutive failures.
+
+        ``DataUpdateCoordinator._async_refresh`` early-returns without
+        notifying listeners when both this and the previous cycle failed,
+        because it assumes availability flips on the success boundary. Our
+        entities stay available *during* the freshness window after a failure
+        (see :attr:`has_recent_success` and ``observation``) and need to flip
+        to *unavailable* once that window expires — so each polling cycle
+        must give them a chance to re-evaluate, even when the success state
+        has not toggled.
+        """
+        previous_success = self.last_update_success
+        await super()._async_refresh(*args, **kwargs)  # type: ignore[misc]
+        if not self.last_update_success and not previous_success:
+            self.async_update_listeners()
 
     async def _fetch(self) -> ShmuData:
         previous = self.data
