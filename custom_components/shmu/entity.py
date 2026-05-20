@@ -41,8 +41,15 @@ class ShmuStationEntity(CoordinatorEntity[ShmuDataUpdateCoordinator]):
 
     @property
     def available(self) -> bool:
-        """Available while the (possibly carried-forward) reading is fresh."""
-        return super().available and self.observation is not None
+        """Available while a fresh (possibly carried-forward) reading is held.
+
+        Intentionally **does not** require ``last_update_success``: a single
+        failed poll would otherwise blank every entity. ``observation`` already
+        encodes the freshness window (``OBSERVATION_STALE_AFTER``), so we stay
+        available across transient blips and only flip to unavailable once the
+        reading is genuinely stale.
+        """
+        return self.observation is not None
 
 
 class ShmuRadarEntity(ShmuStationEntity):
@@ -66,8 +73,15 @@ class ShmuRadarEntity(ShmuStationEntity):
 
     @property
     def available(self) -> bool:
-        """Available while a radar frame is held — independent of the station."""
+        """Available while a recent radar frame is held — independent of the station.
+
+        Uses :attr:`ShmuDataUpdateCoordinator.has_recent_success` (not
+        ``last_update_success``) so a single failed poll does not blank the
+        radar: the cached frame is shown for up to ``OBSERVATION_STALE_AFTER``
+        after the last good fetch.
+        """
         return (
-            self.coordinator.last_update_success
+            self.coordinator.has_recent_success
+            and self.coordinator.data is not None
             and self.coordinator.data.radar is not None
         )
