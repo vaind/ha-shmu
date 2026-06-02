@@ -30,6 +30,10 @@
       "ground_temperature": { "name": "Ground temperature" },
       "global_radiation": { "name": "Global radiation" },
       "weather_code": { "name": "Weather code" },
+      "observation_released": { "name": "Observation released" },
+      "observation_fetched": { "name": "Observation fetched" },
+      "forecast_run": { "name": "Forecast model run" },
+      "forecast_fetched": { "name": "Forecast fetched" },
       "warning_level": {
         "name": "Warning level",
         "state": {
