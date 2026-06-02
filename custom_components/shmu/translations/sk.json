@@ -30,6 +30,10 @@
       "ground_temperature": { "name": "Prízemná teplota" },
       "global_radiation": { "name": "Globálne žiarenie" },
       "weather_code": { "name": "Kód počasia" },
+      "observation_released": { "name": "Meranie zverejnené" },
+      "observation_fetched": { "name": "Meranie stiahnuté" },
+      "forecast_run": { "name": "Beh predpovedného modelu" },
+      "forecast_fetched": { "name": "Predpoveď stiahnutá" },
       "warning_level": {
         "name": "Stupeň výstrahy",
         "state": {

@@ -4,6 +4,16 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Dataset-freshness diagnostic sensors: *Observation released* / *Observation fetched* and *Forecast model run* / *Forecast fetched*. They surface when the SHMÚ data currently in use was published upstream and when this integration fetched it, so a stale card can be told apart from a stalled poll.
+
+### Fixed
+
+- Hourly forecast no longer lists hours that have already elapsed. An ALADIN run is published from its reference time onward, so until the next run lands the raw step list begins several hours in the past; the hourly forecast is now trimmed to the current hour onward. Daily aggregation is unchanged and still summarises each whole calendar day.
+
 ## [0.5.2] - 2026-05-20
 
 ### Changed

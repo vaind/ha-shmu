@@ -167,8 +167,17 @@ class ShmuWeather(ShmuStationEntity, WeatherEntity):
         return snapshot.steps if snapshot is not None else []
 
     async def async_forecast_hourly(self) -> list[Forecast] | None:
-        """Per-hour ALADIN forecast at the station's grid point."""
-        steps = self._steps()
+        """Per-hour ALADIN forecast at the station's grid point.
+
+        Trimmed to the current hour onward. A run is published as forecast
+        hours 000-102 counted from its reference time, so the raw step list
+        begins at the run's start - up to several hours in the past until the
+        next run is published. The hourly card should not show elapsed hours,
+        so steps before the start of the current hour are dropped. Daily
+        forecasts keep the full set so today's high/low cover the whole day.
+        """
+        cutoff = dt_util.utcnow().replace(minute=0, second=0, microsecond=0)
+        steps = [step for step in self._steps() if step.time >= cutoff]
         if not steps:
             return None
         return [
