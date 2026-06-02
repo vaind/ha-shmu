@@ -24,7 +24,7 @@ class ShmuStationEntity(CoordinatorEntity[ShmuDataUpdateCoordinator]):
         self._station = station
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, str(station.ind_kli))},
-            name=station.name,
+            name=coordinator.device_name,
             manufacturer=MANUFACTURER,
             model="Synoptic station",
             entry_type=DeviceEntryType.SERVICE,

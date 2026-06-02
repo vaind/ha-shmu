@@ -51,13 +51,21 @@ class ShmuWarningBinarySensor(ShmuStationEntity, BinarySensorEntity):
 
     @property
     def is_on(self) -> bool:
-        """Whether any active warning covers the station."""
-        return bool(self.coordinator.data.active_warnings_for(self._station))
+        """Whether any active warning covers the measurement location."""
+        return bool(
+            self.coordinator.data.active_warnings_for(
+                self.coordinator.location_latitude,
+                self.coordinator.location_longitude,
+            )
+        )
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Details of the active warnings (worst severity first)."""
-        warnings = self.coordinator.data.active_warnings_for(self._station)
+        warnings = self.coordinator.data.active_warnings_for(
+            self.coordinator.location_latitude,
+            self.coordinator.location_longitude,
+        )
         return {
             "warning_count": len(warnings),
             "warnings": [

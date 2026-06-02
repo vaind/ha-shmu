@@ -9,6 +9,32 @@ DOMAIN: Final = "shmu"
 
 CONF_IND_KLI: Final = "ind_kli"
 
+#: Measurement-location config (the point used for the forecast, radar crop and
+#: warning relevance — *separate* from the observation station, which is always
+#: keyed by ``ind_kli``). Stored in ``entry.options`` so the options flow can
+#: edit it without re-adding the integration.
+CONF_LOCATION_MODE: Final = "location_mode"
+#: The :class:`LocationSelector` field; present only when the mode is custom.
+CONF_LOCATION: Final = "location"
+
+#: Track the observation station's own coordinates (the historical behaviour).
+LOCATION_MODE_STATION: Final = "station"
+#: Track Home Assistant's configured home coordinates. The value must **not**
+#: contain the substring ``"home"``: the mode is surfaced in diagnostics, which
+#: deliberately never leak the user's home location.
+LOCATION_MODE_HASS: Final = "hass"
+#: Track an explicit point the user picks on the map.
+LOCATION_MODE_CUSTOM: Final = "custom"
+
+#: All modes, in the order shown in the selector.
+LOCATION_MODES: Final = (
+    LOCATION_MODE_STATION,
+    LOCATION_MODE_HASS,
+    LOCATION_MODE_CUSTOM,
+)
+#: Absence of options (existing entries) resolves here, preserving behaviour.
+DEFAULT_LOCATION_MODE: Final = LOCATION_MODE_STATION
+
 #: SHMÚ publishes a new observation snapshot every 5 minutes, on the UTC
 #: 5-minute grid, finalised at the boundary. We poll on that same grid so we
 #: pick up each snapshot promptly instead of drifting up to ~5 min behind it.

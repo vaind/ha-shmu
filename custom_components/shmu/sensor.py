@@ -291,7 +291,10 @@ class ShmuWarningLevelSensor(ShmuStationEntity, SensorEntity):
     @property
     def native_value(self) -> str:
         """Return the worst active awareness level, or ``"none"``."""
-        warnings = self.coordinator.data.active_warnings_for(self._station)
+        warnings = self.coordinator.data.active_warnings_for(
+            self.coordinator.location_latitude,
+            self.coordinator.location_longitude,
+        )
         for level in ("red", "orange", "yellow", "green"):
             if any((w.awareness_level or "").lower() == level for w in warnings):
                 return level
