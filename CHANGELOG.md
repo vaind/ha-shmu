@@ -4,7 +4,7 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.6.0] - 2026-06-03
 
 ### Added
 
@@ -50,6 +50,7 @@ First public release.
 - Distributed via **HACS** (not Home Assistant core) by design: the current sky condition is read from the SHMÚ website because the open-data files carry no cloud information.
 - Home Assistant quality scale: **silver**.
 
+[0.6.0]: https://github.com/vaind/ha-shmu/releases/tag/v0.6.0
 [0.5.2]: https://github.com/vaind/ha-shmu/releases/tag/v0.5.2
 [0.5.1]: https://github.com/vaind/ha-shmu/releases/tag/v0.5.1
 [0.5.0]: https://github.com/vaind/ha-shmu/releases/tag/v0.5.0
