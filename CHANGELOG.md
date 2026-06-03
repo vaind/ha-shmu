@@ -12,13 +12,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **Name** — the device/entity name is now configurable at setup, defaulting to your Home Assistant location name (e.g. "Home") instead of always being the station name.
 - Dataset-freshness diagnostic sensors: *Observation released* / *Observation fetched* and *Forecast model run* / *Forecast fetched*. They surface when the SHMÚ data currently in use was published upstream and when this integration fetched it, so a stale card can be told apart from a stalled poll.
 
-### Changed
-
-- Diagnostics now coarsen the radar crop's centre/bounding box to ~0.1° so the dump can never pinpoint a private measurement location; the live radar image keeps full precision for map positioning.
-
 ### Fixed
 
 - Hourly forecast no longer lists hours that have already elapsed. An ALADIN run is published from its reference time onward, so until the next run lands the raw step list begins several hours in the past; the hourly forecast is now trimmed to the current hour onward. Daily aggregation is unchanged and still summarises each whole calendar day.
+- Diagnostics now coarsen the radar crop's centre/bounding box to ~0.1° so the dump can never pinpoint a private measurement location; the live radar image keeps full precision for map positioning.
 
 ## [0.5.2] - 2026-05-20
 
