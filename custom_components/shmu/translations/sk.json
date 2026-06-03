@@ -5,15 +5,53 @@
         "title": "Počasie SHMÚ",
         "description": "Neoficiálna integrácia — nie je spojená so SHMÚ ani ním schválená. Skorá verzia, použitie na vlastné riziko. Vyberte synoptickú stanicu SHMÚ; predvolená je stanica najbližšie k polohe vášho Home Assistant.",
         "data": {
-          "ind_kli": "Stanica"
+          "ind_kli": "Stanica",
+          "name": "Názov",
+          "location_mode": "Poloha merania"
         },
         "data_description": {
-          "ind_kli": "Synoptická stanica SHMÚ, z ktorej sa čítajú údaje o počasí. Ak chcete sledovať ďalšiu stanicu, pridajte túto integráciu znova — každá stanica je samostatné zariadenie."
+          "ind_kli": "Synoptická stanica SHMÚ, z ktorej sa čítajú aktuálne pozorovania. Ak chcete sledovať ďalšiu stanicu, pridajte túto integráciu znova — každá stanica je samostatné zariadenie.",
+          "name": "Názov tohto zariadenia a jeho entít (napr. „Domov“).",
+          "location_mode": "Bod použitý pre predpoveď, radar a výstrahy — nezávisle od pozorovacej stanice."
+        }
+      },
+      "custom": {
+        "title": "Vlastná poloha merania",
+        "description": "Vyberte bod použitý pre predpoveď, vycentrovanie radaru a relevantnosť výstrah.",
+        "data": {
+          "location": "Poloha"
         }
       }
     },
     "abort": {
       "already_configured": "Táto stanica je už nakonfigurovaná."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Počasie SHMÚ",
+        "description": "Zmeňte polohu merania použitú pre predpoveď, radar a výstrahy. Pozorovacia stanica je nemenná.",
+        "data": {
+          "location_mode": "Poloha merania"
+        }
+      },
+      "custom": {
+        "title": "Vlastná poloha merania",
+        "description": "Vyberte bod použitý pre predpoveď, vycentrovanie radaru a relevantnosť výstrah.",
+        "data": {
+          "location": "Poloha"
+        }
+      }
+    }
+  },
+  "selector": {
+    "location_mode": {
+      "options": {
+        "station": "Rovnaká ako stanica",
+        "hass": "Poloha Home Assistant",
+        "custom": "Vlastná poloha (mapa)"
+      }
     }
   },
   "entity": {

@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import CONF_LATITUDE, CONF_LONGITUDE, CONF_NAME
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
 from homeassistant.helpers.event import async_track_point_in_utc_time
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
@@ -23,7 +24,12 @@ from homeassistant.util import dt as dt_util
 
 from .const import (
     CONF_IND_KLI,
+    CONF_LOCATION,
+    CONF_LOCATION_MODE,
+    DEFAULT_LOCATION_MODE,
     DOMAIN,
+    LOCATION_MODE_CUSTOM,
+    LOCATION_MODE_HASS,
     OBSERVATION_STALE_AFTER,
     POLL_INTERVAL_MINUTES,
     POLL_OFFSET_MAX_SECONDS,
@@ -88,15 +94,20 @@ class ShmuData:
     forecast: ForecastSnapshot | None
     radar: RadarSnapshot | None
 
-    def active_warnings_for(self, station: Station) -> list[Warning]:
-        """Active warnings whose area covers the station, worst severity first."""
+    def active_warnings_for(self, latitude: float, longitude: float) -> list[Warning]:
+        """Active warnings whose area covers the point, worst severity first.
+
+        Takes the *measurement location* (not the station) so warning
+        relevance follows the configured point — they can differ once the user
+        picks a custom location or their HA home.
+        """
         if self.warnings is None:
             return []
         now = dt_util.utcnow()
         relevant = [
             w
             for w in self.warnings.warnings
-            if w.is_active(now) and w.covers(station.latitude, station.longitude)
+            if w.is_active(now) and w.covers(latitude, longitude)
         ]
         relevant.sort(key=lambda w: _SEVERITY_ORDER.get(w.severity, 0), reverse=True)
         return relevant
@@ -170,6 +181,20 @@ class ShmuDataUpdateCoordinator(DataUpdateCoordinator[ShmuData]):
         assert station is not None  # value comes from the fixed station list
         #: The configured station; platforms read this instead of re-resolving.
         self.station: Station = station
+        #: Device/entry label. Falls back to the station name for entries
+        #: created before the Name field existed (backward compatible).
+        self.device_name: str = config_entry.data.get(CONF_NAME, station.name)
+        #: Measurement-location mode (``station``/``hass``/``custom``) and the
+        #: resolved point used for the forecast, radar crop and warnings. The
+        #: observation lookup still uses the station's ``ind_kli``. A location
+        #: change is applied by reloading the entry (see ``__init__.py``), so
+        #: resolving once here is sufficient and keeps caches consistent.
+        self.location_mode: str = config_entry.options.get(
+            CONF_LOCATION_MODE, DEFAULT_LOCATION_MODE
+        )
+        self.location_latitude, self.location_longitude = self._resolve_location(
+            hass, config_entry
+        )
         #: Tracks station-presence so we log only on transitions, not every poll.
         self._station_present = True
         #: Last reading we saw for the station and when we obtained it; served
@@ -191,6 +216,34 @@ class ShmuDataUpdateCoordinator(DataUpdateCoordinator[ShmuData]):
         #: number entity, read by the selectable-frame image; runtime-only,
         #: roll-stable (0 always = the latest frame as the buffer rotates).
         self.radar_frame_offset: int = 0
+
+    def _resolve_location(
+        self, hass: HomeAssistant, config_entry: ShmuConfigEntry
+    ) -> tuple[float, float]:
+        """Resolve the measurement point from the configured mode.
+
+        ``hass`` uses Home Assistant's home coordinates; ``custom`` uses the
+        point the user picked. Anything else — including the default, a missing
+        mode, or a malformed custom point — falls back to the station's own
+        coordinates, so the integration can never fail to produce a location.
+
+        Resolved once, at construction. In ``hass`` mode this snapshots HA's
+        home location: if the user later moves it, the measurement point only
+        updates when the entry reloads (which the options flow forces anyway).
+        This matches the deliberate "resolve once" design — the forecast/radar
+        caches key on the upstream file path, so live re-resolution would be
+        ignored until a reload regardless.
+        """
+        options = config_entry.options
+        if self.location_mode == LOCATION_MODE_HASS:
+            return hass.config.latitude, hass.config.longitude
+        if self.location_mode == LOCATION_MODE_CUSTOM:
+            location = options.get(CONF_LOCATION) or {}
+            latitude = location.get(CONF_LATITUDE)
+            longitude = location.get(CONF_LONGITUDE)
+            if latitude is not None and longitude is not None:
+                return latitude, longitude
+        return self.station.latitude, self.station.longitude
 
     @property
     def observation(self) -> Observation | None:
@@ -374,16 +427,16 @@ class ShmuDataUpdateCoordinator(DataUpdateCoordinator[ShmuData]):
         # (~4x/day), so running this every observation cycle does not increase
         # the heavy request rate — same identity-cache idea as observations.
         forecast_coro = self._client.async_get_forecast(
-            self.station.latitude,
-            self.station.longitude,
+            self.location_latitude,
+            self.location_longitude,
             previous=previous.forecast if previous else None,
         )
         # Radar discovery is a small listing too; the ~0.3 MB ODIM frame is
         # re-fetched only when a new composite is published (its path is the
         # cache key) — same identity-cache idea as observations.
         radar_coro = self._client.async_get_radar(
-            self.station.latitude,
-            self.station.longitude,
+            self.location_latitude,
+            self.location_longitude,
             previous=previous.radar if previous else None,
             tz=self.hass.config.time_zone,
         )

@@ -18,6 +18,17 @@ from . import shmu_opendata
 from .const import POLL_INTERVAL_MINUTES
 from .coordinator import ShmuConfigEntry
 
+#: Coordinates derived from the measurement location (the radar crop) are
+#: coarsened to ~0.1° (~11 km) in diagnostics so the dump can never pinpoint a
+#: user's private home/custom point, while still showing roughly where the crop
+#: sits (see the module docstring's no-home-coordinates rule).
+_COORD_PRECISION = 1
+
+
+def _coarse(value: float) -> float:
+    """Round a coordinate to grid-scale precision for privacy."""
+    return round(value, _COORD_PRECISION)
+
 
 async def async_get_config_entry_diagnostics(
     hass: HomeAssistant, entry: ShmuConfigEntry
@@ -58,6 +69,9 @@ async def async_get_config_entry_diagnostics(
             if coordinator.next_refresh_at
             else None,
             "failures_since_success": coordinator.failures_since_success,
+            # Mode only — never the resolved home/custom coordinates, which are
+            # the user's private location (see module docstring).
+            "location_mode": coordinator.location_mode,
             "poll": f"UTC */{POLL_INTERVAL_MINUTES}min, auto-tuned offset",
             "last_exception": repr(coordinator.last_exception)
             if coordinator.last_exception
@@ -113,12 +127,17 @@ async def async_get_config_entry_diagnostics(
             "selected_offset": coordinator.radar_frame_offset,
             "size": [radar.image.width, radar.image.height],
             "max_dbz": radar.image.max_dbz,
-            "center": [radar.image.center_lat, radar.image.center_lon],
+            # Coarsened: the crop is centred on the measurement location, which
+            # may be the user's home (see ``_coarse``).
+            "center": [
+                _coarse(radar.image.center_lat),
+                _coarse(radar.image.center_lon),
+            ],
             "bbox": [
-                radar.image.south,
-                radar.image.west,
-                radar.image.north,
-                radar.image.east,
+                _coarse(radar.image.south),
+                _coarse(radar.image.west),
+                _coarse(radar.image.north),
+                _coarse(radar.image.east),
             ],
         },
         "warnings": None
@@ -127,7 +146,7 @@ async def async_get_config_entry_diagnostics(
             "source": data.warnings.source,
             "fetched_at": data.warnings.fetched_at.isoformat(),
             "total_parsed": len(data.warnings.warnings),
-            "active_for_station": [
+            "active_for_location": [
                 {
                     "event": w.event,
                     "severity": w.severity,
@@ -137,7 +156,9 @@ async def async_get_config_entry_diagnostics(
                     "expires": w.expires.isoformat() if w.expires else None,
                     "areas": list(w.areas),
                 }
-                for w in data.active_warnings_for(station)
+                for w in data.active_warnings_for(
+                    coordinator.location_latitude, coordinator.location_longitude
+                )
             ],
         },
     }

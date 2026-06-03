@@ -88,11 +88,12 @@ class ShmuWeather(ShmuStationEntity, WeatherEntity):
     comes from the SHMÚ website (cloud + present weather), falling back to the
     ``stav_poc`` present-weather code when the website has nothing for this
     station. The forecast comes from the ALADIN 4.5 km model decoded at the
-    station's grid point; its ``condition`` is model-derived (cloud + precip),
-    so the forecast path needs no scraping.
+    configured measurement location's grid point (which may differ from the
+    station); its ``condition`` is model-derived (cloud + precip), so the
+    forecast path needs no scraping.
     """
 
-    _attr_name = None  # the device name is the station; this is its weather
+    _attr_name = None  # named after the device; this is its weather entity
     _attr_native_temperature_unit = UnitOfTemperature.CELSIUS
     _attr_native_pressure_unit = UnitOfPressure.HPA
     _attr_native_wind_speed_unit = UnitOfSpeed.METERS_PER_SECOND

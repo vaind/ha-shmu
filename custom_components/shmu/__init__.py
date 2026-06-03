@@ -43,8 +43,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ShmuConfigEntry) -> bool
     coordinator.async_schedule_refresh()
     entry.async_on_unload(coordinator.async_cancel_refresh)
 
+    # The measurement location resolves once at coordinator construction, and
+    # the forecast/radar caches key on the upstream file path (not lat/lon), so
+    # editing the location in the options flow must rebuild the coordinator to
+    # take effect. Reloading does exactly that (fresh coordinator, empty cache).
+    entry.async_on_unload(entry.add_update_listener(_async_reload_on_update))
+
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
+
+
+async def _async_reload_on_update(hass: HomeAssistant, entry: ShmuConfigEntry) -> None:
+    """Reload the entry when its options change (new measurement location)."""
+    await hass.config_entries.async_reload(entry.entry_id)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ShmuConfigEntry) -> bool:

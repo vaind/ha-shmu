@@ -123,7 +123,9 @@ async def test_radar_in_diagnostics(
     assert radar["selected_offset"] == 0
     w, h = radar["size"]
     assert 0 < w < 64 and 0 < h < 48  # cropped to the station vicinity
-    assert radar["center"] == [47.8733, 18.1944]
+    # Coarsened to ~0.1° in diagnostics so a private measurement location can
+    # never be pinpointed (full precision stays on the live image entity).
+    assert radar["center"] == [47.9, 18.2]
     assert len(radar["bbox"]) == 4
     assert "png" not in radar  # never dump the image bytes
     assert "loop_png" not in radar  # nor the animation bytes
