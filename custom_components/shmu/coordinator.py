@@ -56,14 +56,18 @@ from .shmu_opendata import (
 _LOGGER = logging.getLogger(__name__)
 
 
-def _next_grid_time(now: datetime, interval_minutes: int) -> datetime:
-    """Return the next UTC time strictly after ``now`` on the N-minute grid."""
-    floor = now.replace(
-        minute=now.minute - now.minute % interval_minutes,
+def _grid_floor(when: datetime, interval_minutes: int) -> datetime:
+    """Return ``when`` rounded down to the N-minute grid boundary."""
+    return when.replace(
+        minute=when.minute - when.minute % interval_minutes,
         second=0,
         microsecond=0,
     )
-    return floor + timedelta(minutes=interval_minutes)
+
+
+def _next_grid_time(now: datetime, interval_minutes: int) -> datetime:
+    """Return the next UTC time strictly after ``now`` on the N-minute grid."""
+    return _grid_floor(now, interval_minutes) + timedelta(minutes=interval_minutes)
 
 
 def _keep_previous[T](
@@ -350,11 +354,7 @@ class ShmuDataUpdateCoordinator(DataUpdateCoordinator[ShmuData]):
         published = snapshot.published_at
         if published is None:
             return
-        grid = published.replace(
-            minute=published.minute - published.minute % POLL_INTERVAL_MINUTES,
-            second=0,
-            microsecond=0,
-        )
+        grid = _grid_floor(published, POLL_INTERVAL_MINUTES)
         lag = (published - grid).total_seconds()
         if 0 <= lag < POLL_INTERVAL_MINUTES * 60:
             self._recent_lags.append(lag)

@@ -51,7 +51,7 @@ class ShmuRadarFrameNumber(ShmuRadarEntity, NumberEntity):
 
     def __init__(self, coordinator: ShmuDataUpdateCoordinator) -> None:
         """Initialise the scrubber for the coordinator's station."""
-        ShmuRadarEntity.__init__(self, coordinator, coordinator.station)
+        super().__init__(coordinator, coordinator.station)
 
     def _frame_count(self) -> int:
         radar = self.coordinator.data.radar
