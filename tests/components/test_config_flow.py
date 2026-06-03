@@ -59,6 +59,25 @@ async def test_user_flow_explicit_name(hass: HomeAssistant) -> None:
     assert result["data"][CONF_NAME] == "Cottage"
 
 
+async def test_user_flow_blank_name_falls_back_to_station(
+    hass: HomeAssistant,
+) -> None:
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": SOURCE_USER}
+    )
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {
+            CONF_IND_KLI: "11858",
+            CONF_NAME: "   ",  # whitespace-only — must not become the name
+            CONF_LOCATION_MODE: LOCATION_MODE_STATION,
+        },
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["title"] == "Hurbanovo"
+    assert result["data"][CONF_NAME] == "Hurbanovo"
+
+
 async def test_user_flow_home_location(hass: HomeAssistant) -> None:
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": SOURCE_USER}

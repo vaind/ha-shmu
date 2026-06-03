@@ -226,6 +226,13 @@ class ShmuDataUpdateCoordinator(DataUpdateCoordinator[ShmuData]):
         point the user picked. Anything else — including the default, a missing
         mode, or a malformed custom point — falls back to the station's own
         coordinates, so the integration can never fail to produce a location.
+
+        Resolved once, at construction. In ``hass`` mode this snapshots HA's
+        home location: if the user later moves it, the measurement point only
+        updates when the entry reloads (which the options flow forces anyway).
+        This matches the deliberate "resolve once" design — the forecast/radar
+        caches key on the upstream file path, so live re-resolution would be
+        ignored until a reload regardless.
         """
         options = config_entry.options
         if self.location_mode == LOCATION_MODE_HASS:

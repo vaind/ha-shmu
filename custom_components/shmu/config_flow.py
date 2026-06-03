@@ -55,9 +55,7 @@ def _mode_selector(default: str) -> dict[Any, Any]:
     return {
         vol.Required(CONF_LOCATION_MODE, default=default): SelectSelector(
             SelectSelectorConfig(
-                options=[
-                    SelectOptionDict(value=mode, label=mode) for mode in LOCATION_MODES
-                ],
+                options=list(LOCATION_MODES),
                 mode=SelectSelectorMode.LIST,
                 translation_key="location_mode",
             )
@@ -110,8 +108,12 @@ class ShmuConfigFlow(ConfigFlow, domain=DOMAIN):
             ind_kli = int(user_input[CONF_IND_KLI])
             await self.async_set_unique_id(str(ind_kli))
             self._abort_if_unique_id_configured()
+            station = get_station(ind_kli)
+            assert station is not None  # value comes from the fixed station list
             self._ind_kli = ind_kli
-            self._name = user_input[CONF_NAME]
+            # The field is pre-filled but can be cleared; fall back to the
+            # station name so the device is never left unnamed.
+            self._name = user_input[CONF_NAME].strip() or station.name
             mode = user_input[CONF_LOCATION_MODE]
             if mode == LOCATION_MODE_CUSTOM:
                 return await self.async_step_custom()
@@ -150,11 +152,13 @@ class ShmuConfigFlow(ConfigFlow, domain=DOMAIN):
         )
 
     def _create_entry(self, options: dict[str, Any]) -> ConfigFlowResult:
-        """Create the entry from the gathered station, name and location."""
-        assert self._ind_kli is not None  # set in async_step_user
+        """Create the entry from the gathered station, name and location.
+
+        ``_ind_kli`` and ``_name`` are resolved (and the station validated) in
+        :meth:`async_step_user` before either path reaches here.
+        """
+        assert self._ind_kli is not None
         assert self._name is not None
-        station = get_station(self._ind_kli)
-        assert station is not None  # value comes from the fixed station list
         return self.async_create_entry(
             title=self._name,
             data={CONF_IND_KLI: self._ind_kli, CONF_NAME: self._name},

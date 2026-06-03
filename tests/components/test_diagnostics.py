@@ -49,7 +49,7 @@ async def test_config_entry_diagnostics(
     assert diag["observations"]["raw_record"]["stav_poc"] == 61
     assert diag["web_conditions"]["station"]["weather_text"] == "Dážď"
     # No active warning covers Hurbanovo (polygon is around Bratislava).
-    assert diag["warnings"]["active_for_station"] == []
+    assert diag["warnings"]["active_for_location"] == []
     # The measurement-location mode is surfaced (default = same as station).
     assert diag["coordinator"]["location_mode"] == LOCATION_MODE_STATION
     # The user's HA home coordinates must never leak into the dump.

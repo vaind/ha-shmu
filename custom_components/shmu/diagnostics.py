@@ -146,7 +146,7 @@ async def async_get_config_entry_diagnostics(
             "source": data.warnings.source,
             "fetched_at": data.warnings.fetched_at.isoformat(),
             "total_parsed": len(data.warnings.warnings),
-            "active_for_station": [
+            "active_for_location": [
                 {
                     "event": w.event,
                     "severity": w.severity,
