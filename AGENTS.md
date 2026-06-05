@@ -54,10 +54,21 @@ don't occur.
   4680 (wawa)**; `0` = "no significant weather" is a *real* value, not missing.
   It carries **no cloud cover**, so it cannot yield a trustworthy sky
   condition on its own.
-- **Condition source** is therefore the SHMÚ website table
-  (`website.py`, scraped) first, `stav_poc` (`conditions.py`) as fallback.
-  Scraping means v1 ships via **HACS, not HA core**. `website.py` is the only
-  scraping module and is deliberately swappable (Phase-2 ALADIN replaces it).
+- **Condition** is resolved by a cross-source **priority ladder**
+  (`resolution.py`), not a simple fallback chain — because no single source is
+  complete. Each source emits candidate conditions tagged with a priority and
+  the highest wins: observed present weather (website `Počasie`, then
+  `stav_poc`) at the top, then observed sky (website `Oblačnosť`), then the
+  **ALADIN current-hour cloud cover** filling the sky state the observations
+  lack, with "clear sky" deliberately ranked low (it is the most easily-wrong
+  claim) and `stav_poc` *distant* lightning a last resort just above unknown.
+  The verified reason this matters: the website cloud column is **blank for
+  most stations most of the time** (live check 2026-06-05: 78/100 empty), so
+  without the model gap-filler the condition flipped to *Unknown* whenever both
+  the website cloud cell and `stav_poc` were silent. The winning source
+  (`website`/`stav_poc`/`aladin`) is surfaced in diagnostics and the entity's
+  `condition_source`. Scraping still means v1 ships via **HACS, not HA core**;
+  `website.py` remains the only scraping module and is deliberately swappable.
 - **Station catalogue** is hard-coded (`stations.py`); SHMÚ publishes none in
   machine form. Regenerate from `shmu.sk/sk/?page=318` (coords) +
   `?id=meteo_apocasie_sk` (names). 27 synoptic stations.

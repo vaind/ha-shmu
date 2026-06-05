@@ -20,6 +20,7 @@ from .exceptions import ShmuConnectionError, ShmuDataError, ShmuError
 from .forecast import ForecastStep
 from .models import Observation, Warning
 from .radar import RadarImage
+from .resolution import resolve_condition
 from .stations import (
     STATIONS,
     Station,
@@ -54,4 +55,5 @@ __all__ = [
     "create_ssl_context",
     "get_station",
     "nearest_station",
+    "resolve_condition",
 ]

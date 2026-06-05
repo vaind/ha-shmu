@@ -56,6 +56,12 @@ POLL_OFFSET_MAX_SECONDS: Final = 120
 #: unavailable once we have not obtained a fresh reading for this long.
 OBSERVATION_STALE_AFTER: Final = timedelta(minutes=30)
 
+#: How far an ALADIN forecast step may be from "now" to still count as the
+#: current conditions when filling the condition gap. The model is hourly near
+#: term, so a step is normally within ~30 min; this bounds how stale a run may
+#: be (e.g. a missed publish) before it stops standing in for the present.
+CURRENT_FORECAST_TOLERANCE: Final = timedelta(minutes=90)
+
 #: SHMÚ data is CC BY 4.0 and must be attributed wherever it is shown.
 ATTRIBUTION: Final = "Data © Slovenský hydrometeorologický ústav (SHMÚ), CC BY 4.0"
 

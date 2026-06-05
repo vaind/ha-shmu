@@ -4,6 +4,12 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- Current weather condition no longer flips to *Unknown* for long stretches. The SHMÚ website's cloud column is populated for only a minority of stations at any moment, and the `stav_poc` code carries no cloud cover, so whenever both were silent the condition fell through to unknown. Conditions are now resolved by a cross-source priority ladder that adds the ALADIN model's current-hour cloud cover as a cloud-aware fallback, so the sky state is filled even when the observations have none. The ladder also fixes a latent case where an observed *cloudy* sky could hide present rain — observed precipitation now outranks an observed cloud reading. The winning source (`website`, `stav_poc`, `aladin`) is shown in the weather entity's `condition_source` attribute and in diagnostics.
+
 ## [0.6.0] - 2026-06-03
 
 ### Added
