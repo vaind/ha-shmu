@@ -182,3 +182,22 @@ async def test_diagnostics_includes_forecast_provenance(
     assert fc["step_count"] == 4
     assert len(fc["grid_point"]) == 2
     assert fc["first_step"] is not None
+
+
+async def test_current_forecast_step_picks_nearest_within_tolerance(
+    hass: HomeAssistant, setup_entry: MockConfigEntry
+) -> None:
+    """The ALADIN gap-filler uses the step nearest 'now', ignoring stale runs.
+
+    Fixture run is 2026-05-17 12:00Z with steps at hours 0/1/2/24.
+    """
+    data = setup_entry.runtime_data.data
+
+    # 13:10Z is closest to the 13:00 step (hour 1), comfortably within tolerance.
+    near = data.current_forecast_step(datetime(2026, 5, 17, 13, 10, tzinfo=UTC))
+    assert near is not None
+    assert near.time == datetime(2026, 5, 17, 13, 0, tzinfo=UTC)
+
+    # 18:00Z is >90 min from every step (the next is the hour-24 day-later one),
+    # so the run no longer stands in for the present.
+    assert data.current_forecast_step(datetime(2026, 5, 17, 18, 0, tzinfo=UTC)) is None

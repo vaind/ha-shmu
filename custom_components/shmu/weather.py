@@ -85,12 +85,15 @@ class ShmuWeather(ShmuStationEntity, WeatherEntity):
     """Current conditions for a SHMÚ synoptic station.
 
     Measurements come from the open-data feed; the qualitative ``condition``
-    comes from the SHMÚ website (cloud + present weather), falling back to the
-    ``stav_poc`` present-weather code when the website has nothing for this
-    station. The forecast comes from the ALADIN 4.5 km model decoded at the
-    configured measurement location's grid point (which may differ from the
-    station); its ``condition`` is model-derived (cloud + precip), so the
-    forecast path needs no scraping.
+    is resolved by a cross-source priority ladder (see
+    :mod:`shmu_opendata.resolution`): the SHMÚ website (cloud + present
+    weather) and the ``stav_poc`` present-weather code are the observations,
+    and the ALADIN model's current-hour cloud cover fills the sky state when
+    neither observation has one (the website cloud column is blank for most
+    stations most of the time). The forecast comes from the same ALADIN 4.5 km
+    model decoded at the configured measurement location's grid point (which
+    may differ from the station); its ``condition`` is model-derived (cloud +
+    precip), so the forecast path needs no scraping.
     """
 
     _attr_name = None  # named after the device; this is its weather entity
@@ -110,7 +113,7 @@ class ShmuWeather(ShmuStationEntity, WeatherEntity):
 
     @property
     def condition(self) -> str | None:
-        """HA condition: website first, then ``stav_poc``, else unknown."""
+        """HA condition via the priority ladder; ``sunny`` -> clear-night at night."""
         condition, _ = self.coordinator.data.resolve_condition(
             self._station, self.observation
         )

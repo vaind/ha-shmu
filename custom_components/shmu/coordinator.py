@@ -26,6 +26,7 @@ from .const import (
     CONF_IND_KLI,
     CONF_LOCATION,
     CONF_LOCATION_MODE,
+    CURRENT_FORECAST_TOLERANCE,
     DEFAULT_LOCATION_MODE,
     DOMAIN,
     LOCATION_MODE_CUSTOM,
@@ -38,6 +39,7 @@ from .const import (
 )
 from .shmu_opendata import (
     ForecastSnapshot,
+    ForecastStep,
     Observation,
     ObservationSnapshot,
     RadarFrame,
@@ -49,8 +51,8 @@ from .shmu_opendata import (
     Warning,
     WarningsSnapshot,
     WebConditionsSnapshot,
-    condition_from_weather_code,
     get_station,
+    resolve_condition,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -121,27 +123,46 @@ class ShmuData:
     ) -> tuple[str | None, str]:
         """Resolve a station's HA condition and which source produced it.
 
-        Single source of truth for the website -> ``stav_poc`` -> unknown
-        precedence, shared by the weather entity and diagnostics so they
-        cannot drift. ``observation`` is supplied by the caller (the
-        coordinator's carried-forward reading) so the fallback survives a
-        one-cycle station dropout. ``source`` is ``"website"``, ``"stav_poc"``
-        or ``"unknown"``; the day/night ``sunny`` -> ``clear-night`` shift is
-        a UI concern and stays in the weather entity.
+        Single source of truth for the cross-source priority ladder (see
+        :mod:`shmu_opendata.resolution`), shared by the weather entity and
+        diagnostics so they cannot drift. ``observation`` is supplied by the
+        caller (the coordinator's carried-forward reading) so the fallback
+        survives a one-cycle station dropout. ``source`` is ``"website"``,
+        ``"stav_poc"``, ``"aladin"`` or ``"unknown"``; the day/night
+        ``sunny`` -> ``clear-night`` shift is a UI concern and stays in the
+        weather entity.
         """
-        if self.web_conditions is not None:
-            web = self.web_conditions.conditions.get(station.ind_kli)
-            if web is not None and web.condition is not None:
-                return web.condition, "website"
+        web = (
+            self.web_conditions.conditions.get(station.ind_kli)
+            if self.web_conditions is not None
+            else None
+        )
+        return resolve_condition(
+            web=web,
+            weather_code=observation.weather_code if observation is not None else None,
+            precipitation=(
+                observation.precipitation if observation is not None else None
+            ),
+            forecast_step=self.current_forecast_step(dt_util.utcnow()),
+        )
 
-        if observation is not None:
-            derived = condition_from_weather_code(
-                observation.weather_code, precipitation=observation.precipitation
-            )
-            if derived is not None:
-                return derived, "stav_poc"
+    def current_forecast_step(self, now: datetime) -> ForecastStep | None:
+        """ALADIN step standing in for the present, or ``None``.
 
-        return None, "unknown"
+        The hourly run gives a self-contained, cloud-aware condition for every
+        hour — the gap-filler that keeps a blank website cloud column from
+        surfacing as "unknown". Picks the step nearest ``now``; a run too stale
+        to cover the present (no step within
+        :data:`CURRENT_FORECAST_TOLERANCE`) contributes nothing.
+        """
+        if self.forecast is None or not self.forecast.steps:
+            return None
+        step = min(
+            self.forecast.steps, key=lambda s: abs((s.time - now).total_seconds())
+        )
+        if abs(step.time - now) > CURRENT_FORECAST_TOLERANCE:
+            return None
+        return step
 
 
 #: CAP severity ranked for "worst first" ordering / a sensor state.

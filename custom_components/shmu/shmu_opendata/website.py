@@ -53,11 +53,20 @@ _TAG_RE = re.compile(r"<[^>]+>")
 
 @dataclass(frozen=True, slots=True)
 class WebCondition:
-    """Per-station qualitative condition scraped from the SHMÚ website."""
+    """Per-station qualitative condition scraped from the SHMÚ website.
+
+    ``weather_condition`` (from ``Počasie``) and ``cloud_condition`` (from
+    ``Oblačnosť``) are kept apart because the cross-source priority ladder
+    ranks an *active*-weather reading differently from a *sky*-cover one (see
+    :mod:`shmu_opendata.resolution`). ``condition`` is the merged convenience
+    (present weather over cloud) used where a single value is enough.
+    """
 
     ind_kli: int
     cloud_text: str
     weather_text: str
+    weather_condition: str | None
+    cloud_condition: str | None
     condition: str | None
 
 
@@ -141,12 +150,15 @@ def parse_current_conditions(html: str) -> dict[int, WebCondition]:
         ind_kli = int(ii.group(1))
         cloud = _cell(_CLOUD_CELL_RE, row)
         weather = _cell(_WEATHER_CELL_RE, row)
-        condition = _condition_from_weather(weather) or _condition_from_cloud(cloud)
+        weather_condition = _condition_from_weather(weather)
+        cloud_condition = _condition_from_cloud(cloud)
         result[ind_kli] = WebCondition(
             ind_kli=ind_kli,
             cloud_text=cloud,
             weather_text=weather,
-            condition=condition,
+            weather_condition=weather_condition,
+            cloud_condition=cloud_condition,
+            condition=weather_condition or cloud_condition,
         )
     # The <tbody> split and cell regexes are inherently markup-coupled. If a
     # non-trivial page yields nothing, SHMÚ likely changed the layout — surface
