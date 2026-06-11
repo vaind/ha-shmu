@@ -146,6 +146,23 @@ def nearest_unmasked_index(
     raise ShmuDataError("GRIB2 field is entirely masked")
 
 
+def sky_from_cloud(cloud_coverage: float | None) -> str | None:
+    """Dry-sky condition from cloud-cover percent, or ``None`` if unknown.
+
+    The single home of the cloud-cover thresholds, shared by the model's own
+    :func:`derive_condition` and the resolution ladder (which falls back to a
+    model *sky* state when a station's present-weather observation vetoes the
+    model's precipitation), so the two cannot drift.
+    """
+    if cloud_coverage is None:
+        return None
+    if cloud_coverage < 20.0:
+        return SUNNY
+    if cloud_coverage < 70.0:
+        return PARTLYCLOUDY
+    return CLOUDY
+
+
 def derive_condition(
     *,
     cloud_coverage: float | None,
@@ -170,13 +187,7 @@ def derive_condition(
             return SNOWY_RAINY
         assert precipitation is not None
         return POURING if precipitation >= _HEAVY_RAIN_MM else RAINY
-    if cloud_coverage is None:
-        return None
-    if cloud_coverage < 20.0:
-        return SUNNY
-    if cloud_coverage < 70.0:
-        return PARTLYCLOUDY
-    return CLOUDY
+    return sky_from_cloud(cloud_coverage)
 
 
 def parse_forecast(

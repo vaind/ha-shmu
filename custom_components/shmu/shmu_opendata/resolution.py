@@ -43,6 +43,11 @@ The design choices encoded here:
   modeled clear sky would otherwise apply.
 * **Within a shared band the curated website text beats the automatic code**
   (90 > 88, 80 > 78).
+* **An observation of "nothing happening" vetoes a modeled storm.** When a
+  station reports a present-weather code that means no significant weather
+  (``stav_poc`` 0, and dry), the model's *active* (rain/thunder) candidate is
+  dropped in favour of its cloud-only *sky* state — the model alone must not
+  paint a convective cell as rain/thunder over a station observing itself dry.
 
 Pure and Home-Assistant-free (plain condition strings), so it stays
 offline-testable. A clear sky is returned as ``sunny``; the day/night
@@ -55,7 +60,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .conditions import condition_from_weather_code
-from .forecast import ForecastStep
+from .forecast import ForecastStep, sky_from_cloud
 from .website import WebCondition
 
 #: HA condition strings, grouped by how the ladder bands them.
@@ -131,20 +136,34 @@ def _stav_poc_candidate(
     return _Candidate(band, condition, SOURCE_STAV_POC)
 
 
-def _model_candidate(step: ForecastStep | None) -> _Candidate | None:
-    """The ALADIN current-hour reading, banded as active / sky / clear."""
+def _model_candidate(
+    step: ForecastStep | None, *, suppress_active: bool
+) -> _Candidate | None:
+    """The ALADIN current-hour reading, banded as active / sky / clear.
+
+    ``suppress_active`` is set when a station *observed* no significant weather
+    (see :func:`resolve_condition`): the model's precipitation/storm claim is
+    then dropped in favour of its cloud-only sky state, so a forecast
+    convective cell cannot show as rain/thunder over a station that reports
+    itself dry. Cloud cover is still the model's, so the sky state survives.
+    """
     if step is None or step.condition is None:
         return None
     condition = step.condition
     if condition in _MODEL_ACTIVE:
-        band = _P_MODEL_ACTIVE
-    elif condition in _SKY_CLOUDY:
-        band = _P_MODEL_SKY
-    elif condition == _CLEAR:
-        band = _P_MODEL_CLEAR
-    else:  # ALADIN never emits fog/hail/windy/distant-lightning; be explicit.
-        return None
-    return _Candidate(band, condition, SOURCE_ALADIN)
+        if not suppress_active:
+            return _Candidate(_P_MODEL_ACTIVE, condition, SOURCE_ALADIN)
+        # Vetoed by the observation — fall back to the model's sky state.
+        sky = sky_from_cloud(step.cloud_coverage)
+        if sky is None:
+            return None
+        condition = sky
+    if condition in _SKY_CLOUDY:
+        return _Candidate(_P_MODEL_SKY, condition, SOURCE_ALADIN)
+    if condition == _CLEAR:
+        return _Candidate(_P_MODEL_CLEAR, condition, SOURCE_ALADIN)
+    # ALADIN never emits fog/hail/windy/distant-lightning; be explicit.
+    return None
 
 
 def resolve_condition(
@@ -165,7 +184,11 @@ def resolve_condition(
     aws = _stav_poc_candidate(weather_code, precipitation)
     if aws is not None:
         candidates.append(aws)
-    model = _model_candidate(forecast_step)
+    # A station that reported a present-weather code yielding no active weather
+    # (``stav_poc`` 0 "no significant weather", and dry) is affirmatively quiet
+    # now — trust that over a model forecast of precipitation/storm.
+    station_quiet = weather_code is not None and aws is None
+    model = _model_candidate(forecast_step, suppress_active=station_quiet)
     if model is not None:
         candidates.append(model)
     if not candidates:

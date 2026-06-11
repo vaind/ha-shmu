@@ -21,8 +21,8 @@ def _web(*, weather: str | None = None, cloud: str | None = None) -> WebConditio
     )
 
 
-def _step(condition: str | None) -> ForecastStep:
-    """An ALADIN step whose only relevant field is its derived condition."""
+def _step(condition: str | None, *, cloud: float | None = None) -> ForecastStep:
+    """An ALADIN step carrying only the fields the ladder reads."""
     return ForecastStep(
         time=datetime(2026, 6, 5, 8, 0, tzinfo=UTC),
         temperature=None,
@@ -31,7 +31,7 @@ def _step(condition: str | None) -> ForecastStep:
         wind_gust=None,
         wind_bearing=None,
         pressure=None,
-        cloud_coverage=None,
+        cloud_coverage=cloud,
         cape=None,
         condition=condition,
     )
@@ -129,14 +129,66 @@ def test_distant_lightning_outranks_model_clear() -> None:
 
 
 def test_model_precipitation_outranks_observed_clear() -> None:
-    """Modeled rain is significant enough to override an observed clear sky."""
+    """Modeled rain overrides an observed clear sky when no obs contradicts it.
+
+    ``weather_code=None`` means the station does not report present weather, so
+    nothing vetoes the model.
+    """
     condition, source = resolve_condition(
         web=_web(cloud="sunny"),
-        weather_code=0,
+        weather_code=None,
         precipitation=0.0,
         forecast_step=_step("rainy"),
     )
     assert (condition, source) == ("rainy", "aladin")
+
+
+def test_stav_poc_zero_vetoes_model_storm_keeping_model_sky() -> None:
+    """The reported false 'lightning-rainy': station says quiet, model says storm.
+
+    A station reporting ``stav_poc=0`` (no significant weather) and dry must not
+    show the model's forecast thunderstorm; it falls back to the model's
+    cloud-only sky state (here 90% cloud -> cloudy).
+    """
+    condition, source = resolve_condition(
+        web=None,
+        weather_code=0,
+        precipitation=0.0,
+        forecast_step=_step("lightning-rainy", cloud=90.0),
+    )
+    assert (condition, source) == ("cloudy", "aladin")
+
+
+def test_veto_falls_through_to_partlycloudy_on_moderate_cloud() -> None:
+    condition, source = resolve_condition(
+        web=None,
+        weather_code=0,
+        precipitation=0.0,
+        forecast_step=_step("rainy", cloud=45.0),
+    )
+    assert (condition, source) == ("partlycloudy", "aladin")
+
+
+def test_no_veto_without_a_present_weather_observation() -> None:
+    """A missing ``stav_poc`` is not an observation of 'quiet' — no veto."""
+    condition, source = resolve_condition(
+        web=None,
+        weather_code=None,
+        precipitation=None,
+        forecast_step=_step("lightning-rainy", cloud=90.0),
+    )
+    assert (condition, source) == ("lightning-rainy", "aladin")
+
+
+def test_observed_rain_is_never_vetoed() -> None:
+    """The veto only suppresses the *model*; a real observed code still wins."""
+    condition, source = resolve_condition(
+        web=None,
+        weather_code=61,  # rain observed -> active, not quiet
+        precipitation=0.2,
+        forecast_step=_step("lightning-rainy", cloud=90.0),
+    )
+    assert (condition, source) == ("rainy", "stav_poc")
 
 
 def test_model_clear_is_the_last_resort_above_unknown() -> None:
