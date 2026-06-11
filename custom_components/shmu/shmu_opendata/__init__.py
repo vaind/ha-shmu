@@ -20,7 +20,12 @@ from .exceptions import ShmuConnectionError, ShmuDataError, ShmuError
 from .forecast import ForecastStep
 from .models import Observation, Warning
 from .radar import RadarImage
-from .resolution import resolve_condition
+from .resolution import (
+    ConditionCandidate,
+    ConditionResolution,
+    explain_condition,
+    resolve_condition,
+)
 from .stations import (
     STATIONS,
     Station,
@@ -34,6 +39,8 @@ __version__ = "0.1.0"
 
 __all__ = [
     "STATIONS",
+    "ConditionCandidate",
+    "ConditionResolution",
     "ForecastSnapshot",
     "ForecastStep",
     "Observation",
@@ -53,6 +60,7 @@ __all__ = [
     "__version__",
     "condition_from_weather_code",
     "create_ssl_context",
+    "explain_condition",
     "get_station",
     "nearest_station",
     "resolve_condition",

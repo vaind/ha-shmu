@@ -13,6 +13,7 @@ from typing import Any
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceEntry
+from homeassistant.util import dt as dt_util
 
 from . import shmu_opendata
 from .const import POLL_INTERVAL_MINUTES
@@ -48,8 +49,10 @@ async def async_get_config_entry_diagnostics(
     forecast = data.forecast
     radar = data.radar
 
-    # Shared resolver — exactly what the weather entity uses.
-    condition, source = data.resolve_condition(station, served)
+    # Shared resolver — exactly what the weather entity uses, but the full
+    # evaluation (every candidate + which won) so a dump explains the result.
+    resolution = data.explain_condition(station, served)
+    current_step = data.current_forecast_step(dt_util.utcnow())
 
     return {
         "library_version": shmu_opendata.__version__,
@@ -77,7 +80,28 @@ async def async_get_config_entry_diagnostics(
             if coordinator.last_exception
             else None,
         },
-        "derived_condition": {"condition": condition, "source": source},
+        "derived_condition": {
+            "condition": resolution.condition,
+            "source": resolution.source,
+            # Every source that produced a reading, highest priority first; the
+            # winner (== condition/source above) is flagged.
+            "candidates": [
+                {
+                    "source": c.source,
+                    "tier": c.tier,
+                    "priority": c.priority,
+                    "condition": c.condition,
+                    "won": index == 0,
+                }
+                for index, c in enumerate(resolution.candidates)
+            ],
+            # ``active`` when a station's "no significant weather" observation
+            # vetoed the model's precipitation/storm candidate.
+            "veto": {
+                "active": resolution.suppressed_model_condition is not None,
+                "suppressed_model_condition": resolution.suppressed_model_condition,
+            },
+        },
         "observations": {
             "source": obs_snapshot.source,
             "fetched_at": obs_snapshot.fetched_at.isoformat(),
@@ -113,6 +137,16 @@ async def async_get_config_entry_diagnostics(
             "last_step": (
                 forecast.steps[-1].time.isoformat() if forecast.steps else None
             ),
+            # The step standing in for "now" — the model reading the ladder saw
+            # (``None`` if the run is too stale to cover the present).
+            "current_step": None
+            if current_step is None
+            else {
+                "time": current_step.time.isoformat(),
+                "condition": current_step.condition,
+                "cloud_coverage": current_step.cloud_coverage,
+                "precipitation": current_step.precipitation,
+            },
         },
         "radar": None
         if radar is None

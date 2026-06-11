@@ -5,7 +5,10 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from custom_components.shmu.shmu_opendata.forecast import ForecastStep
-from custom_components.shmu.shmu_opendata.resolution import resolve_condition
+from custom_components.shmu.shmu_opendata.resolution import (
+    explain_condition,
+    resolve_condition,
+)
 from custom_components.shmu.shmu_opendata.website import WebCondition
 
 
@@ -196,3 +199,46 @@ def test_model_clear_is_the_last_resort_above_unknown() -> None:
         web=None, weather_code=0, precipitation=0.0, forecast_step=_step("sunny")
     )
     assert (condition, source) == ("sunny", "aladin")
+
+
+def test_explain_lists_all_candidates_winner_first() -> None:
+    """Diagnostics view: every contributing source, highest priority first."""
+    res = explain_condition(
+        web=_web(cloud="cloudy"),  # website cloud -> 60
+        weather_code=61,  # stav_poc rain -> 78
+        precipitation=0.2,
+        forecast_step=_step("rainy"),  # model precip -> 50
+    )
+    assert (res.condition, res.source) == ("rainy", "stav_poc")
+    assert [(c.source, c.priority) for c in res.candidates] == [
+        ("stav_poc", 78),
+        ("website", 60),
+        ("aladin", 50),
+    ]
+    # Winner is first; tiers are human-readable.
+    assert res.candidates[0].tier == "stav_poc"
+    assert res.suppressed_model_condition is None
+
+
+def test_explain_reports_the_veto_and_suppressed_condition() -> None:
+    res = explain_condition(
+        web=None,
+        weather_code=0,  # station quiet
+        precipitation=0.0,
+        forecast_step=_step("lightning-rainy", cloud=90.0),
+    )
+    assert (res.condition, res.source) == ("cloudy", "aladin")
+    assert res.suppressed_model_condition == "lightning-rainy"
+    # The surviving candidate is the model's cloud-only sky state.
+    assert [(c.condition, c.tier) for c in res.candidates] == [
+        ("cloudy", "model cloud")
+    ]
+
+
+def test_explain_unknown_has_no_candidates() -> None:
+    res = explain_condition(
+        web=None, weather_code=None, precipitation=None, forecast_step=None
+    )
+    assert (res.condition, res.source) == (None, "unknown")
+    assert res.candidates == ()
+    assert res.suppressed_model_condition is None

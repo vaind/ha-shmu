@@ -43,7 +43,20 @@ async def test_config_entry_diagnostics(
     assert diag["station"]["name"] == "Hurbanovo"
     assert diag["coordinator"]["last_update_success"] is True
     # Website said Zamračené/Dážď -> rainy via the website source.
-    assert diag["derived_condition"] == {"condition": "rainy", "source": "website"}
+    derived = diag["derived_condition"]
+    assert derived["condition"] == "rainy"
+    assert derived["source"] == "website"
+    assert derived["veto"]["active"] is False
+    # The winning candidate is flagged and matches the resolved condition.
+    winner = next(c for c in derived["candidates"] if c["won"])
+    assert (winner["source"], winner["condition"]) == ("website", "rainy")
+    # Candidates are highest priority first, and the cloud reading is a
+    # competing (losing) candidate alongside the winning present-weather one.
+    priorities = [c["priority"] for c in derived["candidates"]]
+    assert priorities == sorted(priorities, reverse=True)
+    assert any(
+        c["tier"] == "website cloud" and not c["won"] for c in derived["candidates"]
+    )
     assert diag["observations"]["station_present"] is True
     # The full original SHMÚ row is included for debugging.
     assert diag["observations"]["raw_record"]["stav_poc"] == 61

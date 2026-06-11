@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- Diagnostics now explain *how* the current condition was decided: the `derived_condition` block lists every source that produced a candidate (with its tier, priority, proposed condition, and which one won) and a `veto` block showing when a station's "no significant weather" observation overrode a model storm. The `forecast` block also reports the `current_step` the resolver used. This makes "why is it showing X" answerable straight from a downloaded dump.
+
 ### Fixed
 
 - Weather condition no longer shows a model-forecast *Lightning, rainy* (or rain) while the station itself reports calm, dry weather. The ALADIN model fills the condition when the observations have no sky reading, but on a convective summer afternoon its current-hour cell could predict a thunderstorm over a station that was actually dry. Now, when a station observes no significant present weather (`stav_poc` 0 and no precipitation), that observation vetoes the model's precipitation/storm claim and the condition falls back to the model's cloud-only sky state (e.g. *Cloudy*) instead. Observed present weather is never vetoed, and stations that do not report `stav_poc` are unaffected.
