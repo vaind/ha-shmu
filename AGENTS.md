@@ -67,8 +67,14 @@ don't occur.
   without the model gap-filler the condition flipped to *Unknown* whenever both
   the website cloud cell and `stav_poc` were silent. The winning source
   (`website`/`stav_poc`/`aladin`) is surfaced in diagnostics and the entity's
-  `condition_source`. Scraping still means v1 ships via **HACS, not HA core**;
-  `website.py` remains the only scraping module and is deliberately swappable.
+  `condition_source`. **The model gap-filler does not assert active weather over
+  a contradicting observation**: when a station reports `stav_poc` 0 ("no
+  significant weather") and is dry, that vetoes the model's *precipitation/storm*
+  candidate and the ladder falls back to the model's cloud-only sky state — ALADIN
+  over-predicts convective cells, so on a dry summer afternoon it would otherwise
+  surface a phantom *lightning-rainy* (verified live 2026-06-11). Scraping still
+  means v1 ships via **HACS, not HA core**; `website.py` remains the only scraping
+  module and is deliberately swappable.
 - **Station catalogue** is hard-coded (`stations.py`); SHMÚ publishes none in
   machine form. Regenerate from `shmu.sk/sk/?page=318` (coords) +
   `?id=meteo_apocasie_sk` (names). 27 synoptic stations.

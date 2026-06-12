@@ -38,6 +38,7 @@ from .const import (
     POLL_OFFSET_PAD_SECONDS,
 )
 from .shmu_opendata import (
+    ConditionResolution,
     ForecastSnapshot,
     ForecastStep,
     Observation,
@@ -51,8 +52,8 @@ from .shmu_opendata import (
     Warning,
     WarningsSnapshot,
     WebConditionsSnapshot,
+    explain_condition,
     get_station,
-    resolve_condition,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -132,12 +133,24 @@ class ShmuData:
         ``sunny`` -> ``clear-night`` shift is a UI concern and stays in the
         weather entity.
         """
+        resolution = self.explain_condition(station, observation)
+        return resolution.condition, resolution.source
+
+    def explain_condition(
+        self, station: Station, observation: Observation | None
+    ) -> ConditionResolution:
+        """Full ladder evaluation (all candidates + winner) for diagnostics.
+
+        Same inputs and resolver as :meth:`resolve_condition`; this returns the
+        whole :class:`ConditionResolution` so a diagnostics dump can show why a
+        condition won, not just the result.
+        """
         web = (
             self.web_conditions.conditions.get(station.ind_kli)
             if self.web_conditions is not None
             else None
         )
-        return resolve_condition(
+        return explain_condition(
             web=web,
             weather_code=observation.weather_code if observation is not None else None,
             precipitation=(
