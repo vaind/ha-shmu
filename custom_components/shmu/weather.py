@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 
 from homeassistant.components.weather import (
     ATTR_CONDITION_CLEAR_NIGHT,
@@ -69,6 +69,47 @@ def _daily_condition(steps: list[ForecastStep]) -> str | None:
     return noon_step.condition or max(
         conditions, key=lambda c: _CONDITION_SEVERITY.get(c, 0)
     )
+
+
+def _aggregate_daily(steps: list[ForecastStep]) -> list[Forecast]:
+    """Summarise ALADIN steps into one entry per local (Europe/Bratislava) day.
+
+    A day's high/low, precipitation total, and condition are only meaningful
+    when the model actually covers the whole day. The ALADIN horizon is +102 h,
+    so the last local day is almost always truncated — for a 00 UTC run it ends
+    around 08:00 local, i.e. before the afternoon temperature peak. Summarising
+    that bucket would present a morning-only slice as a full day (a Saturday
+    "high" of the pre-dawn temperature). So a day is emitted only when the
+    forecast horizon reaches its end; the leading day (today) needs no such
+    guard because its only missing hours are already in the past.
+    """
+    by_day: dict[date, list[ForecastStep]] = {}
+    for step in steps:
+        by_day.setdefault(dt_util.as_local(step.time).date(), []).append(step)
+    horizon = max(step.time for step in steps)
+
+    daily: list[Forecast] = []
+    for day, day_steps in sorted(by_day.items()):
+        if horizon < dt_util.start_of_local_day(day + timedelta(days=1)):
+            continue  # model does not cover this day to its end — skip it
+        temps = [s.temperature for s in day_steps if s.temperature is not None]
+        precs = [s.precipitation for s in day_steps if s.precipitation is not None]
+        winds = [s.wind_speed for s in day_steps if s.wind_speed is not None]
+        gusts = [s.wind_gust for s in day_steps if s.wind_gust is not None]
+        clouds = [s.cloud_coverage for s in day_steps if s.cloud_coverage is not None]
+        daily.append(
+            Forecast(
+                datetime=dt_util.start_of_local_day(day).isoformat(),
+                native_temperature=max(temps) if temps else None,
+                native_templow=min(temps) if temps else None,
+                native_precipitation=round(sum(precs), 2) if precs else None,
+                condition=_daily_condition(day_steps),
+                native_wind_speed=max(winds) if winds else None,
+                native_wind_gust_speed=max(gusts) if gusts else None,
+                cloud_coverage=(round(sum(clouds) / len(clouds)) if clouds else None),
+            )
+        )
+    return daily
 
 
 async def async_setup_entry(
@@ -206,37 +247,11 @@ class ShmuWeather(ShmuStationEntity, WeatherEntity):
 
         The model is hourly; a daily entry summarises each calendar day in
         Home Assistant's configured timezone: temperature high/low, total
-        precipitation, and the day's most significant condition.
+        precipitation, and the day's most significant condition. A truncated
+        final day the horizon does not cover is dropped (see
+        :func:`_aggregate_daily`).
         """
         steps = self._steps()
         if not steps:
             return None
-
-        by_day: dict[date, list[ForecastStep]] = {}
-        for step in steps:
-            by_day.setdefault(dt_util.as_local(step.time).date(), []).append(step)
-
-        daily: list[Forecast] = []
-        for day, day_steps in sorted(by_day.items()):
-            temps = [s.temperature for s in day_steps if s.temperature is not None]
-            precs = [s.precipitation for s in day_steps if s.precipitation is not None]
-            winds = [s.wind_speed for s in day_steps if s.wind_speed is not None]
-            gusts = [s.wind_gust for s in day_steps if s.wind_gust is not None]
-            clouds = [
-                s.cloud_coverage for s in day_steps if s.cloud_coverage is not None
-            ]
-            daily.append(
-                Forecast(
-                    datetime=dt_util.start_of_local_day(day).isoformat(),
-                    native_temperature=max(temps) if temps else None,
-                    native_templow=min(temps) if temps else None,
-                    native_precipitation=round(sum(precs), 2) if precs else None,
-                    condition=_daily_condition(day_steps),
-                    native_wind_speed=max(winds) if winds else None,
-                    native_wind_gust_speed=max(gusts) if gusts else None,
-                    cloud_coverage=(
-                        round(sum(clouds) / len(clouds)) if clouds else None
-                    ),
-                )
-            )
-        return daily
+        return _aggregate_daily(steps)
