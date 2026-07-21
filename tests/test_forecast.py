@@ -71,6 +71,35 @@ def test_nearest_unmasked_returns_a_value(fixture) -> None:
             },
             "lightning-rainy",
         ),
+        # A 3-hourly step (hours=3) is classified by its per-hour rate, not its
+        # raw total: 3 mm over 3 h is 1 mm/h → "rainy", not "pouring".
+        (
+            {
+                "cloud_coverage": 100.0,
+                "precipitation": 3.0,
+                "temperature": 10.0,
+                "hours": 3.0,
+            },
+            "rainy",
+        ),
+        # 0.1 mm over 3 h is a trace rate (0.033 mm/h) → dry sky, not "rainy".
+        (
+            {"cloud_coverage": 100.0, "precipitation": 0.1, "hours": 3.0},
+            "cloudy",
+        ),
+        # Trace rate also vetoes the thunderstorm branch even with high CAPE:
+        # ALADIN over-predicts convection, so a dry 3-hourly step must not
+        # surface a phantom lightning-rainy.
+        (
+            {
+                "cloud_coverage": 100.0,
+                "precipitation": 0.1,
+                "temperature": 18.0,
+                "cape": 400.0,
+                "hours": 3.0,
+            },
+            "cloudy",
+        ),
     ],
 )
 def test_derive_condition(kwargs, expected) -> None:

@@ -65,10 +65,14 @@ SNOWY = "snowy"
 SNOWY_RAINY = "snowy-rainy"
 LIGHTNING_RAINY = "lightning-rainy"
 
-#: Rain heavy enough to call "pouring" (mm per forecast step ≈ per hour).
-_HEAVY_RAIN_MM = 2.5
-#: Any wet step at/under this counts as no meaningful precipitation.
-_TRACE_MM = 0.05
+#: Rain *rate* (mm/h) heavy enough to call "pouring". Classification is by
+#: intensity, not by a step's raw accumulation: ALADIN steps are hourly only to
+#: +48 h and 3-hourly beyond (see ``const.FORECAST_HOURS``), so a 3-hourly step
+#: bundles three hours of rain — thresholding its raw total would overstate the
+#: intensity three-fold (a gentle drizzle would read as "pouring").
+_HEAVY_RAIN_MM_PER_H = 2.5
+#: Rain rate (mm/h) at/under which a step counts as no meaningful precipitation.
+_TRACE_MM_PER_H = 0.05
 #: CAPE above this with precipitation implies a thunderstorm.
 _THUNDER_CAPE = 200.0
 
@@ -169,6 +173,7 @@ def derive_condition(
     precipitation: float | None,
     temperature: float | None,
     cape: float | None,
+    hours: float = 1.0,
 ) -> str | None:
     """Map model surface fields to a Home Assistant condition string.
 
@@ -176,8 +181,18 @@ def derive_condition(
     lacks (the reason Phase 1 had to scrape). Returns ``None`` only when cloud
     cover is unknown and it is dry — the caller surfaces that as "unknown"
     rather than inventing a sky state (same philosophy as ``conditions.py``).
+
+    ``precipitation`` is the accumulation *over this step*; ``hours`` is the
+    step's duration, so precipitation is classified as an intensity (mm/h)
+    rather than a raw total. This matters past +48 h where ALADIN steps are
+    3-hourly: without normalising, a light drizzle spread over three hours
+    would be mis-read as "pouring" (and a trace as "rainy"). Defaults to
+    ``1.0`` so an hourly step is unchanged.
     """
-    wet = precipitation is not None and precipitation > _TRACE_MM
+    rate = None
+    if precipitation is not None:
+        rate = precipitation / hours if hours > 0 else precipitation
+    wet = rate is not None and rate > _TRACE_MM_PER_H
     if wet:
         if cape is not None and cape >= _THUNDER_CAPE:
             return LIGHTNING_RAINY
@@ -185,8 +200,8 @@ def derive_condition(
             return SNOWY
         if temperature is not None and temperature <= 2.0:
             return SNOWY_RAINY
-        assert precipitation is not None
-        return POURING if precipitation >= _HEAVY_RAIN_MM else RAINY
+        assert rate is not None
+        return POURING if rate >= _HEAVY_RAIN_MM_PER_H else RAINY
     return sky_from_cloud(cloud_coverage)
 
 
@@ -205,6 +220,7 @@ def parse_forecast(
     steps: list[ForecastStep] = []
     grid: tuple[int, int] | None = None
     prev_accum: float | None = None
+    prev_hour: int | None = None
 
     for forecast_hour, payload in hourly_files:
         fields: dict[tuple[int, int, int, int], Grib2Field] = {}
@@ -243,6 +259,14 @@ def parse_forecast(
         if accum is not None:
             prev_accum = accum
 
+        # The precip accumulation covers the gap since the previous file, so
+        # that same gap is the step duration used to turn the total into a
+        # rate. The first step spans from the run start (its own forecast
+        # hour); a non-increasing gap (files fed out of order) falls back to 1.
+        span = forecast_hour - prev_hour if prev_hour is not None else forecast_hour
+        hours = float(span) if span > 0 else 1.0
+        prev_hour = forecast_hour
+
         u10, v10 = value(_U10), value(_V10)
         if u10 is None or v10 is None:
             wind_speed = wind_bearing = None
@@ -280,6 +304,7 @@ def parse_forecast(
                     precipitation=precipitation,
                     temperature=temperature,
                     cape=cape,
+                    hours=hours,
                 ),
             )
         )

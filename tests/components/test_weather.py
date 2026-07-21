@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
 import pytest
@@ -15,6 +15,8 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.shmu.const import CONF_IND_KLI, DOMAIN
 from custom_components.shmu.diagnostics import async_get_config_entry_diagnostics
+from custom_components.shmu.shmu_opendata import ForecastStep
+from custom_components.shmu.weather import _aggregate_daily
 
 from .test_init import _FakeClient
 
@@ -98,14 +100,83 @@ async def test_daily_forecast_aggregates_by_local_day(
     hass: HomeAssistant, setup_entry: MockConfigEntry
 ) -> None:
     daily = await _forecasts(hass, "daily")
-    # Hours 0/1/2 fall on 2026-05-17 (local), hour 24 on 2026-05-18.
-    assert len(daily) == 2
+    # Hours 0/1/2 fall on 2026-05-17 (local); hour 24 (a single 14:00 local
+    # sample) is the only step on 2026-05-18, which the model horizon does not
+    # cover to its end, so that truncated day is dropped rather than summarised
+    # from morning-only data. See test_daily_forecast_drops_truncated_final_day.
+    assert len(daily) == 1
     day0 = daily[0]
     assert day0["datetime"].startswith("2026-05-17")
     assert day0["templow"] <= day0["temperature"]  # low <= high
     assert day0["precipitation"] >= 0.0
     assert day0["condition"] is not None
-    assert daily[1]["datetime"].startswith("2026-05-18")
+
+
+def _step(when: datetime, temperature: float) -> ForecastStep:
+    """A minimal dry forecast step at ``when`` for daily-aggregation tests."""
+    return ForecastStep(
+        time=when,
+        temperature=temperature,
+        precipitation=0.0,
+        wind_speed=1.0,
+        wind_gust=2.0,
+        wind_bearing=180.0,
+        pressure=1000.0,
+        cloud_coverage=50.0,
+        cape=0.0,
+        condition="partlycloudy",
+    )
+
+
+async def test_daily_forecast_drops_truncated_final_day(hass: HomeAssistant) -> None:
+    """A final day the +102 h horizon does not fully cover is not summarised.
+
+    The real failure: a 00 UTC run reaches only ~08:00 local on its last day,
+    so that day's bucket holds pre-dawn/morning steps whose ``max`` temperature
+    is the overnight value — the true afternoon peak is simply absent. Emitting
+    it would show a whole-day "high" far below reality.
+    """
+    await hass.config.async_set_time_zone("Europe/Bratislava")  # CEST = UTC+2
+
+    # A full local day for the 21st: UTC 22:00 (20th) → 21:00 (21st) covers
+    # local 00:00 → 23:00. Peak warmth at local 15:00 (13:00 UTC).
+    start = datetime(2026, 7, 20, 22, tzinfo=UTC)
+    temps = [10.0 + 8.0 * (1 - abs((h - 15) / 15)) for h in range(24)]  # peak ~ 15L
+    steps = [_step(start + timedelta(hours=h), temps[h]) for h in range(24)]
+
+    # The truncated 22nd: only 00/03/06 UTC (local 02:00 to 08:00), all cool.
+    tail = datetime(2026, 7, 22, 0, tzinfo=UTC)
+    steps += [_step(tail + timedelta(hours=h), 13.0) for h in (0, 3, 6)]
+
+    daily = _aggregate_daily(steps)
+
+    assert [d["datetime"][:10] for d in daily] == ["2026-07-21"]
+    # The kept day's high is the genuine afternoon peak, not a morning slice.
+    assert daily[0]["native_temperature"] == pytest.approx(max(temps))
+
+
+async def test_daily_forecast_keeps_full_days_before_truncated_tail(
+    hass: HomeAssistant,
+) -> None:
+    """Full days are kept; only the truncated tail after them is dropped.
+
+    Mirrors a real contiguous run: every full day has trailing steps reaching
+    into the (partial) next day, so its horizon passes local midnight and it is
+    summarised. This guards against the drop being too aggressive.
+    """
+    await hass.config.async_set_time_zone("Europe/Bratislava")
+
+    start = datetime(2026, 7, 20, 22, tzinfo=UTC)  # local 00:00 on the 21st
+    # 21st and 22nd fully covered, then a morning-only 23rd (the truncated tail).
+    steps = [
+        _step(start + timedelta(hours=h), 15.0 + (h % 24) * 0.5) for h in range(48)
+    ]
+    tail = datetime(2026, 7, 23, 0, tzinfo=UTC)  # local 02:00 on the 23rd
+    steps += [_step(tail + timedelta(hours=h), 13.0) for h in (0, 3, 6)]
+
+    daily = _aggregate_daily(steps)
+
+    assert [d["datetime"][:10] for d in daily] == ["2026-07-21", "2026-07-22"]
 
 
 async def test_hourly_forecast_trims_elapsed_hours(
@@ -141,9 +212,11 @@ async def test_daily_forecast_keeps_full_day_when_hours_elapsed(
     with patch("custom_components.shmu.weather.dt_util.utcnow", lambda: now):
         daily = await _forecasts(hass, "daily")
 
-    # Both local days are still present even though every hour-0/1/2 step is
-    # well in the past relative to "now".
-    assert [d["datetime"][:10] for d in daily] == ["2026-05-17", "2026-05-18"]
+    # 2026-05-17 is still summarised from all of hours 0/1/2 even though every
+    # one is well in the past relative to "now" — the elapsed-hours trim is
+    # confined to the hourly path. (The 18th is a truncated final day and is
+    # dropped for a separate reason; see the horizon tests above.)
+    assert [d["datetime"][:10] for d in daily] == ["2026-05-17"]
 
 
 async def test_dataset_freshness_diagnostics(

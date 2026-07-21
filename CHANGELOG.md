@@ -4,6 +4,14 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- Daily forecast no longer shows a truncated final day as if it were a whole day. The ALADIN model horizon is +102 h, so the last local calendar day is usually covered only into the morning (for a 00 UTC run it stops around 08:00 local); its "high" was therefore the pre-dawn temperature rather than the real afternoon peak (e.g. a summer Saturday reading 16.8 °C instead of ~26 °C). A day is now summarised only when the forecast horizon reaches its end, so the last, partly-covered day is dropped instead of being shown with a misleading high/low and total.
+- Daily and hourly forecast conditions past +48 h no longer overstate rain. Beyond +48 h ALADIN steps are 3-hourly, but each step's precipitation was classified as if it fell in a single hour, so a light drizzle spread over three hours read as *Pouring* and a trace could surface a phantom *Lightning, rainy*. Precipitation is now classified by its per-hour intensity, so the later forecast days reflect the actual rain rate.
+- Today's daily high/low no longer omits the early morning when a fresh model run starts later in the day. A run begins at its reference hour (00/06/12/18 UTC), so the newest one can start partway through the current day; its earlier hours were simply absent, so today's low could be taken from mid-morning rather than the dawn minimum. The previous run's earlier steps for today are now carried forward, so today is summarised from model data spanning the whole local day (the forecast stays entirely model-sourced — no observation is blended in).
+
 ## [0.7.0] - 2026-06-12
 
 ### Added

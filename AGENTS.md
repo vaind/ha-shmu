@@ -95,6 +95,36 @@ don't occur.
   (0,2,23/24@103,pdt8), total-precip-accum(0,1,193@1,pdt8), TCC(192,128,
   164@1), LCC/MCC(192,128,186/187@1), PRMSL(0,3,1@101), CAPE(0,7,6@1). Runs
   cover forecast hours **000–102** (103 files/run, ≈161 KB each), 4 runs/day.
+  **This +102 h is the product's own horizon, not a limit of our request** — we
+  already fetch out to hour 102 (`FORECAST_HOURS`, the last file a run
+  publishes). The consequence for the **daily** forecast: the final local
+  calendar day is almost always truncated (for a 00 UTC run, hour 102 lands
+  ≈08:00 local, i.e. before the afternoon temperature peak), so summarising that
+  bucket would present a morning-only slice as a whole day (a Saturday "high" of
+  the pre-dawn temperature). `weather._aggregate_daily` therefore emits a day
+  only when the horizon reaches its **end of local day**, dropping the truncated
+  tail; the leading day (today) needs no such guard because its only missing
+  hours are already in the past. We also **subsample to 3-hourly past +48 h**
+  (`range(51, 103, 3)`) to cut download volume — that is *our* choice and only
+  lowers resolution *within* the covered days; it does not change the horizon.
+  Because those later steps are 3-hourly, `derive_condition` classifies
+  precipitation by **per-hour rate** (`hours` arg), not the raw step total, or a
+  drizzle spread over three hours reads as *pouring*. A longer daily horizon
+  would need a longer-range model (SHMÚ runs ECMWF to 8–10 days) but SHMÚ
+  publishes ECMWF **only as rendered meteogram images** on the website, not as
+  open GRIB2 in the `opendata` tree — so it is out of scope for the same
+  data-only reason as air quality. **Today's leading edge**: the newest complete
+  run begins at its reference hour (00/06/12/18 UTC), so it can start partway
+  through the current local day and omit today's earlier hours (a 06 UTC run
+  first covers ≈08:00 local, past the dawn minimum). Rather than fold in
+  observations (which would mix an observed station reading into a model,
+  location forecast), `coordinator._extend_forecast_to_day_start` carries the
+  previous run's steps for today that precede the new run's first step, so
+  today's daily high/low/precip are computed from model data spanning the whole
+  local day. The forecast stays purely model-sourced; carried steps are bounded
+  to the current local day (older ones age out, so no past day is ever emitted)
+  and stay strictly before the new run's first step (per-step precip deltas
+  never double-count). `run`/`source` keep identifying the newest run.
 - **Warnings**: CAP 1.2 XML; the Slovak `<info>` block is preferred; polygons
   are used for point-in-station relevance. **Verified 2026-05-17**: every
   `HHMM/` issuance folder republishes the *full* active set (not deltas),

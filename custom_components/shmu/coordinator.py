@@ -12,7 +12,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 
 from homeassistant.config_entries import ConfigEntry
@@ -89,6 +89,39 @@ def _keep_previous[T](
         _LOGGER.warning("SHMÚ %s unavailable, keeping previous: %s", label, result)
         return fallback
     return result
+
+
+def _extend_forecast_to_day_start(
+    previous: ForecastSnapshot | None,
+    current: ForecastSnapshot | None,
+    day_start: datetime,
+) -> ForecastSnapshot | None:
+    """Backfill the current local day's earlier hours from the previous run.
+
+    A model run begins at its reference hour (00/06/12/18 UTC), so the newest
+    *complete* run can start partway through the current local day — its earlier
+    hours are simply absent. Left alone, today's daily summary would then be
+    computed from only the part of the day the run covers (a low taken from
+    mid-morning rather than the dawn minimum, a partial precipitation total).
+    Carry the still-relevant steps from the previous snapshot — model data for
+    the same fixed grid point — so today is covered from ``day_start`` (local
+    midnight). The carried steps stay strictly before the new run's first step,
+    so nothing is double-counted, and retention is bounded to ``day_start``
+    onward, so as the day rolls the older steps age out and no past day is ever
+    emitted. Every step remains model-sourced; only its originating run differs
+    (``run``/``source`` keep identifying the newest run for provenance).
+    """
+    if current is None or previous is None or not current.steps:
+        return current
+    if previous.source == current.source:
+        return current  # same run (cache hit) — already extended in prior cycles
+    first_current = current.steps[0].time
+    if first_current <= day_start:
+        return current  # the run already covers the whole local day
+    carried = [s for s in previous.steps if day_start <= s.time < first_current]
+    if not carried:
+        return current
+    return replace(current, steps=[*carried, *current.steps])
 
 
 @dataclass(slots=True)
@@ -502,6 +535,13 @@ class ShmuDataUpdateCoordinator(DataUpdateCoordinator[ShmuData]):
         )
         forecast = _keep_previous(
             forecast, "forecast", previous.forecast if previous else None
+        )
+        # Keep today covered from local midnight even when the newest run starts
+        # partway through the day, by carrying the previous run's earlier steps.
+        forecast = _extend_forecast_to_day_start(
+            previous.forecast if previous else None,
+            forecast,
+            dt_util.start_of_local_day(),
         )
         radar = _keep_previous(radar, "radar", previous.radar if previous else None)
 
