@@ -59,6 +59,7 @@
       "temperature": { "name": "Teplota" },
       "humidity": { "name": "Vlhkosť" },
       "pressure": { "name": "Tlak" },
+      "pressure_sea_level": { "name": "Tlak prepočítaný na hladinu mora" },
       "wind_speed": { "name": "Rýchlosť vetra" },
       "wind_gust": { "name": "Nárazy vetra" },
       "wind_bearing": { "name": "Smer vetra" },

@@ -25,7 +25,7 @@ from homeassistant.util import dt as dt_util
 
 from .coordinator import ShmuConfigEntry, ShmuDataUpdateCoordinator
 from .entity import ShmuStationEntity
-from .shmu_opendata import ForecastStep
+from .shmu_opendata import ForecastStep, sea_level_pressure
 
 #: All entities read a single shared coordinator snapshot; there is no
 #: per-entity device I/O to rate-limit, so updates need not be serialised.
@@ -188,7 +188,19 @@ class ShmuWeather(ShmuStationEntity, WeatherEntity):
 
     @property
     def native_pressure(self) -> float | None:
-        return obs.pressure if (obs := self.observation) is not None else None
+        """Sea-level (QFF) pressure, matching the forecast's PRMSL datum.
+
+        The observation reports station-level pressure (QFE); reducing it to
+        sea level keeps "now" on the same datum as the forecast steps (whose
+        ``pressure`` is already ALADIN's PRMSL) and is what HA's weather card
+        expects.
+        """
+        obs = self.observation
+        if obs is None:
+            return None
+        return sea_level_pressure(
+            obs.pressure, self._station.elevation, obs.temperature
+        )
 
     @property
     def native_wind_speed(self) -> float | None:

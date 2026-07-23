@@ -4,6 +4,16 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- New **Sea-level pressure** sensor. SHMÚ reports `tlak` as the raw barometer reading *at the station* (QFE), which on an elevated station sits well below the ~1013 hPa people expect and is not comparable between stations (e.g. Lomnický Štít at 2635 m reads ≈793 hPa). The new sensor reduces that reading to mean sea level (QFF) using the station's elevation and current temperature, so it lines up with synoptic charts and other weather sources. The existing **Pressure** sensor is unchanged and still reports the raw station value.
+
+### Changed
+
+- The weather entity's pressure attribute now reports sea-level (QFF) pressure instead of the raw station reading. This puts "now" on the same datum as the forecast (whose pressure is already reduced to sea level), so the two no longer jump by the station's elevation offset.
+
 ## [0.7.1] - 2026-07-21
 
 ### Fixed

@@ -161,7 +161,12 @@ async def test_setup_creates_entities(
 
     # Values come from the latest minute (06:52) of the 3 records for 11858.
     assert hass.states.get("sensor.hurbanovo_temperature").state == "12.1"
+    # Raw station pressure (QFE) as reported; the sea-level (QFF) reduction is
+    # a separate entity that lifts Hurbanovo's 115 m reading to ~1015 hPa.
     assert hass.states.get("sensor.hurbanovo_pressure").state == "1001.2"
+    sea_level = hass.states.get("sensor.hurbanovo_sea_level_pressure")
+    assert sea_level is not None
+    assert float(sea_level.state) == pytest.approx(1015.06, abs=0.2)
 
     # The only warning's polygon is around Bratislava; Hurbanovo is outside it.
     assert hass.states.get("binary_sensor.hurbanovo_weather_warning").state == "off"

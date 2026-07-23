@@ -45,10 +45,11 @@ A Home Assistant integration for Slovak weather data published by the
 ## Features
 
 - **Weather entity** — current conditions for a chosen SHMÚ synoptic station.
-- **Sensors** — temperature, ground temperature, humidity, pressure, wind
-  speed/gust/bearing, precipitation, snow depth, visibility, global radiation,
-  and a warning-level sensor (the raw WMO weather code is an opt-in
-  diagnostic).
+- **Sensors** — temperature, ground temperature, humidity, pressure (the raw
+  station reading), sea-level pressure (that reading reduced to mean sea level,
+  comparable between stations), wind speed/gust/bearing, precipitation, snow
+  depth, visibility, global radiation, and a warning-level sensor (the raw WMO
+  weather code is an opt-in diagnostic).
 - **Weather warnings** — a binary sensor (with full alert details as
   attributes) that is on while a SHMÚ CAP alert covers your station, decided
   by the alert's own polygon.

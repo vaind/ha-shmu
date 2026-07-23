@@ -34,7 +34,7 @@ from homeassistant.helpers.typing import StateType
 
 from .coordinator import ShmuConfigEntry, ShmuData
 from .entity import ShmuStationEntity
-from .shmu_opendata import Observation
+from .shmu_opendata import Observation, sea_level_pressure
 
 #: All entities read a single shared coordinator snapshot; there is no
 #: per-entity device I/O to rate-limit, so updates need not be serialised.
@@ -77,6 +77,8 @@ SENSORS: tuple[ShmuSensorDescription, ...] = (
         state_class=SensorStateClass.MEASUREMENT,
         value_fn=lambda o: o.humidity,
     ),
+    # Raw station-level pressure (QFE) exactly as SHMÚ reports it. Sea-level
+    # (QFF) pressure is a separate entity, ``ShmuSeaLevelPressureSensor``.
     ShmuSensorDescription(
         key="pressure",
         translation_key="pressure",
@@ -211,6 +213,7 @@ async def async_setup_entry(
         ShmuTimestampSensor(coordinator, station, description)
         for description in TIMESTAMPS
     )
+    entities.append(ShmuSeaLevelPressureSensor(coordinator, station))
     entities.append(ShmuWarningLevelSensor(coordinator, station))
     async_add_entities(entities)
 
@@ -235,6 +238,37 @@ class ShmuSensor(ShmuStationEntity, SensorEntity):
         if obs is None:
             return None
         return self.entity_description.value_fn(obs)
+
+
+class ShmuSeaLevelPressureSensor(ShmuStationEntity, SensorEntity):
+    """Station pressure reduced to mean sea level (QFF).
+
+    SHMÚ's ``tlak`` is the raw barometer reading at the station (QFE), so it
+    is not comparable between stations at different heights (a mountain station
+    reads far below 1013 hPa). This entity reduces it to sea level using the
+    station elevation and its current temperature, matching the datum of the
+    forecast pressure and of most other weather sources.
+    """
+
+    _attr_translation_key = "pressure_sea_level"
+    _attr_device_class = SensorDeviceClass.ATMOSPHERIC_PRESSURE
+    _attr_native_unit_of_measurement = UnitOfPressure.HPA
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(self, coordinator, station) -> None:
+        """Initialise the sea-level pressure sensor."""
+        super().__init__(coordinator, station)
+        self._attr_unique_id = f"{station.ind_kli}_pressure_sea_level"
+
+    @property
+    def native_value(self) -> StateType:
+        """Sea-level pressure, or ``None`` if pressure or temperature is absent."""
+        obs = self.observation
+        if obs is None:
+            return None
+        return sea_level_pressure(
+            obs.pressure, self._station.elevation, obs.temperature
+        )
 
 
 class ShmuTimestampSensor(ShmuStationEntity, SensorEntity):
