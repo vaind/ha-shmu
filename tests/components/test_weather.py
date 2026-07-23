@@ -76,6 +76,21 @@ async def test_weather_supports_forecast_features(
     assert feats & WeatherEntityFeature.FORECAST_DAILY
 
 
+async def test_current_pressure_is_reduced_to_sea_level(
+    hass: HomeAssistant, setup_entry: MockConfigEntry
+) -> None:
+    """The weather card's pressure is QFF, on the forecast's PRMSL datum.
+
+    The observation reports station-level pressure (QFE, 1001.2 hPa at
+    Hurbanovo's 115 m); the entity reduces it to sea level (~1015 hPa) so
+    "now" and the forecast steps share a datum. Reporting the raw station
+    value here (the old behaviour) would jump ~14 hPa against the forecast.
+    """
+    state = hass.states.get("weather.hurbanovo")
+    assert state is not None
+    assert state.attributes["pressure"] == pytest.approx(1015.06, abs=0.2)
+
+
 async def test_hourly_forecast_shape_and_values(
     hass: HomeAssistant, setup_entry: MockConfigEntry, frozen_now: datetime
 ) -> None:

@@ -19,6 +19,7 @@ from .conditions import condition_from_weather_code
 from .exceptions import ShmuConnectionError, ShmuDataError, ShmuError
 from .forecast import ForecastStep
 from .models import Observation, Warning
+from .pressure import sea_level_pressure
 from .radar import RadarImage
 from .resolution import (
     ConditionCandidate,
@@ -64,4 +65,5 @@ __all__ = [
     "get_station",
     "nearest_station",
     "resolve_condition",
+    "sea_level_pressure",
 ]

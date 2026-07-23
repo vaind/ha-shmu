@@ -49,6 +49,17 @@ don't occur.
   parsing an HTML directory listing; hrefs are percent-encoded.
 - **Observations** (`climate/now/data/.../aws1min - ....json`): new file every
   5 min, ~95 stations, several 1-minute records each. Keyed by `ind_kli`.
+- **`tlak` is station-level pressure (QFE), *not* reduced to sea level.**
+  Verified 2026-07-21 on live data: Lomnický Štít (elevation 2635 m) reports
+  `tlak` ≈793 hPa — the raw barometer reading at altitude, not the ~1013 hPa
+  people associate with "air pressure". The forecast, by contrast, carries
+  `PRMSL` (already reduced to MSL), so the two are on different datums. The raw
+  value is surfaced as-is by the `pressure` sensor; `pressure.py`
+  (`sea_level_pressure`) reduces it to QFF for the `sea_level_pressure` sensor
+  and the weather entity's `native_pressure`, using the station's `elevation`
+  and current temperature (the barometric formula with the ICAO lapse rate).
+  The reduction needs a real temperature, so it returns `None` when either
+  pressure or temperature is missing rather than guessing a headline value.
 - `stav_poc` (present-weather code) is **per-station, not time-sparse**: only
   ~35/95 stations report it at all (≈16/27 synoptic). It is **WMO code table
   4680 (wawa)**; `0` = "no significant weather" is a *real* value, not missing.

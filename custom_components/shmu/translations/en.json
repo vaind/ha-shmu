@@ -59,6 +59,7 @@
       "temperature": { "name": "Temperature" },
       "humidity": { "name": "Humidity" },
       "pressure": { "name": "Pressure" },
+      "pressure_sea_level": { "name": "Sea-level pressure" },
       "wind_speed": { "name": "Wind speed" },
       "wind_gust": { "name": "Wind gust" },
       "wind_bearing": { "name": "Wind bearing" },
