@@ -4,7 +4,7 @@ A Home Assistant integration for Slovak weather data published by the
 **Slovak Hydrometeorological Institute (SHMÚ)**.
 
 [![CI](https://github.com/vaind/ha-shmu/actions/workflows/ci.yml/badge.svg)](https://github.com/vaind/ha-shmu/actions/workflows/ci.yml)
-[![HACS: Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://hacs.xyz/)
+[![HACS: Default](https://img.shields.io/badge/HACS-Default-41BDF5.svg)](https://hacs.xyz/)
 
 > Current conditions, weather warnings, and the ALADIN/SHMÚ daily & hourly
 > forecast — decoded from GRIB2 in pure Python, with no native dependency.
@@ -109,12 +109,18 @@ open-data files contain no cloud information — see
 [Why HACS](CONTRIBUTING.md#why-hacs-and-not-home-assistant-core)), so it is
 distributed via HACS rather than Home Assistant core.
 
-1. HACS → Integrations → ⋮ → *Custom repositories* → add this repository as an
-   *Integration*.
-2. Install **SHMÚ Weather**, then restart Home Assistant.
-3. *Settings → Devices & Services → Add Integration → SHMÚ Weather*. The
+It is part of the **default HACS store** — no custom repository needed.
+
+1. HACS → search for **SHMÚ Weather** → *Download*, then restart Home
+   Assistant.
+
+   [![Open your Home Assistant instance and open the SHMÚ Weather repository inside HACS.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=vaind&repository=ha-shmu&category=integration)
+
+2. *Settings → Devices & Services → Add Integration → SHMÚ Weather*. The
    station nearest your Home Assistant location is preselected; pick any of
    the 27 synoptic stations. Add the integration again for more stations.
+
+   [![Open your Home Assistant instance and start setting up SHMÚ Weather.](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=shmu)
 
 ## Removing the integration
 
