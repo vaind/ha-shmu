@@ -16,7 +16,7 @@ from urllib.parse import unquote
 from xml.etree import ElementTree as ET
 
 from .exceptions import ShmuDataError
-from .models import Observation, Warning
+from .models import GaugeObservation, Observation, Warning
 
 # Apache autoindex links: skip the column-sort links ("?C=...") and the
 # "Parent Directory" link ("/...").
@@ -102,6 +102,47 @@ def parse_observations(payload: bytes | str) -> dict[int, Observation]:
             ground_temperature=_to_float(record.get("tprz")),
             global_radiation=_to_float(record.get("zglo")),
             weather_code=_to_int(record.get("stav_poc")),
+            raw=record,
+        )
+    return latest
+
+
+def parse_gauge_observations(payload: bytes | str) -> dict[int, GaugeObservation]:
+    """Parse an ``aps1min`` snapshot into the latest reading per rain gauge.
+
+    Mirrors :func:`parse_observations`: a snapshot holds several 1-minute
+    records per gauge — and, unlike the ``aws1min`` feed, sometimes hours-old
+    backfill alongside them — so only the most recent record is kept for each
+    ``ind_zra``.
+
+    Ids absent from :mod:`shmu_opendata.gauges` are still parsed: the
+    catalogue is deliberately a near-complete snapshot of the network, and
+    callers look up the one gauge they care about rather than iterating.
+    """
+    try:
+        document = json.loads(payload)
+        records: list[Mapping[str, Any]] = document["data"]
+    except (json.JSONDecodeError, KeyError, TypeError) as err:
+        raise ShmuDataError(f"Malformed precipitation payload: {err}") from err
+
+    latest: dict[int, GaugeObservation] = {}
+    for record in records:
+        ind_zra = _to_int(record.get("ind_zra"))
+        raw_minuta = record.get("minuta")
+        if ind_zra is None or not raw_minuta:
+            continue
+        try:
+            measured_at = _parse_minuta(raw_minuta)
+        except ValueError:
+            continue
+        existing = latest.get(ind_zra)
+        if existing is not None and measured_at <= existing.measured_at:
+            continue
+        latest[ind_zra] = GaugeObservation(
+            ind_zra=ind_zra,
+            measured_at=measured_at,
+            precipitation=_to_float(record.get("zra_uhrn")),
+            temperature=_to_float(record.get("t")),
             raw=record,
         )
     return latest

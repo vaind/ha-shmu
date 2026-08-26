@@ -1,0 +1,16 @@
+{
+  "id": "test",
+  "dataset": "Automatic precipitation stations",
+  "interval": "1 minute",
+  "frequency": "5 minute",
+  "statistics": { "stations_count": 4, "records_count": 7 },
+  "data": [
+    {"ind_zra": 17720, "minuta": "2026-05-17T06:50:00", "zra_uhrn": 0.1, "t": 11.9},
+    {"ind_zra": 17720, "minuta": "2026-05-17T06:52:00", "zra_uhrn": 0.4, "t": 12.1},
+    {"ind_zra": 17720, "minuta": "2026-05-17T06:51:00", "zra_uhrn": 0.2, "t": 12.0},
+    {"ind_zra": 24295, "minuta": "2026-05-17T06:52:00", "zra_uhrn": 0.0, "t": 4.3},
+    {"ind_zra": 17140, "minuta": "2026-05-17T06:52:00", "zra_uhrn": 1.2, "t": 13.4},
+    {"ind_zra": 17140, "minuta": "2026-05-17T02:15:00", "zra_uhrn": 9.9, "t": 9.1},
+    {"ind_zra": 99999, "minuta": "2026-05-17T06:52:00", "zra_uhrn": 0.3, "t": 10.0}
+  ]
+}
