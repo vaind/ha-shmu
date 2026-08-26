@@ -49,6 +49,9 @@ don't occur.
   parsing an HTML directory listing; hrefs are percent-encoded.
 - **Observations** (`climate/now/data/.../aws1min - ....json`): new file every
   5 min, ~95 stations, several 1-minute records each. Keyed by `ind_kli`.
+- **The rain gauges are a second, disjoint station network** (`precipitation/now/data/.../aps1min - ....json`, new upstream on 2026-07-06): same envelope and 5-minute cadence as `aws1min`, ~32 days kept, but keyed by `ind_zra` and carrying only `zra_uhrn` (mm, 1-minute sum) and `t` (°C at 2 m, 1-minute average).
+  **Verified live 2026-08-26**: 907 records from 186 stations in one file, and the id set is *completely disjoint* from the 95 `ind_kli` AWS stations — a complementary network, not a re-cut of the observations we already fetch.
+  Unused because SHMÚ publishes **no coordinates** for these gauges: the only pointer is an INSPIRE record (`rpi.gov.sk/…/dfa31b86-…`, a client-side app whose CSW returned nothing usable), so adopting it means hand-building a second catalogue beside `stations.py` (issue #43).
 - **`tlak` is station-level pressure (QFE), *not* reduced to sea level.**
   Verified 2026-07-21 on live data: Lomnický Štít (elevation 2635 m) reports
   `tlak` ≈793 hPa — the raw barometer reading at altitude, not the ~1013 hPa
@@ -136,6 +139,8 @@ don't occur.
   to the current local day (older ones age out, so no past day is ever emitted)
   and stay strictly before the new run's first step (per-step precip deltas
   never double-count). `run`/`source` keep identifying the newest run.
+- **The ALADIN hour-files also carry upper-air fields we don't decode.** **Verified 2026-08-26** on the 06 UTC run, hour 006: 36 messages, of which **25 are pressure-level** at 925/850/700/500/250 hPa — temperature (0,0,0), relative humidity (0,1,1), `u`/`v` (0,2,2 / 0,2,3) and geopotential height (0,3,4), all DRT 5.0 simple packing on the same grid, so reaching them needs no new decoder in `grib2.py`, only a wider message selection (issue #44).
+  SHMÚ's metadata (`weather/nwp/metadata/OpenData_AladinSHMU_metadata.json`) labels `tcc` "vysoká oblačnosť" (high cloud), but **no 188/HCC message exists in the files** — `192,128,164` is total cloud cover, as `grib2.py` decodes it. Trust the message inventory, not that label; there is no high-cloud field in this product.
 - **Warnings**: CAP 1.2 XML; the Slovak `<info>` block is preferred; polygons
   are used for point-in-station relevance. **Verified 2026-05-17**: every
   `HHMM/` issuance folder republishes the *full* active set (not deltas),
@@ -164,9 +169,8 @@ don't occur.
   Pillow — same no-binary-deps reason GRIB2 libs were rejected). If a radar
   read starts failing, re-verify the HDF5 structure of one file against this
   list before changing the reader.
-- **Air quality**: `airQuality/` exists but serves **no data files** — every
-  leaf is a Windows `.url` shortcut to the EEA download webapp
-  (`eeadmz1-downloads-webapp.azurewebsites.net`) or SHMÚ web pages (verified
-  2026-05-17, issue #6). It is **out of scope**: consuming it would need the
-  EEA portal or scraping, both against the project's constraints. Don't add an
-  air-quality source here without revisiting that decision.
+- **Three further trees exist and are deliberately unused** (surveyed 2026-08-26). `climate/recent/data/daily/` publishes monthly `kli-inter - YYYY-MM.json` files of daily climate elements, but lags ~2–3 months (newest month 2026-05 was published 2026-07-29), so it is a quality-controlled archive rather than a live source. `products/grids/climateAdaptation/` holds static GIS ZIPs (1991–2020 standard normals, RCP4.5/8.5 scenarios). `weather/radar/volume/{skjav,skkoj,skkub,sklaz}/` holds per-site dual-polarisation polar volumes (`dBZ`, `dBuZ`, `V`, `W`, `ZDR`, `KDP`, `PhiDP`, `RhoHV`) — far heavier than the national composite we already render, for no gain on a home dashboard.
+- **Only ALADIN is published as data.** `weather/nwp/` contains exactly `aladin/sk/4.5km/` (verified 2026-08-26). SHMÚ also runs **A-LAEF** (the 17-member ALARO ensemble, two runs a day, 3-day range) but surfaces it *only* as rendered epsgram and map images on the website — so it is out of scope for the same data-only reason as the ECMWF meteograms above. Re-check `weather/nwp/` before concluding that an ensemble is unavailable; that is where it would appear.
+- **Air quality**: `airQuality/` exists but serves **no data files** — every leaf is a Windows `.url` shortcut to the EEA download webapp (`eeadmz1-downloads-webapp.azurewebsites.net`) or to INSPIRE records on `rpi.gov.sk` (verified 2026-05-17, issue #6).
+  **Re-verified 2026-08-26**: the tree has since grown `historical/`, `recent/` and `products/{management,models,nmsko}` subtrees, but every leaf is still a shortcut (plus a `.docx` how-to) — more signposts, still no data.
+  It is **out of scope**: consuming it would need the EEA portal or scraping, both against the project's constraints. Don't add an air-quality source here without revisiting that decision.
