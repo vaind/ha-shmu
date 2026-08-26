@@ -109,11 +109,16 @@ def _gauge_reading_is_current(
     a day behind the network.
 
     So the reading is compared against the newest record anywhere in the same
-    snapshot, which is that feed's own notion of "now". Deliberately *not*
-    against the wall clock: `minuta`'s zone is not currently trustworthy (SHMÚ
-    documents CET for both feeds while the parser attaches UTC), and an
-    hour-shifted reading would look permanently fresh. Two timestamps drawn
-    from the same file carry the same offset, so it cancels out.
+    snapshot, which is that feed's own notion of "now", rather than against
+    the wall clock. An absolute age check would work too now that `minuta` is
+    parsed in its documented zone (it was read as UTC until 2026-08-26, which
+    put every reading an hour in the future and would have made anything look
+    permanently fresh). The relative test is kept because it measures what
+    actually goes wrong here — a gauge falling behind *its own network* — and
+    holds regardless of the HA host's clock.
+
+    It does not by itself catch the whole feed freezing: that is covered
+    separately, by only counting a snapshot whose source path changed.
 
     The threshold separates cleanly in practice — sampled across the 32-day
     archive, 99.8% of gauge readings sit within 10 minutes of their snapshot's
