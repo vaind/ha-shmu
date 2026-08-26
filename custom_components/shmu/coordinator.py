@@ -391,6 +391,26 @@ class ShmuDataUpdateCoordinator(DataUpdateCoordinator[ShmuData]):
             return None
         return obs
 
+    def _carry_forward_remaining(self) -> timedelta | None:
+        """How much longer the cached reading is served, for logging.
+
+        ``None`` when nothing is being carried forward — either no reading has
+        been cached yet (the station was already missing when we started) or
+        the cached one has aged out. In both cases entities are unavailable
+        *now*, not in ``OBSERVATION_STALE_AFTER``. The window runs from when
+        the reading was acquired, so by the time a dropout is noticed part of
+        it is already spent.
+        """
+        if self._last_observation_at is None:
+            return None
+        remaining = OBSERVATION_STALE_AFTER - (
+            dt_util.utcnow() - self._last_observation_at
+        )
+        if remaining <= timedelta():
+            return None
+        # Whole seconds: the microseconds are noise in a log line.
+        return timedelta(seconds=round(remaining.total_seconds()))
+
     @property
     def last_success_at(self) -> datetime | None:
         """When the last fully-successful update completed (UTC)."""
@@ -500,14 +520,24 @@ class ShmuDataUpdateCoordinator(DataUpdateCoordinator[ShmuData]):
         if present and not self._station_present:
             _LOGGER.info("SHMÚ station %s is reporting again", ind_kli)
         elif not present and self._station_present:
-            _LOGGER.info(
-                "SHMÚ station %s is not in the latest observation snapshot "
-                "(%s); its last reading is served for up to %s more, after "
-                "which its entities go unavailable until it reports again",
-                ind_kli,
-                data.observations.source,
-                OBSERVATION_STALE_AFTER,
-            )
+            remaining = self._carry_forward_remaining()
+            if remaining is None:
+                _LOGGER.info(
+                    "SHMÚ station %s is not in the latest observation snapshot "
+                    "(%s) and no recent reading is cached, so its entities are "
+                    "unavailable until it reports again",
+                    ind_kli,
+                    data.observations.source,
+                )
+            else:
+                _LOGGER.info(
+                    "SHMÚ station %s is not in the latest observation snapshot "
+                    "(%s); its last reading is served for another %s, after "
+                    "which its entities go unavailable until it reports again",
+                    ind_kli,
+                    data.observations.source,
+                    remaining,
+                )
         self._station_present = present
 
     async def _async_update_data(self) -> ShmuData:
