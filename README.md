@@ -50,7 +50,7 @@ A Home Assistant integration for Slovak weather data published by the
   comparable between stations), wind speed/gust/bearing, precipitation, snow
   depth, visibility, global radiation, and a warning-level sensor (the raw WMO
   weather code is an opt-in diagnostic).
-- **Upper air (opt-in)** — a **freezing level** (the height of the 0 °C isotherm above sea level, i.e. how high the snow line sits) and the **850 hPa temperature** (the standard air-mass indicator, ~1450 m up), both read from the same ALADIN run that drives the forecast. Disabled by default — enable them from the device page if you want them.
+- **Upper air (opt-in)** — a **freezing level** (the height of the 0 °C isotherm above sea level) and the **850 hPa temperature** (the standard air-mass indicator, ~1450 m up), both read from the same ALADIN run that drives the forecast. The freezing level *indicates* the snow line rather than being it: snow keeps falling and melting below the isotherm, so it typically settles a few hundred metres lower, depending on how humid the air below is and how hard it is snowing. Disabled by default — enable them from the device page if you want them.
 - **Weather warnings** — a binary sensor (with full alert details as
   attributes) that is on while a SHMÚ CAP alert covers your station, decided
   by the alert's own polygon.

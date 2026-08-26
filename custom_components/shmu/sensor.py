@@ -182,8 +182,10 @@ SENSORS: tuple[ShmuSensorDescription, ...] = (
 #: output, and most households will never look at them — an entity nobody reads
 #: is permanent clutter, while enabling one is a single click.
 FORECAST_SENSORS: tuple[ShmuForecastSensorDescription, ...] = (
-    # Height of the 0 °C isotherm above sea level — the snow line question in a
-    # country where valley and ridge differ by two kilometres.
+    # Height of the 0 °C isotherm above sea level. It *indicates* the snow line
+    # rather than being it — snow keeps falling and melting below the isotherm,
+    # so the snow settles some way under it — but in a country where valley and
+    # ridge differ by two kilometres, that indication is the point.
     ShmuForecastSensorDescription(
         key="freezing_level",
         translation_key="freezing_level",

@@ -8,7 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
-- Two new **opt-in** sensors read from the ALADIN model run: **Freezing level** — the height of the 0 °C isotherm above sea level, the number behind "how high does the snow line sit today" — and **Temperature at 850 hPa**, the standard air-mass indicator at roughly 1450 m, above the valley inversions and daytime heating a 2 m thermometer sees. Both are disabled by default; enable them from the device page if you want them. They cost nothing extra upstream: the forecast files have always carried these fields on every download, and every message in them was already being decoded and then discarded.
+- Two new **opt-in** sensors read from the ALADIN model run: **Freezing level** — the height of the 0 °C isotherm above sea level — and **Temperature at 850 hPa**, the standard air-mass indicator at roughly 1450 m, above the valley inversions and daytime heating a 2 m thermometer sees. The freezing level is an *indicator* of the snow line, not the snow line itself: snow goes on falling and melting below the isotherm, so it usually settles a few hundred metres lower. Both are disabled by default; enable them from the device page if you want them. They cost nothing extra upstream: the forecast files have always carried these fields on every download, and every message in them was already being decoded and then discarded.
 
 ### Fixed
 

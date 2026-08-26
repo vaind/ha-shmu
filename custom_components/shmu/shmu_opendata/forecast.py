@@ -434,10 +434,16 @@ def parse_forecast(
             terrain = value(_OROGRAPHY)
         t850 = value((*_T_PRESSURE, _AIR_MASS_LEVEL_PA))
         # The published 850 hPa value is reported as-is, even where that level
-        # is below the model terrain (a High Tatras grid point sits above it):
-        # that is what every 850 hPa air-mass chart shows. Only the profile
-        # below drops such levels, because interpolating a crossing through
-        # extrapolated sub-surface air would move a real one.
+        # is below the model terrain — the Lomnický Štít grid cell has its
+        # terrain at 1858 m against an 850 hPa surface near 1530 m, so the
+        # value there is the model's downward extrapolation. That is
+        # deliberate: an 850 hPa chart shows a value over every mountain range
+        # for exactly the same reason, and blanking it would make the air-mass
+        # indicator unavailable at the stations where an air mass is most
+        # interesting, while disagreeing with SHMÚ's own charts for the same
+        # point. The freezing-level profile *does* drop such levels, because
+        # there the fiction is not merely reported but interpolated through:
+        # it moves a real 0 °C crossing to a wrong height.
         temperature_850hpa = None if t850 is None else t850 - 273.15
 
         steps.append(
