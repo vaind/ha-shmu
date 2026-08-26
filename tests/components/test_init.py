@@ -25,6 +25,7 @@ from custom_components.shmu.const import (
 )
 from custom_components.shmu.shmu_opendata import (
     ForecastSnapshot,
+    GaugeSnapshot,
     ObservationSnapshot,
     RadarFrame,
     RadarSnapshot,
@@ -37,6 +38,7 @@ from custom_components.shmu.shmu_opendata.client import _frame_label, _radar_sna
 from custom_components.shmu.shmu_opendata.forecast import grid_index, parse_forecast
 from custom_components.shmu.shmu_opendata.parsers import (
     parse_cap_alert,
+    parse_gauge_observations,
     parse_observations,
 )
 from custom_components.shmu.shmu_opendata.radar import render_radar
@@ -53,8 +55,13 @@ class _FakeClient:
         self._load = load
         #: When True, the next snapshot omits the configured station.
         self.drop_station: int | None = None
+        #: Same, for the (independent) rain-gauge feed.
+        self.drop_gauge: int | None = None
         #: When set, every fetch raises this — simulates an upstream outage.
         self.fail_with: Exception | None = None
+        #: When set, only the rain-gauge fetch raises — that feed is
+        #: supplementary, so it fails independently of the observations.
+        self.fail_gauges_with: Exception | None = None
         #: Coordinates the forecast/radar fetchers were last called with, so
         #: tests can assert the measurement location reaches the client.
         self.forecast_coords: tuple[float, float] | None = None
@@ -73,6 +80,20 @@ class _FakeClient:
             source=f"test-{self._serial}",
             fetched_at=datetime.now(UTC),
             published_at=None,
+        )
+
+    async def async_get_gauge_observations(self, previous=None) -> GaugeSnapshot:
+        if self.fail_gauges_with is not None:
+            raise self.fail_gauges_with
+        if self.fail_with is not None:
+            raise self.fail_with
+        gauges = parse_gauge_observations(self._load("gauge_observations.json"))
+        if self.drop_gauge is not None:
+            gauges.pop(self.drop_gauge, None)
+        return GaugeSnapshot(
+            observations=gauges,
+            source=f"test-gauges-{self._serial}",
+            fetched_at=datetime.now(UTC),
         )
 
     async def async_get_warnings(self, previous=None) -> WarningsSnapshot:
@@ -463,3 +484,142 @@ async def test_options_update_reloads_and_reapplies_location(
 
         assert client.forecast_coords == _BRATISLAVA
         assert hass.states.get("binary_sensor.home_weather_warning").state == "on"
+
+
+async def test_rain_gauge_sensor_reads_the_nearest_gauge(
+    hass: HomeAssistant, entry: MockConfigEntry, load: Callable[[str], bytes]
+) -> None:
+    """The gauge is chosen from the measurement location, not the station.
+
+    Station 11858 (Hurbanovo) has no gauge of its own — the nearest is
+    Kolárovo, ~19 km away — so the sensor must resolve and report it, and say
+    which gauge it came from.
+    """
+    client = _FakeClient(load)
+    with patch("custom_components.shmu.ShmuClient", return_value=client):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    state = hass.states.get("sensor.hurbanovo_rain_gauge_precipitation")
+    assert state.state == "0.4"  # newest minute for gauge 17720
+    assert state.attributes["gauge_ind_zra"] == 17720
+    assert state.attributes["gauge_name"] == "Kolárovo"
+    assert state.attributes["gauge_distance_km"] == pytest.approx(19.4, abs=0.5)
+
+    # The station's own precipitation sensor is a different network and is
+    # deliberately left reading the station.
+    assert hass.states.get("sensor.hurbanovo_precipitation").state == "0.2"
+
+
+async def test_rain_gauge_follows_the_measurement_location(
+    hass: HomeAssistant, load: Callable[[str], bytes]
+) -> None:
+    """A custom measurement point picks that point's gauge, not the station's."""
+    entry, _ = await _setup_entry(
+        hass,
+        load,
+        data={CONF_IND_KLI: 11858},
+        options={
+            CONF_LOCATION_MODE: LOCATION_MODE_CUSTOM,
+            CONF_LOCATION: {
+                CONF_LATITUDE: _BRATISLAVA[0],
+                CONF_LONGITUDE: _BRATISLAVA[1],
+            },
+        },
+    )
+
+    assert entry.runtime_data.gauge.ind_zra == 17140
+    state = hass.states.get("sensor.hurbanovo_rain_gauge_precipitation")
+    assert state.state == "1.2"
+    assert state.attributes["gauge_name"] == "Bratislava - Koliba"
+
+
+async def test_rain_gauge_is_independent_of_the_station(
+    hass: HomeAssistant, entry: MockConfigEntry, load: Callable[[str], bytes]
+) -> None:
+    """The two networks are disjoint; one dropping out must not blank the other."""
+    client = _FakeClient(load)
+    with patch("custom_components.shmu.ShmuClient", return_value=client):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        # The station drops out; the gauge keeps reporting.
+        client.drop_station = 11858
+        await entry.runtime_data.async_refresh()
+        await hass.async_block_till_done()
+
+        assert (
+            hass.states.get("sensor.hurbanovo_rain_gauge_precipitation").state == "0.4"
+        )
+
+
+async def test_rain_gauge_survives_a_one_cycle_dropout(
+    hass: HomeAssistant, entry: MockConfigEntry, load: Callable[[str], bytes]
+) -> None:
+    """A gauge absent from one snapshot keeps serving its last reading."""
+    client = _FakeClient(load)
+    with patch("custom_components.shmu.ShmuClient", return_value=client):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        client.drop_gauge = 17720
+        await entry.runtime_data.async_refresh()
+        await hass.async_block_till_done()
+
+        assert (
+            hass.states.get("sensor.hurbanovo_rain_gauge_precipitation").state == "0.4"
+        )
+
+
+async def test_rain_gauge_goes_unavailable_during_a_feed_outage(
+    hass: HomeAssistant, entry: MockConfigEntry, load: Callable[[str], bytes]
+) -> None:
+    """A failing gauge feed must eventually surface, not freeze a reading.
+
+    The gauge feed is *supplementary*: a failed fetch keeps the previous
+    snapshot and the coordinator cycle still succeeds. So the reading's
+    acquisition time may only be refreshed by a genuine fetch — refreshing it
+    from the kept-previous snapshot would hold the sensor at its last value
+    for ever, and it would never go unavailable.
+    """
+    client = _FakeClient(load)
+    now = datetime(2026, 5, 17, 12, 0, tzinfo=UTC)
+
+    def _now() -> datetime:
+        return now
+
+    with (
+        patch("custom_components.shmu.coordinator.dt_util.utcnow", _now),
+        patch("custom_components.shmu.ShmuClient", return_value=client),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+        assert (
+            hass.states.get("sensor.hurbanovo_rain_gauge_precipitation").state == "0.4"
+        )
+
+        # Only the gauge feed fails; observations keep succeeding, so the
+        # coordinator cycle stays successful throughout.
+        client.fail_gauges_with = ShmuConnectionError("gauge feed down")
+        now += timedelta(minutes=10)
+        await entry.runtime_data.async_refresh()
+        await hass.async_block_till_done()
+
+        assert entry.runtime_data.last_update_success is True
+        # Within the window the last reading is still served.
+        assert (
+            hass.states.get("sensor.hurbanovo_rain_gauge_precipitation").state == "0.4"
+        )
+        # ...while the station is unaffected.
+        assert hass.states.get("sensor.hurbanovo_temperature").state == "12.1"
+
+        now += OBSERVATION_STALE_AFTER + timedelta(minutes=1)
+        await entry.runtime_data.async_refresh()
+        await hass.async_block_till_done()
+
+        assert (
+            hass.states.get("sensor.hurbanovo_rain_gauge_precipitation").state
+            == "unavailable"
+        )
+        # The station's own entities are untouched by the gauge outage.
+        assert hass.states.get("sensor.hurbanovo_temperature").state == "12.1"

@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- New **Rain gauge precipitation** sensor, reading SHMÚ's automatic rain-gauge network — a second network of ~190 gauges, disjoint from and roughly three times denser than the 27 synoptic stations (~16 km spacing against ~40 km).
+Precipitation is the measurement that varies most sharply over short distances, so this matters: sampled over a grid of points across the country, the nearest rain gauge is a median **10 km** away against **28 km** for the nearest synoptic station, and is the closer of the two at 92% of points.
+The gauge is chosen from your measurement location (as the forecast and radar already are) and named in the sensor's attributes, along with its distance.
+Your station's existing **Precipitation** sensor is unchanged and still reads the station — the two are different networks measuring different places, so neither silently stands in for the other.
+- SHMÚ publishes no coordinates for these gauges, which is why the network went unused until now; they were recovered from the SHMÚ page that plots the gauges on a map and cross-checked against the existing station catalogue, which the same page also carries (the two independent sources agree to a median of 272 m).
+
 ### Fixed
 
 - The forecast now refreshes with every ALADIN run (4×/day) instead of once a day. SHMÚ publishes four runs daily, but only the 00 UTC one reaches +102 h — the 06/12/18 UTC runs stop at +72 h. The integration required every hour through +102, so it silently discarded three runs in four and served a forecast up to 24 hours old. Today's forecast is noticeably closer to reality as a result: on a live comparison the discarded 06 UTC run corrected the current afternoon by 1.5–2.4 °C and raised the next day's high by 0.7 °C.

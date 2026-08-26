@@ -49,6 +49,15 @@ async def async_get_config_entry_diagnostics(
     forecast = data.forecast
     radar = data.radar
 
+    gauge = coordinator.gauge
+    gauge_snapshot = data.gauge_observations
+    gauge_record = (
+        gauge_snapshot.observations.get(gauge.ind_zra)
+        if gauge_snapshot is not None
+        else None
+    )
+    gauge_served = coordinator.gauge_observation  # what the sensor shows
+
     # Shared resolver — exactly what the weather entity uses, but the full
     # evaluation (every candidate + which won) so a dump explains the result.
     resolution = data.explain_condition(station, served)
@@ -109,6 +118,33 @@ async def async_get_config_entry_diagnostics(
             "station_present": observation is not None,
             # Full original SHMÚ row — invaluable for "why is sensor X null".
             "raw_record": dict(observation.raw) if observation else None,
+        },
+        # The rain gauge is derived from the measurement location, so naming
+        # it discloses roughly where that is — but no more finely than the
+        # radar block below already does (a ~0.1° box is smaller than this
+        # network's ~260 km² per-gauge cell), so the module's no-home-
+        # coordinates rule still holds. The distance is rounded for the same
+        # reason: a full-precision one would narrow the point to a thin ring.
+        # The gauge's own coordinates are omitted — they add nothing over the
+        # public catalogue.
+        "rain_gauge": {
+            "ind_zra": gauge.ind_zra,
+            "name": gauge.name,
+            "distance_km": round(
+                gauge.distance_km(
+                    coordinator.location_latitude, coordinator.location_longitude
+                ),
+                1,
+            ),
+            "source": gauge_snapshot.source if gauge_snapshot else None,
+            "fetched_at": gauge_snapshot.fetched_at.isoformat()
+            if gauge_snapshot
+            else None,
+            "gauge_count": len(gauge_snapshot.observations) if gauge_snapshot else None,
+            "gauge_present": gauge_record is not None,
+            # False while a carried-forward reading is still being served.
+            "reading_stale": gauge_served is None,
+            "raw_record": dict(gauge_record.raw) if gauge_record else None,
         },
         "web_conditions": None
         if web is None

@@ -65,6 +65,18 @@ async def test_config_entry_diagnostics(
     assert diag["warnings"]["active_for_location"] == []
     # The measurement-location mode is surfaced (default = same as station).
     assert diag["coordinator"]["location_mode"] == LOCATION_MODE_STATION
+    # The rain gauge that feeds the precipitation sensor is identified, so
+    # "why is my gauge sensor unavailable" reports are self-contained.
+    gauge = diag["rain_gauge"]
+    assert (gauge["ind_zra"], gauge["name"]) == (17720, "Kolárovo")
+    assert gauge["gauge_present"] is True
+    assert gauge["reading_stale"] is False
+    assert gauge["raw_record"]["zra_uhrn"] == 0.4
+    # Its coordinates are not dumped — they add nothing over the public
+    # catalogue, and the distance is rounded so it cannot narrow the
+    # measurement point to a thin ring.
+    assert "latitude" not in gauge
+    assert gauge["distance_km"] == round(gauge["distance_km"], 1)
     # The user's HA home coordinates must never leak into the dump.
     assert "latitude" not in diag["coordinator"]
     assert "home" not in repr(diag).lower()
