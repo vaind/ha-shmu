@@ -143,11 +143,14 @@ def _cap_datetime(element: ET.Element | None) -> datetime | None:
         parsed = datetime.fromisoformat(text)
     except ValueError:
         return None
-    # SHMÚ CAP times carry an explicit offset (CAP 1.2 requires one), but if
-    # one ever arrives naive, treat it as UTC rather than letting astimezone()
-    # silently assume the host's local zone. Note this feed's fallback is *not*
-    # the observations' SEC: nothing documents a zone for a CAP time that has
-    # lost its offset, so the format's own default is the safer guess.
+    # SHMÚ CAP times carry an explicit offset: CAP 1.2 requires one, and so
+    # defines no default for a value that has lost it. If one ever arrives
+    # naive we therefore have nothing to read the zone from, and UTC is this
+    # parser's deterministic fallback — a fixed (if possibly wrong) instant
+    # beats letting astimezone() vary the result with the host's local zone.
+    # Note it is deliberately *not* the observations' SEC: that zone is
+    # documented for `minuta` by the observation feeds, and says nothing about
+    # this one.
     if parsed.tzinfo is None:
         return parsed.replace(tzinfo=UTC)
     return parsed.astimezone(UTC)
