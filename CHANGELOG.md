@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- The weather entity's `observation_time` attribute is no longer an hour in the future. SHMÚ stamps the observation timestamp in SEC (Central European Time, a fixed UTC+1) — both feeds' metadata say so — but it was read as UTC. Readings themselves were never affected: every record in a file shares the offset, so "newest minute wins" picked the same reading either way; only the reported time of the observation was wrong.
 - The forecast now refreshes with every ALADIN run (4×/day) instead of once a day. SHMÚ publishes four runs daily, but only the 00 UTC one reaches +102 h — the 06/12/18 UTC runs stop at +72 h. The integration required every hour through +102, so it silently discarded three runs in four and served a forecast up to 24 hours old. Today's forecast is noticeably closer to reality as a result: on a live comparison the discarded 06 UTC run corrected the current afternoon by 1.5–2.4 °C and raised the next day's high by 0.7 °C.
 - Today's daily forecast no longer shows *yesterday* as its first entry in the hours after midnight. The series is now re-bounded to the current local day on every update, rather than only when a new model run appears — between local midnight and the next run being published (several hours), the leading day was the one that had just ended.
 
