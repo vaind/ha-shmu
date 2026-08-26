@@ -64,6 +64,7 @@
       "wind_gust": { "name": "Nárazy vetra" },
       "wind_bearing": { "name": "Smer vetra" },
       "precipitation": { "name": "Zrážky" },
+      "rain_gauge_precipitation": { "name": "Zrážky zo zrážkomera" },
       "snow_depth": { "name": "Výška snehu" },
       "visibility": { "name": "Dohľadnosť" },
       "ground_temperature": { "name": "Prízemná teplota" },

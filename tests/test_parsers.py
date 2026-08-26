@@ -10,6 +10,7 @@ from custom_components.shmu.shmu_opendata.exceptions import ShmuDataError
 from custom_components.shmu.shmu_opendata.parsers import (
     list_directory,
     parse_cap_alert,
+    parse_gauge_observations,
     parse_observations,
 )
 
@@ -46,6 +47,58 @@ def test_parse_observations_keeps_latest_minute_per_station(fixture) -> None:
 def test_parse_observations_rejects_malformed() -> None:
     with pytest.raises(ShmuDataError):
         parse_observations(b"not json")
+
+
+def test_parse_gauge_observations_keeps_latest_minute_per_gauge(fixture) -> None:
+    gauges = parse_gauge_observations(fixture("gauge_observations.json"))
+
+    # Three minutes for 17720, listed out of order; the 06:52 record wins.
+    kolarovo = gauges[17720]
+    # As with `aws1min`, `minuta` is SEC (fixed UTC+1): 06:52 SEC is 05:52 UTC.
+    assert kolarovo.measured_at == datetime(2026, 5, 17, 5, 52, tzinfo=UTC)
+    assert kolarovo.measured_at.utcoffset() == timedelta(hours=1)
+    assert kolarovo.precipitation == 0.4
+    assert kolarovo.temperature == 12.1
+
+
+def test_parse_gauge_observations_ignores_backfilled_records(fixture) -> None:
+    """The feed mixes hours-old backfill in with the current minutes.
+
+    Verified live 2026-08-26: one snapshot carried records spanning 8 hours.
+    Taking anything but the newest per gauge would surface a stale reading as
+    the current one.
+    """
+    gauges = parse_gauge_observations(fixture("gauge_observations.json"))
+
+    koliba = gauges[17140]
+    assert koliba.measured_at == datetime(2026, 5, 17, 5, 52, tzinfo=UTC)
+    assert koliba.precipitation == 1.2  # not the 02:15 backfill's 9.9
+
+
+def test_parse_gauge_observations_keeps_uncatalogued_ids(fixture) -> None:
+    """The catalogue is near-complete, not total, so ids may be unknown."""
+    assert 99999 in parse_gauge_observations(fixture("gauge_observations.json"))
+
+
+def test_parse_gauge_observations_skips_unusable_records() -> None:
+    payload = (
+        b'{"data": ['
+        b'{"ind_zra": null, "minuta": "2026-05-17T06:52:00", "zra_uhrn": 1.0},'
+        b'{"ind_zra": 17720, "minuta": "", "zra_uhrn": 1.0},'
+        b'{"ind_zra": 17720, "minuta": "not-a-time", "zra_uhrn": 1.0},'
+        b'{"ind_zra": 24295, "minuta": "2026-05-17T06:52:00", "zra_uhrn": null}'
+        b"]}"
+    )
+    gauges = parse_gauge_observations(payload)
+
+    assert set(gauges) == {24295}
+    # A null upstream value becomes None, not 0.0.
+    assert gauges[24295].precipitation is None
+
+
+def test_parse_gauge_observations_rejects_malformed() -> None:
+    with pytest.raises(ShmuDataError):
+        parse_gauge_observations(b"not json")
     with pytest.raises(ShmuDataError):
         parse_observations(b'{"no_data_key": true}')
 

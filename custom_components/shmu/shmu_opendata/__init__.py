@@ -8,6 +8,7 @@ from __future__ import annotations
 from ._ssl import create_ssl_context
 from .client import (
     ForecastSnapshot,
+    GaugeSnapshot,
     ObservationSnapshot,
     RadarFrame,
     RadarSnapshot,
@@ -18,7 +19,13 @@ from .client import (
 from .conditions import condition_from_weather_code
 from .exceptions import ShmuConnectionError, ShmuDataError, ShmuError
 from .forecast import ForecastStep
-from .models import Observation, Warning
+from .gauges import (
+    GAUGES,
+    Gauge,
+    get_gauge,
+    nearest_gauge,
+)
+from .models import GaugeObservation, Observation, Warning
 from .pressure import sea_level_pressure
 from .radar import RadarImage
 from .resolution import (
@@ -39,11 +46,15 @@ from .website import WebCondition
 __version__ = "0.1.0"
 
 __all__ = [
+    "GAUGES",
     "STATIONS",
     "ConditionCandidate",
     "ConditionResolution",
     "ForecastSnapshot",
     "ForecastStep",
+    "Gauge",
+    "GaugeObservation",
+    "GaugeSnapshot",
     "Observation",
     "ObservationSnapshot",
     "RadarFrame",
@@ -62,7 +73,9 @@ __all__ = [
     "condition_from_weather_code",
     "create_ssl_context",
     "explain_condition",
+    "get_gauge",
     "get_station",
+    "nearest_gauge",
     "nearest_station",
     "resolve_condition",
     "sea_level_pressure",

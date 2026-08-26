@@ -42,6 +42,9 @@ from .shmu_opendata import (
     ConditionResolution,
     ForecastSnapshot,
     ForecastStep,
+    Gauge,
+    GaugeObservation,
+    GaugeSnapshot,
     Observation,
     ObservationSnapshot,
     RadarFrame,
@@ -55,6 +58,7 @@ from .shmu_opendata import (
     WebConditionsSnapshot,
     explain_condition,
     get_station,
+    nearest_gauge,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -90,6 +94,40 @@ def _keep_previous[T](
         _LOGGER.warning("SHMÚ %s unavailable, keeping previous: %s", label, result)
         return fallback
     return result
+
+
+def _gauge_reading_is_current(
+    observation: GaugeObservation, snapshot: GaugeSnapshot
+) -> bool:
+    """Whether a gauge's newest record keeps up with the rest of its network.
+
+    The precipitation feed republishes backfill, so neither a gauge's presence
+    in a snapshot nor its timestamp merely *advancing* proves it is still
+    reporting: verified on the live archive, gauge 32100 was absent from every
+    snapshot of 2026-08-11 and then published 73 rows at once whose newest was
+    29 hours old — a run of records that advances minute by minute while being
+    a day behind the network.
+
+    So the reading is compared against the newest record anywhere in the same
+    snapshot, which is that feed's own notion of "now", rather than against
+    the wall clock. An absolute age check would work too now that `minuta` is
+    parsed in its documented zone (it was read as UTC until 2026-08-26, which
+    put every reading an hour in the future and would have made anything look
+    permanently fresh). The relative test is kept because it measures what
+    actually goes wrong here — a gauge falling behind *its own network* — and
+    holds regardless of the HA host's clock.
+
+    It does not by itself catch the whole feed freezing: that is covered
+    separately, by only counting a snapshot whose source path changed.
+
+    The threshold separates cleanly in practice — sampled across the 32-day
+    archive, 99.8% of gauge readings sit within 10 minutes of their snapshot's
+    newest record, and the stragglers are hours behind.
+    """
+    if not snapshot.observations:
+        return False
+    feed_now = max(o.measured_at for o in snapshot.observations.values())
+    return feed_now - observation.measured_at <= OBSERVATION_STALE_AFTER
 
 
 #: Slack when comparing a step's accumulation window to the gap before it.
@@ -194,6 +232,9 @@ class ShmuData:
     web_conditions: WebConditionsSnapshot | None
     forecast: ForecastSnapshot | None
     radar: RadarSnapshot | None
+    #: Rain-gauge readings. ``None`` until the first successful fetch — it is
+    #: a supplementary source, so the very first one may fail.
+    gauge_observations: GaugeSnapshot | None
 
     def active_warnings_for(self, latitude: float, longitude: float) -> list[Warning]:
         """Active warnings whose area covers the point, worst severity first.
@@ -327,14 +368,36 @@ class ShmuDataUpdateCoordinator(DataUpdateCoordinator[ShmuData]):
         self.location_latitude, self.location_longitude = self._resolve_location(
             hass, config_entry
         )
+        #: The rain gauge nearest the *measurement location* — a second,
+        #: denser SHMÚ network than the observation station (see
+        #: :mod:`shmu_opendata.gauges`). Resolved once, like the location
+        #: itself: an options change reloads the entry.
+        self.gauge: Gauge = nearest_gauge(
+            self.location_latitude, self.location_longitude
+        )
         #: Tracks station-presence so we log only on transitions, not every poll.
         self._station_present = True
+        #: Same, for the rain gauge — it drops out of snapshots more readily
+        #: than a synoptic station, so a silent sensor must be diagnosable.
+        self._gauge_present = True
         #: Last reading we saw for the station and when we obtained it; served
         #: across one-cycle dropouts so entities don't flicker (see
         #: `observation`). Freshness is measured from acquisition time, not the
         #: reading's upstream timestamp.
         self._last_observation: Observation | None = None
         self._last_observation_at: datetime | None = None
+        #: Same carry-forward for the rain gauge. Updated only from a genuine
+        #: gauge fetch (see ``_fetch``), never from a kept-previous snapshot —
+        #: otherwise a total gauge-feed outage would refresh the acquisition
+        #: time every cycle and the sensor would serve a frozen reading for
+        #: ever instead of going unavailable.
+        self._last_gauge_observation: GaugeObservation | None = None
+        self._last_gauge_observation_at: datetime | None = None
+        #: Source path of the newest gauge snapshot we have actually seen. The
+        #: client returns the *previous* object when the newest file has not
+        #: changed, and an unchanged file carries no new reading — so this is
+        #: what distinguishes a new snapshot from a cache hit.
+        self._last_gauge_source: str | None = None
         #: Recently observed publish lags (s) for offset auto-tuning.
         self._recent_lags: deque[float] = deque(maxlen=5)
         #: Update health, surfaced in diagnostics.
@@ -388,6 +451,20 @@ class ShmuDataUpdateCoordinator(DataUpdateCoordinator[ShmuData]):
         if obs is None or self._last_observation_at is None:
             return None
         if dt_util.utcnow() - self._last_observation_at > OBSERVATION_STALE_AFTER:
+            return None
+        return obs
+
+    @property
+    def gauge_observation(self) -> GaugeObservation | None:
+        """The nearest rain gauge's reading, carried across brief dropouts.
+
+        Mirrors :attr:`observation`: the last reading we actually fetched, or
+        ``None`` once it is older than ``OBSERVATION_STALE_AFTER``.
+        """
+        obs = self._last_gauge_observation
+        if obs is None or self._last_gauge_observation_at is None:
+            return None
+        if dt_util.utcnow() - self._last_gauge_observation_at > OBSERVATION_STALE_AFTER:
             return None
         return obs
 
@@ -506,6 +583,34 @@ class ShmuDataUpdateCoordinator(DataUpdateCoordinator[ShmuData]):
             )
         self._station_present = present
 
+    def _log_gauge_presence(self, snapshot: GaugeSnapshot) -> None:
+        """Log rain-gauge presence transitions.
+
+        The gauge network is denser but patchier than the synoptic one, so a
+        gauge dropping out is the likeliest reason for a silent precipitation
+        sensor. Called only with a freshly fetched snapshot.
+        """
+        ind_zra = self.gauge.ind_zra
+        present = ind_zra in snapshot.observations
+        if present and not self._gauge_present:
+            _LOGGER.info(
+                "SHMÚ rain gauge %s is back in the precipitation snapshot; its "
+                "sensor recovers once that reading is current with the rest of "
+                "the network, which a backfill dump is not",
+                ind_zra,
+            )
+        elif not present and self._gauge_present:
+            _LOGGER.info(
+                "SHMÚ rain gauge %s (%s) is not in the latest precipitation "
+                "snapshot (%s); its last reading is served for up to %s more, "
+                "after which the sensor goes unavailable until it reports again",
+                ind_zra,
+                self.gauge.name,
+                snapshot.source,
+                OBSERVATION_STALE_AFTER,
+            )
+        self._gauge_present = present
+
     async def _async_update_data(self) -> ShmuData:
         try:
             data = await self._fetch()
@@ -568,13 +673,20 @@ class ShmuDataUpdateCoordinator(DataUpdateCoordinator[ShmuData]):
             previous=previous.radar if previous else None,
             tz=self.hass.config.time_zone,
         )
+        # A second, ~3x denser observation network (~70 KB vs the 392 KB
+        # observation snapshot), on the same 5-minute grid and with the same
+        # path-identity cache.
+        gauges_coro = self._client.async_get_gauge_observations(
+            previous=previous.gauge_observations if previous else None
+        )
 
-        observations, warnings, web, forecast, radar = await asyncio.gather(
+        observations, warnings, web, forecast, radar, gauges = await asyncio.gather(
             observations_coro,
             warnings_coro,
             web_coro,
             forecast_coro,
             radar_coro,
+            gauges_coro,
             return_exceptions=True,
         )
 
@@ -609,10 +721,42 @@ class ShmuDataUpdateCoordinator(DataUpdateCoordinator[ShmuData]):
         )
         radar = _keep_previous(radar, "radar", previous.radar if previous else None)
 
+        # Record the gauge reading *here*, while a genuine fetch is still
+        # distinguishable from the kept-previous fallback below. Doing it
+        # after `_keep_previous` would refresh the acquisition time from a
+        # stale snapshot on every cycle of a gauge-feed outage, so the sensor
+        # would never go unavailable.
+        #
+        # Only a reading that is current *within its own snapshot* counts (see
+        # `_gauge_reading_is_current`); a backfilled one leaves both fields
+        # untouched, so the acquisition time keeps ageing and the sensor goes
+        # unavailable on schedule rather than serving day-old rain as current.
+        if not isinstance(gauges, BaseException) and (
+            gauges.source != self._last_gauge_source
+        ):
+            # Only a *new* snapshot can carry a new reading: when the newest
+            # file is unchanged the client hands back the previous object, and
+            # counting that as an acquisition would keep a frozen reading
+            # alive for as long as the listing kept succeeding. (SHMÚ has not
+            # been seen to stall — 9190 files over the 32-day archive with no
+            # gap — but a cache hit is not evidence of a reading either way.)
+            self._last_gauge_source = gauges.source
+            self._log_gauge_presence(gauges)
+            gauge_obs = gauges.observations.get(self.gauge.ind_zra)
+            if gauge_obs is not None and _gauge_reading_is_current(gauge_obs, gauges):
+                self._last_gauge_observation = gauge_obs
+                self._last_gauge_observation_at = dt_util.utcnow()
+        gauges = _keep_previous(
+            gauges,
+            "rain gauges",
+            previous.gauge_observations if previous else None,
+        )
+
         return ShmuData(
             observations=observations,
             warnings=warnings,
             web_conditions=web,
             forecast=forecast,
             radar=radar,
+            gauge_observations=gauges,
         )

@@ -42,6 +42,24 @@ class Observation:
 
 
 @dataclass(frozen=True, slots=True)
+class GaugeObservation:
+    """Latest 1-minute reading for a single rain-gauge station.
+
+    The ``aps1min`` feed carries only two measurements: ``precipitation`` (mm,
+    the 1-minute sum — same quantity and window as
+    :attr:`Observation.precipitation`) and ``temperature`` (°C at 2 m). Either
+    may be ``None``. ``ind_zra`` is this network's own id space; it never
+    collides with :attr:`Observation.ind_kli`.
+    """
+
+    ind_zra: int
+    measured_at: datetime
+    precipitation: float | None
+    temperature: float | None
+    raw: Mapping[str, Any] = field(repr=False)
+
+
+@dataclass(frozen=True, slots=True)
 class Warning:
     """A single SHMÚ CAP 1.2 meteorological alert."""
 

@@ -64,6 +64,7 @@
       "wind_gust": { "name": "Wind gust" },
       "wind_bearing": { "name": "Wind bearing" },
       "precipitation": { "name": "Precipitation" },
+      "rain_gauge_precipitation": { "name": "Rain gauge precipitation" },
       "snow_depth": { "name": "Snow depth" },
       "visibility": { "name": "Visibility" },
       "ground_temperature": { "name": "Ground temperature" },

@@ -9,6 +9,13 @@ BASE_URL: Final = "https://opendata.shmu.sk"
 #: Directory holding per-day folders of 5-minute automatic-station snapshots.
 OBSERVATIONS_PATH: Final = "/meteorology/climate/now/data"
 
+#: Directory holding per-day folders of 5-minute rain-gauge snapshots. A
+#: second, complementary observation network to :data:`OBSERVATIONS_PATH`:
+#: ~190 gauges keyed by ``ind_zra`` (disjoint from the ``ind_kli`` stations),
+#: carrying only a 1-minute precipitation sum and a 2 m temperature. Same
+#: envelope and 5-minute cadence; ~70 KB per file.
+PRECIPITATION_PATH: Final = "/meteorology/precipitation/now/data"
+
 #: Directory holding per-day / per-issuance folders of CAP 1.2 alert XML.
 WARNINGS_PATH: Final = "/meteorology/weather/alerts/cap"
 
