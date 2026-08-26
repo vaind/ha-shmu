@@ -21,6 +21,7 @@ from custom_components.shmu.diagnostics import (
     async_get_config_entry_diagnostics,
     async_get_device_diagnostics,
 )
+from custom_components.shmu.shmu_opendata import ShmuConnectionError
 
 from .test_init import _FakeClient
 
@@ -65,6 +66,19 @@ async def test_config_entry_diagnostics(
     assert diag["warnings"]["active_for_location"] == []
     # The measurement-location mode is surfaced (default = same as station).
     assert diag["coordinator"]["location_mode"] == LOCATION_MODE_STATION
+    # The rain gauge that feeds the precipitation sensor is identified, so
+    # "why is my gauge sensor unavailable" reports are self-contained.
+    gauge = diag["rain_gauge"]
+    assert (gauge["ind_zra"], gauge["name"]) == (17720, "Kolárovo")
+    assert gauge["gauge_present"] is True
+    assert gauge["reading_stale"] is False
+    assert gauge["raw_record"]["zra_uhrn"] == 0.4
+    # Neither its coordinates nor the distance to it are dumped: a distance
+    # to a public point places the measurement location on a narrow ring,
+    # which combined with the coarsened radar box below would pin it down far
+    # more tightly than either value alone.
+    assert "latitude" not in gauge
+    assert "distance_km" not in gauge
     # The user's HA home coordinates must never leak into the dump.
     assert "latitude" not in diag["coordinator"]
     assert "home" not in repr(diag).lower()
@@ -100,6 +114,11 @@ async def test_diagnostics_never_leak_custom_location(
     assert str(sentinel_lon) not in dump
     assert "latitude" not in diag["coordinator"]
     assert "home" not in dump.lower()
+    # Nor any distance to a *public* point: the rain gauge's coordinates are
+    # published, so a distance to it would place the private location on a
+    # narrow ring — which, intersected with the coarsened radar box, localises
+    # it far better than either value on its own.
+    assert "distance" not in dump
 
 
 async def test_device_diagnostics_matches_config_entry(
@@ -122,3 +141,37 @@ async def test_device_diagnostics_matches_config_entry(
     # One device per entry: the device dump is the full config-entry dump.
     assert device_diag == entry_diag
     assert device_diag["station"]["ind_kli"] == 11858
+
+
+async def test_diagnostics_when_the_gauge_feed_never_succeeded(
+    hass: HomeAssistant, load: Callable[[str], bytes]
+) -> None:
+    """A dump must still be produceable with no gauge snapshot at all.
+
+    Diagnostics are what a user attaches to a bug report, so the branch where
+    the supplementary feed has failed since startup is exactly when they need
+    to work.
+    """
+    client = _FakeClient(load)
+    client.fail_gauges_with = ShmuConnectionError("gauge feed down at startup")
+    entry = MockConfigEntry(
+        domain=DOMAIN, unique_id="11858", title="Hurbanovo", data={CONF_IND_KLI: 11858}
+    )
+    entry.add_to_hass(hass)
+
+    with patch("custom_components.shmu.ShmuClient", return_value=client):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    diag = await async_get_config_entry_diagnostics(hass, entry)
+
+    gauge = diag["rain_gauge"]
+    # The chosen gauge is still named — that is static, not fetched.
+    assert (gauge["ind_zra"], gauge["name"]) == (17720, "Kolárovo")
+    # ...but nothing was ever received for it.
+    assert gauge["source"] is None
+    assert gauge["fetched_at"] is None
+    assert gauge["gauge_count"] is None
+    assert gauge["gauge_present"] is False
+    assert gauge["reading_stale"] is True
+    assert gauge["raw_record"] is None

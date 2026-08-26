@@ -214,6 +214,7 @@ async def async_setup_entry(
         for description in TIMESTAMPS
     )
     entities.append(ShmuSeaLevelPressureSensor(coordinator, station))
+    entities.append(ShmuRainGaugePrecipitationSensor(coordinator, station))
     entities.append(ShmuWarningLevelSensor(coordinator, station))
     async_add_entities(entities)
 
@@ -269,6 +270,71 @@ class ShmuSeaLevelPressureSensor(ShmuStationEntity, SensorEntity):
         return sea_level_pressure(
             obs.pressure, self._station.elevation, obs.temperature
         )
+
+
+class ShmuRainGaugePrecipitationSensor(ShmuStationEntity, SensorEntity):
+    """Precipitation from the rain gauge nearest the measurement location.
+
+    SHMÚ runs a second, ~3x denser observation network beside the synoptic
+    stations (see :mod:`shmu_opendata.gauges`), so this usually measures rain
+    much closer to the user than the station's own ``precipitation`` sensor —
+    which is left untouched, because silently swapping one network's reading
+    for another's under the same name would be exactly the wrong surprise.
+    The two are expected to differ; the attributes say which gauge fed this.
+
+    The gauge is chosen from the *measurement location* (as the forecast and
+    radar are), not the station, and is fixed for the life of the entry.
+
+    The unique id keys on the **station**, not the gauge, so changing the
+    measurement location keeps this entity and its history rather than
+    orphaning it and starting afresh. The cost is that such a history is
+    *mixed*: long-term statistics keep only the aggregated value per period,
+    never the attributes, so a series spanning a location change holds
+    readings from two gauges with nothing recorded to say which fed when. The
+    attributes describe the gauge in use **now**, not the history. Keying on
+    the gauge would make the boundary explicit, but at the price of discarding
+    the history every time the location moves — the worse trade for a sensor
+    whose whole premise is "the gauge nearest wherever I am".
+    """
+
+    _attr_translation_key = "rain_gauge_precipitation"
+    _attr_device_class = SensorDeviceClass.PRECIPITATION
+    _attr_native_unit_of_measurement = UnitOfPrecipitationDepth.MILLIMETERS
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(self, coordinator, station) -> None:
+        """Initialise the rain-gauge precipitation sensor."""
+        super().__init__(coordinator, station)
+        self._attr_unique_id = f"{station.ind_kli}_rain_gauge_precipitation"
+        gauge = coordinator.gauge
+        self._attr_extra_state_attributes = {
+            "gauge_ind_zra": gauge.ind_zra,
+            "gauge_name": gauge.name,
+            "gauge_distance_km": round(
+                gauge.distance_km(
+                    coordinator.location_latitude, coordinator.location_longitude
+                ),
+                1,
+            ),
+        }
+
+    @property
+    def available(self) -> bool:
+        """Follows the *gauge's* reading, not the station's.
+
+        The two networks are independent: the station dropping out of a
+        snapshot says nothing about the gauge, and vice versa. Overrides
+        :attr:`ShmuStationEntity.available`, which gates on the station.
+        """
+        return self.coordinator.gauge_observation is not None
+
+    @property
+    def native_value(self) -> StateType:
+        """The gauge's 1-minute precipitation sum, or ``None``."""
+        obs = self.coordinator.gauge_observation
+        if obs is None:
+            return None
+        return obs.precipitation
 
 
 class ShmuTimestampSensor(ShmuStationEntity, SensorEntity):

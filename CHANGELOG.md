@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- New **Rain gauge precipitation** sensor, reading SHMÚ's automatic rain-gauge network — a second network of ~190 gauges, disjoint from and roughly three times denser than the 27 synoptic stations (~16 km spacing against ~40 km).
+Precipitation is the measurement that varies most sharply over short distances, so this matters: sampled over a grid of points across the country, the nearest rain gauge is a median **10 km** away against **28 km** for the nearest synoptic station, and is the closer of the two at 92% of points.
+The gauge is chosen from your measurement location (as the forecast and radar already are) and named in the sensor's attributes, along with its distance.
+Your station's existing **Precipitation** sensor is unchanged and still reads the station — the two are different networks measuring different places, so neither silently stands in for the other.
+- SHMÚ's open-data server publishes no coordinates for these gauges, which is why the network went unused until now; they were recovered from the SHMÚ website page that plots the gauges on a map, and cross-checked against the existing station catalogue, which the same page also carries (the two independent sources agree to a median of 272 m).
+
 ### Fixed
 
 - The weather entity's `observation_time` attribute is no longer an hour in the future. SHMÚ stamps the observation timestamp in SEC (Central European Time, a fixed UTC+1) — both feeds' metadata say so — but it was read as UTC. Readings themselves were never affected: every record in a file shares the offset, so "newest minute wins" picked the same reading either way; only the reported time of the observation was wrong.
