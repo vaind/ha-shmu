@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
@@ -62,6 +63,10 @@ class _FakeClient:
         #: When set, only the rain-gauge fetch raises — that feed is
         #: supplementary, so it fails independently of the observations.
         self.fail_gauges_with: Exception | None = None
+        #: Minutes to advance every gauge reading's ``measured_at`` by. The
+        #: fixture is static, so by default a refetch returns the *same*
+        #: minute — which is exactly what upstream backfill looks like.
+        self.gauge_minutes_advanced: int = 0
         #: Coordinates the forecast/radar fetchers were last called with, so
         #: tests can assert the measurement location reaches the client.
         self.forecast_coords: tuple[float, float] | None = None
@@ -90,6 +95,12 @@ class _FakeClient:
         gauges = parse_gauge_observations(self._load("gauge_observations.json"))
         if self.drop_gauge is not None:
             gauges.pop(self.drop_gauge, None)
+        if self.gauge_minutes_advanced:
+            shift = timedelta(minutes=self.gauge_minutes_advanced)
+            gauges = {
+                k: replace(v, measured_at=v.measured_at + shift)
+                for k, v in gauges.items()
+            }
         return GaugeSnapshot(
             observations=gauges,
             source=f"test-gauges-{self._serial}",
@@ -623,3 +634,73 @@ async def test_rain_gauge_goes_unavailable_during_a_feed_outage(
         )
         # The station's own entities are untouched by the gauge outage.
         assert hass.states.get("sensor.hurbanovo_temperature").state == "12.1"
+
+
+async def test_rain_gauge_backfill_does_not_keep_a_stale_reading_alive(
+    hass: HomeAssistant, entry: MockConfigEntry, load: Callable[[str], bytes]
+) -> None:
+    """A gauge present in every snapshot is not necessarily still reporting.
+
+    The feed carries backfill, so an offline gauge can keep appearing with an
+    unchanged, old record — verified upstream on 2026-08-11, where gauge 32100
+    was absent all day and then published 73 rows at once whose newest was 29
+    hours old. If mere presence counted as a fresh reading the sensor would
+    renew itself for ever and never go unavailable.
+    """
+    client = _FakeClient(load)
+    now = datetime(2026, 5, 17, 12, 0, tzinfo=UTC)
+
+    def _now() -> datetime:
+        return now
+
+    with (
+        patch("custom_components.shmu.coordinator.dt_util.utcnow", _now),
+        patch("custom_components.shmu.ShmuClient", return_value=client),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+        assert (
+            hass.states.get("sensor.hurbanovo_rain_gauge_precipitation").state == "0.4"
+        )
+
+        # Every fetch succeeds and the gauge is present every time — but its
+        # reading never advances past the minute we already have.
+        for _ in range(3):
+            now += timedelta(minutes=12)
+            await entry.runtime_data.async_refresh()
+            await hass.async_block_till_done()
+
+        assert entry.runtime_data.last_update_success is True
+        assert (
+            hass.states.get("sensor.hurbanovo_rain_gauge_precipitation").state
+            == "unavailable"
+        )
+
+
+async def test_rain_gauge_stays_available_while_its_readings_advance(
+    hass: HomeAssistant, entry: MockConfigEntry, load: Callable[[str], bytes]
+) -> None:
+    """The converse: a genuinely reporting gauge never goes unavailable."""
+    client = _FakeClient(load)
+    now = datetime(2026, 5, 17, 12, 0, tzinfo=UTC)
+
+    def _now() -> datetime:
+        return now
+
+    with (
+        patch("custom_components.shmu.coordinator.dt_util.utcnow", _now),
+        patch("custom_components.shmu.ShmuClient", return_value=client),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        # Well past the staleness window, but each poll brings a newer minute.
+        for step in range(1, 4):
+            now += timedelta(minutes=12)
+            client.gauge_minutes_advanced = 12 * step
+            await entry.runtime_data.async_refresh()
+            await hass.async_block_till_done()
+
+        assert (
+            hass.states.get("sensor.hurbanovo_rain_gauge_precipitation").state == "0.4"
+        )

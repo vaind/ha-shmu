@@ -688,8 +688,31 @@ class ShmuDataUpdateCoordinator(DataUpdateCoordinator[ShmuData]):
             self._log_gauge_presence(gauges)
             gauge_obs = gauges.observations.get(self.gauge.ind_zra)
             if gauge_obs is not None:
-                self._last_gauge_observation = gauge_obs
-                self._last_gauge_observation_at = dt_util.utcnow()
+                # Presence is not freshness. The feed carries backfill, so a
+                # gauge can reappear carrying only *old* rows: verified on the
+                # live archive, gauge 32100 was absent all of 2026-08-11 and
+                # then published 73 rows at once whose newest was 29 hours
+                # old. Treating that as a new reading would present day-old
+                # rain as the current value, and keep renewing it.
+                #
+                # So freshness is "this gauge's own timestamp advanced", not
+                # "a row was present". That is a *relative* test on purpose:
+                # comparing `measured_at` against the wall clock would be the
+                # stronger check, but `minuta`'s zone is not currently
+                # trustworthy (SHMÚ documents CET while the parser reads UTC),
+                # and an hour-shifted reading would read as permanently fresh.
+                # Comparing two values from the same feed cancels that out.
+                previous_obs = self._last_gauge_observation
+                if (
+                    previous_obs is None
+                    or gauge_obs.measured_at > previous_obs.measured_at
+                ):
+                    self._last_gauge_observation = gauge_obs
+                    self._last_gauge_observation_at = dt_util.utcnow()
+                elif gauge_obs.measured_at == previous_obs.measured_at:
+                    # Same minute, possibly a corrected value: keep the newer
+                    # object, but it is not evidence of a new reading.
+                    self._last_gauge_observation = gauge_obs
         gauges = _keep_previous(
             gauges,
             "rain gauges",
