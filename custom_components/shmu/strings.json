@@ -69,6 +69,8 @@
       "ground_temperature": { "name": "Ground temperature" },
       "global_radiation": { "name": "Global radiation" },
       "weather_code": { "name": "Weather code" },
+      "freezing_level": { "name": "Freezing level" },
+      "temperature_850hpa": { "name": "Temperature at 850 hPa" },
       "observation_released": { "name": "Observation released" },
       "observation_fetched": { "name": "Observation fetched" },
       "forecast_run": { "name": "Forecast model run" },

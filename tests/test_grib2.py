@@ -11,6 +11,7 @@ from custom_components.shmu.shmu_opendata.grib2 import iter_fields
 _T2M = (0, 0, 0, 103)
 _TCC = (192, 128, 164, 1)
 _OROGRAPHY = (0, 3, 5, 1)  # the only DRT 5.4 (IEEE) message, hour 000 only
+_T_PRESSURE = (0, 0, 0, 100)  # temperature, published on five pressure levels
 
 
 def test_iter_fields_decodes_simple_packing(fixture) -> None:
@@ -70,3 +71,39 @@ def test_truncated_message_raises(fixture) -> None:
 def test_non_grib_payload_raises() -> None:
     with pytest.raises(ShmuDataError, match="Expected 'GRIB'"):
         list(iter_fields(b"<html>not a grib file</html>"))
+
+
+def test_pressure_level_messages_are_addressable(fixture) -> None:
+    """Five same-``param`` messages differ only by level — and must survive it.
+
+    Temperature on the 925/850/700/500/250 hPa levels shares one ``param``, so
+    without the level they collapse onto a single key (issue #44).
+    """
+    fields = list(iter_fields(fixture("aladin_upper_000.grb")))
+    temperatures = [f for f in fields if f.param == _T_PRESSURE]
+    assert [f.level for f in temperatures] == [
+        92500.0,
+        85000.0,
+        70000.0,
+        50000.0,
+        25000.0,
+    ]
+    # Distinct fields, not five views of one message.
+    assert len({f.values for f in temperatures}) == len(temperatures)
+
+
+def test_surface_message_reports_its_own_level(fixture) -> None:
+    by_param = {f.param: f for f in iter_fields(fixture("aladin_001.grb"))}
+    assert by_param[_T2M].level == 2.0  # the 2 m screen
+    assert by_param[(0, 2, 2, 103)].level == 10.0  # 10 m wind
+
+
+def test_missing_level_is_none_not_an_absurd_exponent(fixture) -> None:
+    """GRIB's all-ones "missing" level must not decode as ``10**127``."""
+    data = bytearray(fixture("aladin_002.grb"))
+    pos = 16
+    while data[pos + 4] != 4:  # first Section 4 (product definition)
+        pos += int.from_bytes(data[pos : pos + 4], "big")
+    data[pos + 23] = 0xFF  # scale factor
+    data[pos + 24 : pos + 28] = b"\xff\xff\xff\xff"  # scaled value
+    assert next(iter_fields(bytes(data))).level is None

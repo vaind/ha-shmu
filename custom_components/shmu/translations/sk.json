@@ -69,6 +69,8 @@
       "ground_temperature": { "name": "Prízemná teplota" },
       "global_radiation": { "name": "Globálne žiarenie" },
       "weather_code": { "name": "Kód počasia" },
+      "freezing_level": { "name": "Nulová izoterma" },
+      "temperature_850hpa": { "name": "Teplota v 850 hPa" },
       "observation_released": { "name": "Meranie zverejnené" },
       "observation_fetched": { "name": "Meranie stiahnuté" },
       "forecast_run": { "name": "Beh predpovedného modelu" },

@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- Two new **opt-in** sensors read from the ALADIN model run: **Freezing level** — the height of the 0 °C isotherm above sea level, the number behind "how high does the snow line sit today" — and **Temperature at 850 hPa**, the standard air-mass indicator at roughly 1450 m, above the valley inversions and daytime heating a 2 m thermometer sees. Both are disabled by default; enable them from the device page if you want them. They cost nothing extra upstream: the forecast files have always carried these fields on every download, and every message in them was already being decoded and then discarded.
+
 ### Fixed
 
 - The forecast now refreshes with every ALADIN run (4×/day) instead of once a day. SHMÚ publishes four runs daily, but only the 00 UTC one reaches +102 h — the 06/12/18 UTC runs stop at +72 h. The integration required every hour through +102, so it silently discarded three runs in four and served a forecast up to 24 hours old. Today's forecast is noticeably closer to reality as a result: on a live comparison the discarded 06 UTC run corrected the current afternoon by 1.5–2.4 °C and raised the next day's high by 0.7 °C.
