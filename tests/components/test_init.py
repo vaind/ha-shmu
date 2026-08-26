@@ -777,3 +777,59 @@ async def test_rain_gauge_cache_hits_do_not_keep_a_frozen_reading_alive(
             hass.states.get("sensor.hurbanovo_rain_gauge_precipitation").state
             == "unavailable"
         )
+
+
+async def test_setup_succeeds_when_the_gauge_feed_fails_from_the_start(
+    hass: HomeAssistant, entry: MockConfigEntry, load: Callable[[str], bytes]
+) -> None:
+    """The rain-gauge feed is supplementary: losing it must not cost the entry.
+
+    This is the branch where there is no previous snapshot to fall back on, so
+    ``ShmuData.gauge_observations`` is ``None`` for the whole life of the
+    entry. Everything driven by the observation feed has to carry on, and only
+    the gauge sensor goes unavailable.
+    """
+    client = _FakeClient(load)
+    client.fail_gauges_with = ShmuConnectionError("gauge feed down at startup")
+
+    with patch("custom_components.shmu.ShmuClient", return_value=client):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    assert entry.state is ConfigEntryState.LOADED
+    assert entry.runtime_data.last_update_success is True
+    assert entry.runtime_data.data.gauge_observations is None
+
+    # The station's own entities are untouched by the gauge feed being down.
+    assert hass.states.get("sensor.hurbanovo_temperature").state == "12.1"
+    assert hass.states.get("sensor.hurbanovo_precipitation").state == "0.2"
+    assert hass.states.get("weather.hurbanovo").state == "rainy"
+
+    # The gauge sensor exists but has never had a reading.
+    gauge_sensor = hass.states.get("sensor.hurbanovo_rain_gauge_precipitation")
+    assert gauge_sensor.state == "unavailable"
+    # Its gauge is still resolved, so the attributes still say which one it is
+    # once the feed recovers.
+    assert entry.runtime_data.gauge.ind_zra == 17720
+
+
+async def test_gauge_feed_recovers_without_a_reload(
+    hass: HomeAssistant, entry: MockConfigEntry, load: Callable[[str], bytes]
+) -> None:
+    """Having started with no gauge data, the sensor picks up when it returns."""
+    client = _FakeClient(load)
+    client.fail_gauges_with = ShmuConnectionError("gauge feed down at startup")
+
+    with patch("custom_components.shmu.ShmuClient", return_value=client):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+        assert (
+            hass.states.get("sensor.hurbanovo_rain_gauge_precipitation").state
+            == "unavailable"
+        )
+
+        client.fail_gauges_with = None
+        await entry.runtime_data.async_refresh()
+        await hass.async_block_till_done()
+
+    assert hass.states.get("sensor.hurbanovo_rain_gauge_precipitation").state == "0.4"
