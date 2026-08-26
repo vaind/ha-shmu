@@ -116,7 +116,7 @@ def _gauge_reading_is_current(
     from the same file carry the same offset, so it cancels out.
 
     The threshold separates cleanly in practice — sampled across the 32-day
-    archive, 99.9% of gauge readings sit within 10 minutes of their snapshot's
+    archive, 99.8% of gauge readings sit within 10 minutes of their snapshot's
     newest record, and the stragglers are hours behind.
     """
     if not snapshot.observations:
@@ -388,6 +388,11 @@ class ShmuDataUpdateCoordinator(DataUpdateCoordinator[ShmuData]):
         #: ever instead of going unavailable.
         self._last_gauge_observation: GaugeObservation | None = None
         self._last_gauge_observation_at: datetime | None = None
+        #: Source path of the newest gauge snapshot we have actually seen. The
+        #: client returns the *previous* object when the newest file has not
+        #: changed, and an unchanged file carries no new reading — so this is
+        #: what distinguishes a new snapshot from a cache hit.
+        self._last_gauge_source: str | None = None
         #: Recently observed publish lags (s) for offset auto-tuning.
         self._recent_lags: deque[float] = deque(maxlen=5)
         #: Update health, surfaced in diagnostics.
@@ -583,7 +588,12 @@ class ShmuDataUpdateCoordinator(DataUpdateCoordinator[ShmuData]):
         ind_zra = self.gauge.ind_zra
         present = ind_zra in snapshot.observations
         if present and not self._gauge_present:
-            _LOGGER.info("SHMÚ rain gauge %s is reporting again", ind_zra)
+            _LOGGER.info(
+                "SHMÚ rain gauge %s is back in the precipitation snapshot; its "
+                "sensor recovers once that reading is current with the rest of "
+                "the network, which a backfill dump is not",
+                ind_zra,
+            )
         elif not present and self._gauge_present:
             _LOGGER.info(
                 "SHMÚ rain gauge %s (%s) is not in the latest precipitation "
@@ -716,7 +726,16 @@ class ShmuDataUpdateCoordinator(DataUpdateCoordinator[ShmuData]):
         # `_gauge_reading_is_current`); a backfilled one leaves both fields
         # untouched, so the acquisition time keeps ageing and the sensor goes
         # unavailable on schedule rather than serving day-old rain as current.
-        if not isinstance(gauges, BaseException):
+        if not isinstance(gauges, BaseException) and (
+            gauges.source != self._last_gauge_source
+        ):
+            # Only a *new* snapshot can carry a new reading: when the newest
+            # file is unchanged the client hands back the previous object, and
+            # counting that as an acquisition would keep a frozen reading
+            # alive for as long as the listing kept succeeding. (SHMÚ has not
+            # been seen to stall — 9190 files over the 32-day archive with no
+            # gap — but a cache hit is not evidence of a reading either way.)
+            self._last_gauge_source = gauges.source
             self._log_gauge_presence(gauges)
             gauge_obs = gauges.observations.get(self.gauge.ind_zra)
             if gauge_obs is not None and _gauge_reading_is_current(gauge_obs, gauges):

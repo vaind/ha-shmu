@@ -70,6 +70,10 @@ class _FakeClient:
         #: of the snapshot — what an upstream backfill dump looks like: its
         #: own timestamps still advance, but they trail the live network.
         self.gauge_lag: tuple[int, int] | None = None
+        #: Pin the gauge snapshot's source path, so repeated fetches look like
+        #: the newest file never changing — a stalled feed. The real client
+        #: then returns the previous snapshot untouched; this mimics that.
+        self.gauge_source_frozen: bool = False
         #: Coordinates the forecast/radar fetchers were last called with, so
         #: tests can assert the measurement location reaches the client.
         self.forecast_coords: tuple[float, float] | None = None
@@ -95,6 +99,15 @@ class _FakeClient:
             raise self.fail_gauges_with
         if self.fail_with is not None:
             raise self.fail_with
+        source = (
+            "test-gauges-frozen"
+            if self.gauge_source_frozen
+            else f"test-gauges-{self._serial}"
+        )
+        # The real client skips the download and returns the previous snapshot
+        # when the newest file path is unchanged.
+        if previous is not None and previous.source == source:
+            return previous
         gauges = parse_gauge_observations(self._load("gauge_observations.json"))
         if self.drop_gauge is not None:
             gauges.pop(self.drop_gauge, None)
@@ -113,7 +126,7 @@ class _FakeClient:
                 )
         return GaugeSnapshot(
             observations=gauges,
-            source=f"test-gauges-{self._serial}",
+            source=source,
             fetched_at=datetime.now(UTC),
         )
 
@@ -722,4 +735,45 @@ async def test_rain_gauge_stays_available_while_its_readings_advance(
 
         assert (
             hass.states.get("sensor.hurbanovo_rain_gauge_precipitation").state == "0.4"
+        )
+
+
+async def test_rain_gauge_cache_hits_do_not_keep_a_frozen_reading_alive(
+    hass: HomeAssistant, entry: MockConfigEntry, load: Callable[[str], bytes]
+) -> None:
+    """An unchanged upstream file carries no new reading.
+
+    The client returns the previous snapshot when the newest file path has not
+    changed. Counting that as an acquisition would keep the held reading alive
+    for as long as the directory listing kept succeeding, so a feed that
+    stopped publishing would never surface.
+    """
+    client = _FakeClient(load)
+    now = datetime(2026, 5, 17, 12, 0, tzinfo=UTC)
+
+    def _now() -> datetime:
+        return now
+
+    with (
+        patch("custom_components.shmu.coordinator.dt_util.utcnow", _now),
+        patch("custom_components.shmu.ShmuClient", return_value=client),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+        assert (
+            hass.states.get("sensor.hurbanovo_rain_gauge_precipitation").state == "0.4"
+        )
+
+        # Upstream stops publishing: the newest file never changes, so every
+        # poll is a cache hit returning the very same snapshot object.
+        client.gauge_source_frozen = True
+        for _ in range(4):
+            now += timedelta(minutes=12)
+            await entry.runtime_data.async_refresh()
+            await hass.async_block_till_done()
+
+        assert entry.runtime_data.last_update_success is True
+        assert (
+            hass.states.get("sensor.hurbanovo_rain_gauge_precipitation").state
+            == "unavailable"
         )
