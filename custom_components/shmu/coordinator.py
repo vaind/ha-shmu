@@ -161,7 +161,11 @@ def _merge_forecast_runs(
     else:
         by_time = {step.time: step for step in previous.steps}
         by_time.update({step.time: step for step in current.steps})
-        merged = sorted(by_time.values(), key=lambda step: step.time)
+        merged = list(by_time.values())
+    # Chronological order is what makes "the gap to its predecessor" mean
+    # anything, so sort here rather than inheriting a decoded run's ordering:
+    # the tiling check below then holds whatever the caller hands in.
+    merged.sort(key=lambda step: step.time)
 
     kept = [step for step in merged if step.time >= day_start]
     if _accumulations_tile(kept):
@@ -174,9 +178,11 @@ def _merge_forecast_runs(
         ", ".join(sorted({s.run.isoformat() for s in kept})),
         current.run.isoformat(),
     )
-    return replace(
-        current, steps=[step for step in current.steps if step.time >= day_start]
+    fallback = sorted(
+        (step for step in current.steps if step.time >= day_start),
+        key=lambda step: step.time,
     )
+    return replace(current, steps=fallback)
 
 
 @dataclass(slots=True)

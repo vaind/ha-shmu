@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
 from custom_components.shmu.coordinator import (
@@ -168,6 +169,25 @@ def test_merge_of_a_full_four_run_day_tiles() -> None:
     assert snapshot.run == datetime(2026, 7, 21, 18, tzinfo=UTC)
     contributing = {s.run for s in snapshot.steps}
     assert len(contributing) == 4
+
+
+def test_merge_orders_the_series_regardless_of_input_order() -> None:
+    """Chronological order is the helper's own guarantee, not the caller's.
+
+    ``_accumulations_tile`` reads each step against its predecessor, so an
+    out-of-order input would make the windows look mismatched and needlessly
+    drop the merge. Decoded runs happen to arrive ordered; the helper does not
+    rely on it.
+    """
+    current = _snap("run-B", datetime(2026, 7, 21, 6, tzinfo=UTC), list(range(6)))
+    shuffled = replace(current, steps=list(reversed(current.steps)))
+
+    merged = _merge_forecast_runs(None, shuffled, _DAY_START)
+
+    assert merged is not None
+    times = [s.time for s in merged.steps]
+    assert times == sorted(times)
+    assert _accumulations_tile(merged.steps)
 
 
 def test_merge_opts_out_when_the_windows_stop_tiling() -> None:

@@ -128,7 +128,12 @@ async def async_get_config_entry_diagnostics(
         else {
             "source": forecast.source,
             "run": forecast.run.isoformat(),
-            "forecast_hours": [
+            # First and last decoded forecast hour of the newest run — named a
+            # range, not ``forecast_hours``, because the snapshot's field of
+            # that name is the full hour tuple and the two must not be read as
+            # the same thing. The hours in between are contiguous by
+            # construction (the client stops at the first missing one).
+            "forecast_hour_range": [
                 forecast.forecast_hours[0],
                 forecast.forecast_hours[-1],
             ]
