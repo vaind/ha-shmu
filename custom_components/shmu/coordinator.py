@@ -490,8 +490,10 @@ class ShmuDataUpdateCoordinator(DataUpdateCoordinator[ShmuData]):
     def _log_station_presence(self, data: ShmuData) -> None:
         """Log (once per transition) whether the chosen station is reporting.
 
-        A synoptic station can drop out of a 5-minute snapshot; its entities
-        then go unavailable. Without this an operator has no idea why.
+        A synoptic station can drop out of a 5-minute snapshot; its last
+        reading is carried forward (see :attr:`observation`) and only a
+        dropout outlasting the freshness window makes its entities go
+        unavailable. Without this an operator has no idea why.
         """
         ind_kli = self.station.ind_kli
         present = ind_kli in data.observations.observations
@@ -500,9 +502,11 @@ class ShmuDataUpdateCoordinator(DataUpdateCoordinator[ShmuData]):
         elif not present and self._station_present:
             _LOGGER.info(
                 "SHMÚ station %s is not in the latest observation snapshot "
-                "(%s); its entities will be unavailable until it reports again",
+                "(%s); its last reading is served for up to %s more, after "
+                "which its entities go unavailable until it reports again",
                 ind_kli,
                 data.observations.source,
+                OBSERVATION_STALE_AFTER,
             )
         self._station_present = present
 
