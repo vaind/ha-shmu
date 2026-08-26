@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -31,7 +31,10 @@ def test_parse_observations_keeps_latest_minute_per_station(fixture) -> None:
     assert set(obs) == {11858, 11816, 11930}
     # Three minutes for 11858; the 06:52 record must win.
     hurbanovo = obs[11858]
-    assert hurbanovo.measured_at == datetime(2026, 5, 17, 6, 52, tzinfo=UTC)
+    # `minuta` is stamped in SEC (fixed UTC+1), so 06:52 SEC is 05:52 UTC; the
+    # offset is asserted too, since that is what the entity attribute renders.
+    assert hurbanovo.measured_at == datetime(2026, 5, 17, 5, 52, tzinfo=UTC)
+    assert hurbanovo.measured_at.utcoffset() == timedelta(hours=1)
     assert hurbanovo.temperature == 12.1
     assert hurbanovo.weather_code == 61
     # Null upstream values become None, not 0/"".
