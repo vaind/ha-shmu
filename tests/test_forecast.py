@@ -190,8 +190,14 @@ def test_derive_freezing_level(profile, expected) -> None:
         assert result == pytest.approx(expected, abs=0.5)
 
 
-def _profile_at(payload: bytes, latitude: float, longitude: float):
-    """The module's vertical profile at a point, straight from a real file."""
+def _profile_at(
+    payload: bytes, latitude: float, longitude: float, *, anchored: bool = True
+):
+    """The module's vertical profile at a point, straight from a real file.
+
+    ``anchored=False`` stands in for a run whose hour-000 file (the only one
+    carrying the terrain) never reached us.
+    """
     fields = {(*f.param, f.level): f for f in iter_fields(payload)}
     i, j = nearest_unmasked_index(fields[_T2M], latitude, longitude)
 
@@ -203,7 +209,7 @@ def _profile_at(payload: bytes, latitude: float, longitude: float):
     return _vertical_profile(
         value,
         None if surface is None else surface - 273.15,
-        value(_OROGRAPHY),
+        value(_OROGRAPHY) if anchored else None,
     )
 
 
@@ -261,3 +267,19 @@ def test_profile_drops_below_ground_levels(fixture) -> None:
     assert terrain == pytest.approx(1503.0, abs=5.0)
     assert len(profile) == 5  # 925 hPa dropped, the other four kept
     assert all(height > terrain for height, _ in profile[1:])
+
+
+def test_no_profile_without_the_surface_anchor(fixture) -> None:
+    """Without the terrain there is no profile — and so no freezing level.
+
+    Everything below the lowest pressure level is unobserved, which is exactly
+    where a winter freezing level sits. An unanchored profile would let a
+    sub-zero 925 hPa point pose as the surface and hand back its own height,
+    a number the data cannot support; unknown is the honest answer.
+    """
+    payload = fixture("aladin_upper_000.grb")
+    assert _profile_at(payload, 48.1717, 17.2, anchored=False) == []
+    assert derive_freezing_level([]) is None
+    # The 850 hPa temperature is a plain lookup and stays available.
+    (step,) = parse_forecast([(0, payload)], 48.1717, 17.2)
+    assert step.temperature_850hpa is not None

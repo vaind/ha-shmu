@@ -48,6 +48,10 @@ _NY = 48
 #: level value, in that level type's units — see :class:`grib2.Grib2Field`).
 #: The level is part of the key because ALADIN publishes the same quantity on
 #: five pressure levels; keyed by ``param`` alone they collapse onto one entry.
+#: Matching is by float equality, which holds because SHMÚ's levels decode to
+#: exact integers-as-floats. A level that stopped decoding to its constant
+#: would make that field go *silently* missing — see AGENTS.md for the
+#: re-verification trigger.
 type _FieldKey = tuple[int, int, int, int, float | None]
 
 # --- Surface fields we need ------------------------------------------------
@@ -221,8 +225,10 @@ def sky_from_cloud(cloud_coverage: float | None) -> str | None:
 def derive_freezing_level(profile: Sequence[tuple[float, float]]) -> float | None:
     """Lowest height (m) at which a temperature profile reaches 0 °C.
 
-    ``profile`` is ``(height, temperature °C)`` ordered bottom-up, anchored at
-    the surface where the model terrain is known. *Lowest* follows the standard
+    ``profile`` is ``(height, temperature °C)`` ordered bottom-up and anchored
+    at the surface — :func:`_vertical_profile` returns nothing else, because
+    "lowest" is only meaningful when the ground is where the profile starts.
+    *Lowest* follows the standard
     definition of the freezing level ("the lowest altitude at which the air
     temperature is 0 °C"); a winter valley inversion can produce several
     crossings and the one nearest the ground is the one that decides what
@@ -235,9 +241,9 @@ def derive_freezing_level(profile: Sequence[tuple[float, float]]) -> float | Non
     freezing, "no crossing" only happens for degenerate input, so ``None``
     uniformly reads as *not derivable* rather than as a physical claim.
 
-    A first point already at or below 0 °C is itself the answer — with a
-    surface-anchored profile that is a frost, and the freezing level is *at the
-    ground* by definition. Accuracy follows the profile's spacing: dense below
+    A first point already at or below 0 °C is itself the answer: that is a
+    surface frost, and the freezing level is *at the ground* by definition.
+    Accuracy follows the profile's spacing: dense below
     850 hPa, where winter freezing levels sit, but the 700→500 hPa gap spans
     ~2.6 km, so a summer isotherm interpolated there can be a few hundred
     metres out.
@@ -300,28 +306,33 @@ def _vertical_profile(
 ) -> list[tuple[float, float]]:
     """Temperature profile ``(height m, °C)`` at one grid point, bottom-up.
 
-    Anchored at the 2 m screen over the model terrain when that terrain is
-    known, then every pressure level above it. Levels *below* the terrain are
-    dropped: the model fills them by extrapolation, so at a mountain grid point
-    the 925 hPa "temperature" describes air that is underground (verified live
-    2026-08-26 — a Chopok point has its terrain at 1501 m and 925 hPa at
-    816 m). Dropping is keyed off the terrain itself, not off the anchor being
-    present, so a file missing its 2 m temperature still yields an
-    above-ground profile. Without a terrain height nothing *can* be dropped,
-    so the profile then starts at the lowest published level and may include
-    such a value.
+    Always anchored at the 2 m screen over the model terrain, then every
+    pressure level above it — **an unanchored profile is not returned at all**
+    (empty list). The anchor is what makes the result answerable: without the
+    ground the profile starts at whatever pressure level happens to be lowest,
+    and everything below it — where a winter freezing level actually sits — is
+    simply unobserved. A sub-zero 925 hPa point would then look like a frozen
+    "surface" and yield its own height as the freezing level, a number the data
+    cannot support. Unknown is the honest answer, so both inputs are required.
+
+    Levels *below* the terrain are dropped: the model fills them by
+    extrapolation, so at a mountain grid point the 925 hPa "temperature"
+    describes air that is underground (verified live 2026-08-26 — a Chopok
+    point has its terrain at 1501 m and 925 hPa at 816 m), and interpolating a
+    crossing through it can place the freezing level below the ground it is
+    measured from.
     """
-    anchor_height = None if terrain is None else terrain + _SCREEN_HEIGHT
-    profile: list[tuple[float, float]] = []
-    if anchor_height is not None and surface_temperature is not None:
-        profile.append((anchor_height, surface_temperature))
+    if terrain is None or surface_temperature is None:
+        return []
+    anchor_height = terrain + _SCREEN_HEIGHT
+    profile: list[tuple[float, float]] = [(anchor_height, surface_temperature)]
     for level_pa in _PRESSURE_LEVELS_PA:
         level_t = value((*_T_PRESSURE, level_pa))
         geopotential = value((*_Z_PRESSURE, level_pa))
         if level_t is None or geopotential is None:
             continue
         height = geopotential / _G0
-        if anchor_height is not None and height <= anchor_height:
+        if height <= anchor_height:
             continue
         profile.append((height, level_t - 273.15))
     return profile
@@ -343,8 +354,9 @@ def parse_forecast(
     constant, so it is picked up from whichever file carries it and reused for
     every step's upper-air profile. In production that file is always present
     and first (the client takes a run's *contiguous leading* hours, and
-    ``FORECAST_HOURS`` starts at 0); a caller passing later hours only still
-    gets a profile, just without the surface anchor.
+    ``FORECAST_HOURS`` starts at 0). A caller passing later hours only gets no
+    ``freezing_level`` at all rather than an unanchored guess at one; the
+    850 hPa temperature, a plain lookup, is unaffected.
     """
     steps: list[ForecastStep] = []
     grid: tuple[int, int] | None = None
