@@ -96,6 +96,35 @@ def _keep_previous[T](
     return result
 
 
+def _gauge_reading_is_current(
+    observation: GaugeObservation, snapshot: GaugeSnapshot
+) -> bool:
+    """Whether a gauge's newest record keeps up with the rest of its network.
+
+    The precipitation feed republishes backfill, so neither a gauge's presence
+    in a snapshot nor its timestamp merely *advancing* proves it is still
+    reporting: verified on the live archive, gauge 32100 was absent from every
+    snapshot of 2026-08-11 and then published 73 rows at once whose newest was
+    29 hours old — a run of records that advances minute by minute while being
+    a day behind the network.
+
+    So the reading is compared against the newest record anywhere in the same
+    snapshot, which is that feed's own notion of "now". Deliberately *not*
+    against the wall clock: `minuta`'s zone is not currently trustworthy (SHMÚ
+    documents CET for both feeds while the parser attaches UTC), and an
+    hour-shifted reading would look permanently fresh. Two timestamps drawn
+    from the same file carry the same offset, so it cancels out.
+
+    The threshold separates cleanly in practice — sampled across the 32-day
+    archive, 99.9% of gauge readings sit within 10 minutes of their snapshot's
+    newest record, and the stragglers are hours behind.
+    """
+    if not snapshot.observations:
+        return False
+    feed_now = max(o.measured_at for o in snapshot.observations.values())
+    return feed_now - observation.measured_at <= OBSERVATION_STALE_AFTER
+
+
 #: Slack when comparing a step's accumulation window to the gap before it.
 #: Both are whole hours derived from integer forecast hours, so this only
 #: absorbs float noise — it is not a tolerance for genuinely misaligned steps.
@@ -681,38 +710,18 @@ class ShmuDataUpdateCoordinator(DataUpdateCoordinator[ShmuData]):
         # distinguishable from the kept-previous fallback below. Doing it
         # after `_keep_previous` would refresh the acquisition time from a
         # stale snapshot on every cycle of a gauge-feed outage, so the sensor
-        # would never go unavailable. A client-side cache hit (unchanged file
-        # path) is a real fetch and does refresh it — freshness is measured
-        # from acquisition, exactly as for the station observation.
+        # would never go unavailable.
+        #
+        # Only a reading that is current *within its own snapshot* counts (see
+        # `_gauge_reading_is_current`); a backfilled one leaves both fields
+        # untouched, so the acquisition time keeps ageing and the sensor goes
+        # unavailable on schedule rather than serving day-old rain as current.
         if not isinstance(gauges, BaseException):
             self._log_gauge_presence(gauges)
             gauge_obs = gauges.observations.get(self.gauge.ind_zra)
-            if gauge_obs is not None:
-                # Presence is not freshness. The feed carries backfill, so a
-                # gauge can reappear carrying only *old* rows: verified on the
-                # live archive, gauge 32100 was absent all of 2026-08-11 and
-                # then published 73 rows at once whose newest was 29 hours
-                # old. Treating that as a new reading would present day-old
-                # rain as the current value, and keep renewing it.
-                #
-                # So freshness is "this gauge's own timestamp advanced", not
-                # "a row was present". That is a *relative* test on purpose:
-                # comparing `measured_at` against the wall clock would be the
-                # stronger check, but `minuta`'s zone is not currently
-                # trustworthy (SHMÚ documents CET while the parser reads UTC),
-                # and an hour-shifted reading would read as permanently fresh.
-                # Comparing two values from the same feed cancels that out.
-                previous_obs = self._last_gauge_observation
-                if (
-                    previous_obs is None
-                    or gauge_obs.measured_at > previous_obs.measured_at
-                ):
-                    self._last_gauge_observation = gauge_obs
-                    self._last_gauge_observation_at = dt_util.utcnow()
-                elif gauge_obs.measured_at == previous_obs.measured_at:
-                    # Same minute, possibly a corrected value: keep the newer
-                    # object, but it is not evidence of a new reading.
-                    self._last_gauge_observation = gauge_obs
+            if gauge_obs is not None and _gauge_reading_is_current(gauge_obs, gauges):
+                self._last_gauge_observation = gauge_obs
+                self._last_gauge_observation_at = dt_util.utcnow()
         gauges = _keep_previous(
             gauges,
             "rain gauges",

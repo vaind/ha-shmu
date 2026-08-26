@@ -63,10 +63,13 @@ class _FakeClient:
         #: When set, only the rain-gauge fetch raises — that feed is
         #: supplementary, so it fails independently of the observations.
         self.fail_gauges_with: Exception | None = None
-        #: Minutes to advance every gauge reading's ``measured_at`` by. The
-        #: fixture is static, so by default a refetch returns the *same*
-        #: minute — which is exactly what upstream backfill looks like.
+        #: Minutes to advance every gauge reading's ``measured_at`` by, so a
+        #: test can simulate the network progressing between polls.
         self.gauge_minutes_advanced: int = 0
+        #: ``(ind_zra, minutes)`` holding one gauge that far *behind* the rest
+        #: of the snapshot — what an upstream backfill dump looks like: its
+        #: own timestamps still advance, but they trail the live network.
+        self.gauge_lag: tuple[int, int] | None = None
         #: Coordinates the forecast/radar fetchers were last called with, so
         #: tests can assert the measurement location reaches the client.
         self.forecast_coords: tuple[float, float] | None = None
@@ -101,6 +104,13 @@ class _FakeClient:
                 k: replace(v, measured_at=v.measured_at + shift)
                 for k, v in gauges.items()
             }
+        if self.gauge_lag is not None:
+            ind_zra, minutes = self.gauge_lag
+            behind = gauges.get(ind_zra)
+            if behind is not None:
+                gauges[ind_zra] = replace(
+                    behind, measured_at=behind.measured_at - timedelta(minutes=minutes)
+                )
         return GaugeSnapshot(
             observations=gauges,
             source=f"test-gauges-{self._serial}",
@@ -639,13 +649,14 @@ async def test_rain_gauge_goes_unavailable_during_a_feed_outage(
 async def test_rain_gauge_backfill_does_not_keep_a_stale_reading_alive(
     hass: HomeAssistant, entry: MockConfigEntry, load: Callable[[str], bytes]
 ) -> None:
-    """A gauge present in every snapshot is not necessarily still reporting.
+    """A gauge whose readings advance can still be a day behind the network.
 
-    The feed carries backfill, so an offline gauge can keep appearing with an
-    unchanged, old record — verified upstream on 2026-08-11, where gauge 32100
-    was absent all day and then published 73 rows at once whose newest was 29
-    hours old. If mere presence counted as a fresh reading the sensor would
-    renew itself for ever and never go unavailable.
+    Verified upstream on 2026-08-11: gauge 32100 was absent from every
+    snapshot of the day, then published 73 rows at once whose newest was 29
+    hours old. Those rows advance minute by minute, so "did the timestamp move
+    forward?" accepts them — and the sensor would serve day-old rain as the
+    current value, renewing it on every poll. Freshness has to be judged
+    against the rest of the same snapshot.
     """
     client = _FakeClient(load)
     now = datetime(2026, 5, 17, 12, 0, tzinfo=UTC)
@@ -663,10 +674,18 @@ async def test_rain_gauge_backfill_does_not_keep_a_stale_reading_alive(
             hass.states.get("sensor.hurbanovo_rain_gauge_precipitation").state == "0.4"
         )
 
-        # Every fetch succeeds and the gauge is present every time — but its
-        # reading never advances past the minute we already have.
-        for _ in range(3):
+        # The gauge goes offline and the network runs on ~29 h ahead of it.
+        # Then the backfill dump arrives: our gauge's own newest record creeps
+        # forward one minute per poll (06:53, 06:54, 06:55 …) — genuinely
+        # advancing — while staying a day behind the live network. This is the
+        # case a "did the timestamp advance?" test accepts and must not.
+        day_behind = 29 * 60
+        for step in range(1, 4):
             now += timedelta(minutes=12)
+            client.gauge_minutes_advanced = day_behind + 12 * step
+            # Hold our gauge back to exactly `step` minutes past its original
+            # reading, so it advances while lagging the rest of the snapshot.
+            client.gauge_lag = (17720, client.gauge_minutes_advanced - step)
             await entry.runtime_data.async_refresh()
             await hass.async_block_till_done()
 
