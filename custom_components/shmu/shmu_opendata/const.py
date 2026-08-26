@@ -37,6 +37,14 @@ RADAR_LOOP_FRAMES: Final = 12
 #: observation poll. Trimmed if a run does not publish the full set.
 FORECAST_HOURS: Final = (*range(0, 49), *range(51, 103, 3))
 
+#: Shortest run we will use. Only the **00 UTC** run publishes out to +102 h;
+#: the 06/12/18 UTC runs stop at +72 h (verified 2026-08-26 across the full
+#: 32-day retention). Demanding +102 h therefore rejected three runs in four
+#: and pinned the forecast to one refresh a day, up to 24 h stale. Accepting
+#: +72 h lets every run be used; the caller merges successive runs, so the
+#: longer 00 UTC horizon is still what sets the daily forecast's reach.
+MIN_FORECAST_HOURS: Final = 72
+
 DEFAULT_TIMEOUT: Final = 30.0
 
 #: Identifies this client to SHMÚ (they log client IPs for abuse protection;

@@ -107,10 +107,21 @@ don't occur.
   encoder quirk and assume this one immutable grid. Each hour-file carries
   all needed surface fields: `2t`(0,0,0@103), `10u/10v`(0,2,2/3@103), gusts
   (0,2,23/24@103,pdt8), total-precip-accum(0,1,193@1,pdt8), TCC(192,128,
-  164@1), LCC/MCC(192,128,186/187@1), PRMSL(0,3,1@101), CAPE(0,7,6@1). Runs
-  cover forecast hours **000–102** (103 files/run, ≈161 KB each), 4 runs/day.
+  164@1), LCC/MCC(192,128,186/187@1), PRMSL(0,3,1@101), CAPE(0,7,6@1).
+  There are 4 runs/day but **they do not all reach the same horizon**: only the
+  **00 UTC** run publishes forecast hours **000–102** (103 files, ≈161 KB each);
+  the **06/12/18 UTC runs stop at +72 h** (73 files). **Verified 2026-08-26**
+  across the whole 32-day retention — these are finished runs, not runs caught
+  mid-publication. (An earlier note here claimed 103 files for all four; that
+  generalised from a single 00 UTC run. The cost of believing it: the client
+  required every requested hour through +102, so three runs in four were
+  silently discarded and the forecast refreshed **once a day**, up to 24 h
+  stale.) `MIN_FORECAST_HOURS` (+72) is therefore the bar a run must clear, and
+  the client takes a run's **contiguous leading run of published hours** — a
+  *hole* still disqualifies it, because precipitation is accumulated since the
+  run start and a missing file would widen a step's window past its interval.
   **This +102 h is the product's own horizon, not a limit of our request** — we
-  already fetch out to hour 102 (`FORECAST_HOURS`, the last file a run
+  already fetch out to hour 102 (`FORECAST_HOURS`, the last file a 00 UTC run
   publishes). The consequence for the **daily** forecast: the final local
   calendar day is almost always truncated (for a 00 UTC run, hour 102 lands
   ≈08:00 local, i.e. before the afternoon temperature peak), so summarising that
@@ -127,18 +138,36 @@ don't occur.
   would need a longer-range model (SHMÚ runs ECMWF to 8–10 days) but SHMÚ
   publishes ECMWF **only as rendered meteogram images** on the website, not as
   open GRIB2 in the `opendata` tree — so it is out of scope for the same
-  data-only reason as air quality. **Today's leading edge**: the newest complete
-  run begins at its reference hour (00/06/12/18 UTC), so it can start partway
-  through the current local day and omit today's earlier hours (a 06 UTC run
-  first covers ≈08:00 local, past the dawn minimum). Rather than fold in
+  data-only reason as air quality. **A single run is short at both ends**, which
+  is why `coordinator._merge_forecast_runs` keeps a *series* rather than the
+  newest run's steps. At the **leading** edge, a run begins at its reference
+  hour (00/06/12/18 UTC), so it can start partway through the current local day
+  and omit today's earlier hours (a 06 UTC run first covers ≈08:00 local, past
+  the dawn minimum) — today's high/low would then be computed from a partial
+  day. At the **trailing** edge, a +72 h run's horizon falls short of its last
+  local day's end (end of local day is 22:00 UTC under CEST, 23:00 under CET),
+  so `_aggregate_daily` would drop that day: using a fresh short run *alone*
+  costs a whole forecast day, whatever hour it was issued. Rather than fold in
   observations (which would mix an observed station reading into a model,
-  location forecast), `coordinator._extend_forecast_to_day_start` carries the
-  previous run's steps for today that precede the new run's first step, so
-  today's daily high/low/precip are computed from model data spanning the whole
-  local day. The forecast stays purely model-sourced; carried steps are bounded
-  to the current local day (older ones age out, so no past day is ever emitted)
-  and stay strictly before the new run's first step (per-step precip deltas
-  never double-count). `run`/`source` keep identifying the newest run.
+  location forecast), the merge keeps one step **per valid time with the newest
+  run winning**, so whatever the newest run does not cover survives from the
+  previous snapshot — today's earlier hours at the head, the 00 UTC run's longer
+  reach at the tail — then bounds the result to the current local day (so a day
+  rolling over drops yesterday even while the run is unchanged; that trim must
+  run every cycle, not only on a run change). The forecast stays purely
+  model-sourced; each `ForecastStep` records its originating `run`, and
+  `run`/`source` keep identifying the newest contributing one.
+  **The merge rests on an assumption**: that every run's step times are a subset
+  of any denser run overlapping them. That holds for today's grids (a +72 h
+  run's last step lands on 00 UTC hours 78/84/90, all members of
+  `range(51, 103, 3)`), so each step's precipitation window still meets its
+  predecessor exactly. It is an observation about the current product, not a
+  guarantee — so `ForecastStep.span_hours` retains each window's width and
+  `_accumulations_tile` checks it. If SHMÚ ever changes the spacing we **opt out
+  of the merge** (falling back to the newest run alone, losing the extra day)
+  rather than silently double-count rain; the fallback logs, is visible as a
+  single `contributing_runs` entry in diagnostics, and is re-evaluated each
+  cycle so a return to tiling grids recovers on its own.
 - **The ALADIN hour-files also carry upper-air fields we don't decode.** **Verified 2026-08-26** on the 06 UTC run, hour 006: 36 messages, of which **25 are pressure-level** at 925/850/700/500/250 hPa — temperature (0,0,0), relative humidity (0,1,1), `u`/`v` (0,2,2 / 0,2,3) and geopotential height (0,3,4), all DRT 5.0 simple packing on the same grid, so reaching them needs no new decoder in `grib2.py`, only a wider message selection (issue #44).
   SHMÚ's metadata (`weather/nwp/metadata/OpenData_AladinSHMU_metadata.json`) labels `tcc` "vysoká oblačnosť" (high cloud), but **no 188/HCC message exists in the files** — `192,128,164` is total cloud cover, as `grib2.py` decodes it. Trust the message inventory, not that label; there is no high-cloud field in this product.
 - **Warnings**: CAP 1.2 XML; the Slovak `<info>` block is preferred; polygons

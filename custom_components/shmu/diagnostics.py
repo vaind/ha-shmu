@@ -128,9 +128,23 @@ async def async_get_config_entry_diagnostics(
         else {
             "source": forecast.source,
             "run": forecast.run.isoformat(),
+            "forecast_hours": [
+                forecast.forecast_hours[0],
+                forecast.forecast_hours[-1],
+            ]
+            if forecast.forecast_hours
+            else None,
             "fetched_at": forecast.fetched_at.isoformat(),
             "grid_point": list(forecast.grid_point),
             "step_count": len(forecast.steps),
+            # Which runs the series is actually built from, newest last. More
+            # than one is the normal merged case; a single run older than
+            # ``run`` means the merge opted out (see
+            # ``coordinator._merge_forecast_runs``), and a stale entry here is
+            # how a tail left behind by a failed fetch becomes visible.
+            "contributing_runs": sorted(
+                {step.run.isoformat() for step in forecast.steps}
+            ),
             "first_step": (
                 forecast.steps[0].time.isoformat() if forecast.steps else None
             ),

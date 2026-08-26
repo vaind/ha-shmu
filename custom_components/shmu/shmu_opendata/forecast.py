@@ -85,6 +85,17 @@ class ForecastStep:
     bearing degrees, pressure hPa, precipitation mm accumulated *within this
     step*, cloud cover %, CAPE J/kg. Any field may be ``None`` if its source
     message was absent. ``condition`` is an HA condition string (plain text).
+
+    ``span_hours`` is the width of the accumulation window ``precipitation``
+    represents — the gap to the previous step *of the same run*. It is
+    retained (rather than being a local of :func:`parse_forecast`) because a
+    caller may merge steps from several runs into one series, and such a
+    series is only correct while every step's window equals the gap to its
+    predecessor. Without the width there is no way to tell, and a mismatch
+    silently double-counts or drops rain.
+
+    ``run`` is the reference time of the model run the step came from, so a
+    merged series stays traceable to its sources.
     """
 
     time: datetime
@@ -97,6 +108,8 @@ class ForecastStep:
     cloud_coverage: float | None
     cape: float | None
     condition: str | None
+    span_hours: float
+    run: datetime
 
 
 def grid_index(latitude: float, longitude: float) -> tuple[int, int]:
@@ -306,6 +319,8 @@ def parse_forecast(
                     cape=cape,
                     hours=hours,
                 ),
+                span_hours=hours,
+                run=reference_time,
             )
         )
     return steps

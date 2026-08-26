@@ -104,6 +104,7 @@ class _FakeClient:
             steps=parse_forecast(files, latitude, longitude),
             run=datetime(2026, 5, 17, 12, tzinfo=UTC),
             source="test-run/20260517/1200",
+            forecast_hours=tuple(_FCAST_FIXTURE_HOURS),
             grid_point=grid_index(latitude, longitude),
             fetched_at=datetime.now(UTC),
         )
