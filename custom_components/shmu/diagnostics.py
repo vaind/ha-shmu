@@ -131,8 +131,10 @@ async def async_get_config_entry_diagnostics(
             # First and last decoded forecast hour of the newest run — named a
             # range, not ``forecast_hours``, because the snapshot's field of
             # that name is the full hour tuple and the two must not be read as
-            # the same thing. The hours in between are contiguous by
-            # construction (the client stops at the first missing one).
+            # the same thing. The endpoints bound the run's reach; they do not
+            # imply every hour between is present (the requested set is hourly
+            # only to +48 h, 3-hourly beyond) — what the client guarantees is
+            # that no *requested* hour inside the range is missing.
             "forecast_hour_range": [
                 forecast.forecast_hours[0],
                 forecast.forecast_hours[-1],
@@ -143,10 +145,14 @@ async def async_get_config_entry_diagnostics(
             "grid_point": list(forecast.grid_point),
             "step_count": len(forecast.steps),
             # Which runs the series is actually built from, newest last. More
-            # than one is the normal merged case; a single run older than
-            # ``run`` means the merge opted out (see
-            # ``coordinator._merge_forecast_runs``), and a stale entry here is
-            # how a tail left behind by a failed fetch becomes visible.
+            # than one is the normal merged case. A sole entry equal to ``run``
+            # means nothing was merged in — either the first fetch after a
+            # restart, or the merge opted out because the steps stopped tiling
+            # (see ``coordinator._merge_forecast_runs``); only its warning log
+            # tells the two apart. An entry *older* than ``run`` is a carried
+            # tail, which is normal — but one lagging by more than a day is a
+            # tail left behind by a failing fetch, visible here and nowhere
+            # else.
             "contributing_runs": sorted(
                 {step.run.isoformat() for step in forecast.steps}
             ),
