@@ -119,23 +119,21 @@ async def async_get_config_entry_diagnostics(
             # Full original SHMÚ row — invaluable for "why is sensor X null".
             "raw_record": dict(observation.raw) if observation else None,
         },
-        # The rain gauge is derived from the measurement location, so naming
-        # it discloses roughly where that is — but no more finely than the
-        # radar block below already does (a ~0.1° box is smaller than this
-        # network's ~260 km² per-gauge cell), so the module's no-home-
-        # coordinates rule still holds. The distance is rounded for the same
-        # reason: a full-precision one would narrow the point to a thin ring.
-        # The gauge's own coordinates are omitted — they add nothing over the
-        # public catalogue.
+        # The gauge is identified but its *distance* is deliberately not
+        # reported, and neither are its coordinates. Naming the gauge is
+        # harmless on its own — it narrows the measurement location no further
+        # than the ~0.1° radar box below already does, since this network's
+        # per-gauge cell is the larger of the two. A distance is different in
+        # kind: combined with the gauge's public coordinates it places the
+        # location on a narrow ring, and intersecting that ring with the radar
+        # box would pin it down roughly a hundred times more tightly than
+        # either value alone — defeating the coarsening that the module
+        # docstring's no-home-coordinates rule depends on. The sensor's own
+        # attributes still carry the exact distance; they stay on the user's
+        # instance rather than going into a shareable dump.
         "rain_gauge": {
             "ind_zra": gauge.ind_zra,
             "name": gauge.name,
-            "distance_km": round(
-                gauge.distance_km(
-                    coordinator.location_latitude, coordinator.location_longitude
-                ),
-                1,
-            ),
             "source": gauge_snapshot.source if gauge_snapshot else None,
             "fetched_at": gauge_snapshot.fetched_at.isoformat()
             if gauge_snapshot

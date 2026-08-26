@@ -72,11 +72,12 @@ async def test_config_entry_diagnostics(
     assert gauge["gauge_present"] is True
     assert gauge["reading_stale"] is False
     assert gauge["raw_record"]["zra_uhrn"] == 0.4
-    # Its coordinates are not dumped — they add nothing over the public
-    # catalogue, and the distance is rounded so it cannot narrow the
-    # measurement point to a thin ring.
+    # Neither its coordinates nor the distance to it are dumped: a distance
+    # to a public point places the measurement location on a narrow ring,
+    # which combined with the coarsened radar box below would pin it down far
+    # more tightly than either value alone.
     assert "latitude" not in gauge
-    assert gauge["distance_km"] == round(gauge["distance_km"], 1)
+    assert "distance_km" not in gauge
     # The user's HA home coordinates must never leak into the dump.
     assert "latitude" not in diag["coordinator"]
     assert "home" not in repr(diag).lower()
@@ -112,6 +113,11 @@ async def test_diagnostics_never_leak_custom_location(
     assert str(sentinel_lon) not in dump
     assert "latitude" not in diag["coordinator"]
     assert "home" not in dump.lower()
+    # Nor any distance to a *public* point: the rain gauge's coordinates are
+    # published, so a distance to it would place the private location on a
+    # narrow ring — which, intersected with the coarsened radar box, localises
+    # it far better than either value on its own.
+    assert "distance" not in dump
 
 
 async def test_device_diagnostics_matches_config_entry(

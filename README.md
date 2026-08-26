@@ -50,15 +50,9 @@ A Home Assistant integration for Slovak weather data published by the
   comparable between stations), wind speed/gust/bearing, precipitation, snow
   depth, visibility, global radiation, and a warning-level sensor (the raw WMO
   weather code is an opt-in diagnostic).
-- **Rain gauge precipitation** — SHMÚ runs a second, roughly three times denser
-  network of automatic rain gauges alongside the synoptic stations: across the
-  country the nearest gauge is a median 10 km away, against 28 km for the
-  nearest synoptic station. A separate **Rain gauge precipitation** sensor
-  reports the nearest one, picked from your measurement location, with the
-  gauge's name and distance as attributes. It is a *different* network from
-  the station's own **Precipitation** sensor — the two measure different places
-  and are expected to disagree, which is exactly why neither silently stands in
-  for the other.
+- **Rain gauge precipitation** — SHMÚ runs a second, roughly three times denser network of automatic rain gauges alongside the synoptic stations: across the country the nearest gauge is a median 10 km away, against 28 km for the nearest synoptic station.
+  A separate **Rain gauge precipitation** sensor reports the nearest one, picked from your measurement location, with the gauge's name and distance as attributes.
+  It is a *different* network from the station's own **Precipitation** sensor — the two measure different places and are expected to disagree, which is exactly why neither silently stands in for the other.
 - **Weather warnings** — a binary sensor (with full alert details as
   attributes) that is on while a SHMÚ CAP alert covers your station, decided
   by the alert's own polygon.
