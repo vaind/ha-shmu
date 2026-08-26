@@ -13,6 +13,7 @@ Precipitation is the measurement that varies most sharply over short distances, 
 The gauge is chosen from your measurement location (as the forecast and radar already are) and named in the sensor's attributes, along with its distance.
 Your station's existing **Precipitation** sensor is unchanged and still reads the station — the two are different networks measuring different places, so neither silently stands in for the other.
 - SHMÚ's open-data server publishes no coordinates for these gauges, which is why the network went unused until now; they were recovered from the SHMÚ website page that plots the gauges on a map, and cross-checked against the existing station catalogue, which the same page also carries (the two independent sources agree to a median of 272 m).
+- Two new **opt-in** sensors read from the ALADIN model run: **Freezing level** — the height of the 0 °C isotherm above sea level — and **Temperature at 850 hPa**, the standard air-mass indicator at roughly 1450 m, above the valley inversions and daytime heating a 2 m thermometer sees. The freezing level is an *indicator* of the snow line, not the snow line itself: snow goes on falling and melting below the isotherm, so it usually settles a few hundred metres lower. Both are disabled by default; enable them from the device page if you want them. They cost nothing extra upstream: the forecast files have always carried these fields on every download, and every message in them was already being decoded and then discarded.
 
 ### Fixed
 

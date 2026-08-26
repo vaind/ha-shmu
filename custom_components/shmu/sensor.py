@@ -31,10 +31,11 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.typing import StateType
+from homeassistant.util import dt as dt_util
 
 from .coordinator import ShmuConfigEntry, ShmuData
 from .entity import ShmuStationEntity
-from .shmu_opendata import Observation, sea_level_pressure
+from .shmu_opendata import ForecastStep, Observation, sea_level_pressure
 
 #: All entities read a single shared coordinator snapshot; there is no
 #: per-entity device I/O to rate-limit, so updates need not be serialised.
@@ -46,6 +47,19 @@ class ShmuSensorDescription(SensorEntityDescription):
     """Describes a SHMÚ sensor and how to read it from an observation."""
 
     value_fn: Callable[[Observation], StateType]
+
+
+@dataclass(frozen=True, kw_only=True)
+class ShmuForecastSensorDescription(SensorEntityDescription):
+    """Describes a quantity read from the ALADIN step standing in for now.
+
+    Everything else on this platform is a *measurement* from the station; these
+    come from the model run at the configured measurement location — the same
+    "current step" the condition ladder already uses as its sky-state
+    gap-filler.
+    """
+
+    value_fn: Callable[[ForecastStep], StateType]
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -161,6 +175,44 @@ SENSORS: tuple[ShmuSensorDescription, ...] = (
 )
 
 
+#: Upper-air quantities the ALADIN files have always carried (issue #44): the
+#: hour-files hold temperature and geopotential on five pressure levels, and
+#: every message is decoded whether or not we read it, so these cost nothing to
+#: surface. They are **opt-in**: unlike the station measurements they are model
+#: output, and most households will never look at them — an entity nobody reads
+#: is permanent clutter, while enabling one is a single click.
+FORECAST_SENSORS: tuple[ShmuForecastSensorDescription, ...] = (
+    # Height of the 0 °C isotherm above sea level. It *indicates* the snow line
+    # rather than being it — snow keeps falling and melting below the isotherm,
+    # so the snow settles some way under it — but in a country where valley and
+    # ridge differ by two kilometres, that indication is the point.
+    ShmuForecastSensorDescription(
+        key="freezing_level",
+        translation_key="freezing_level",
+        device_class=SensorDeviceClass.DISTANCE,
+        native_unit_of_measurement=UnitOfLength.METERS,
+        state_class=SensorStateClass.MEASUREMENT,
+        # Derived by interpolating a profile, so full float precision is noise;
+        # the feed-backed sensors inherit SHMÚ's own rounding instead.
+        suggested_display_precision=0,
+        entity_registry_enabled_default=False,
+        value_fn=lambda s: s.freezing_level,
+    ),
+    # The standard air-mass indicator: ~1450 m, above the boundary layer, so it
+    # answers "is warmer/colder air moving in" far better than a 2 m reading.
+    ShmuForecastSensorDescription(
+        key="temperature_850hpa",
+        translation_key="temperature_850hpa",
+        device_class=SensorDeviceClass.TEMPERATURE,
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        state_class=SensorStateClass.MEASUREMENT,
+        suggested_display_precision=1,
+        entity_registry_enabled_default=False,
+        value_fn=lambda s: s.temperature_850hpa,
+    ),
+)
+
+
 #: Dataset-freshness diagnostics. ``observations`` is always present once the
 #: coordinator has data; ``forecast`` may be absent (no published ALADIN run),
 #: so its readers guard for ``None``. For the forecast the natural "released"
@@ -209,6 +261,10 @@ async def async_setup_entry(
     entities: list[SensorEntity] = [
         ShmuSensor(coordinator, station, description) for description in SENSORS
     ]
+    entities.extend(
+        ShmuForecastSensor(coordinator, station, description)
+        for description in FORECAST_SENSORS
+    )
     entities.extend(
         ShmuTimestampSensor(coordinator, station, description)
         for description in TIMESTAMPS
@@ -335,6 +391,41 @@ class ShmuRainGaugePrecipitationSensor(ShmuStationEntity, SensorEntity):
         if obs is None:
             return None
         return obs.precipitation
+
+
+class ShmuForecastSensor(ShmuStationEntity, SensorEntity):
+    """A model quantity for the present hour, from the ALADIN forecast.
+
+    Availability follows the coordinator's recent success rather than a fresh
+    station reading: this is national model data for the measurement location,
+    so a station dropping out of one observation snapshot says nothing about
+    it. The value is ``None`` — surfaced as ``unknown`` — while no run covers
+    the present, the same way the condition ladder simply stops using the model
+    then.
+    """
+
+    entity_description: ShmuForecastSensorDescription
+
+    def __init__(
+        self, coordinator, station, description: ShmuForecastSensorDescription
+    ) -> None:
+        """Initialise the forecast-derived sensor."""
+        super().__init__(coordinator, station)
+        self.entity_description = description
+        self._attr_unique_id = f"{station.ind_kli}_{description.key}"
+
+    @property
+    def available(self) -> bool:
+        """Available while a recent successful fetch backs the held run."""
+        return self.coordinator.has_recent_success
+
+    @property
+    def native_value(self) -> StateType:
+        """Value at the current hour, or ``None`` if no step covers it."""
+        step = self.coordinator.data.current_forecast_step(dt_util.utcnow())
+        if step is None:
+            return None
+        return self.entity_description.value_fn(step)
 
 
 class ShmuTimestampSensor(ShmuStationEntity, SensorEntity):

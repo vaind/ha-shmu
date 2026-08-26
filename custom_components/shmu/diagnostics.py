@@ -205,6 +205,12 @@ async def async_get_config_entry_diagnostics(
                 "condition": current_step.condition,
                 "cloud_coverage": current_step.cloud_coverage,
                 "precipitation": current_step.precipitation,
+                # Upper-air quantities behind the two opt-in sensors; ``None``
+                # here means the run's files carried no pressure levels (or,
+                # for the freezing level, that the profile could not support
+                # one) rather than a sensor fault.
+                "freezing_level": current_step.freezing_level,
+                "temperature_850hpa": current_step.temperature_850hpa,
             },
         },
         "radar": None

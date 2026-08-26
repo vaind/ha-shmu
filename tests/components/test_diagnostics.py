@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import replace
+from datetime import UTC, datetime
 from unittest.mock import patch
 
 from homeassistant.core import HomeAssistant
@@ -24,6 +26,7 @@ from custom_components.shmu.diagnostics import (
 from custom_components.shmu.shmu_opendata import ShmuConnectionError
 
 from .test_init import _FakeClient
+from .test_sensor import _step
 
 
 async def test_config_entry_diagnostics(
@@ -175,3 +178,40 @@ async def test_diagnostics_when_the_gauge_feed_never_succeeded(
     assert gauge["gauge_present"] is False
     assert gauge["reading_stale"] is True
     assert gauge["raw_record"] is None
+
+
+async def test_diagnostics_report_the_current_step_upper_air(
+    hass: HomeAssistant, load: Callable[[str], bytes]
+) -> None:
+    """The step behind the two opt-in upper-air sensors is visible in a dump.
+
+    Without it, "why does my freezing level say unknown" is unanswerable from a
+    downloaded dump — the same reason ``current_step`` itself is there.
+    """
+    entry = MockConfigEntry(
+        domain=DOMAIN, unique_id="11858", title="Hurbanovo", data={CONF_IND_KLI: 11858}
+    )
+    entry.add_to_hass(hass)
+
+    with patch("custom_components.shmu.ShmuClient", return_value=_FakeClient(load)):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    # The GRIB2 fixtures are surface-only and their run predates today, so hold
+    # a step that covers the present and carries the upper air.
+    coordinator = entry.runtime_data
+    forecast = coordinator.data.forecast
+    assert forecast is not None
+    coordinator.data.forecast = replace(
+        forecast,
+        steps=[
+            _step(datetime.now(UTC), freezing_level=2450.0, temperature_850hpa=-3.5)
+        ],
+    )
+
+    current = (await async_get_config_entry_diagnostics(hass, entry))["forecast"][
+        "current_step"
+    ]
+    assert current is not None
+    assert current["freezing_level"] == 2450.0
+    assert current["temperature_850hpa"] == -3.5

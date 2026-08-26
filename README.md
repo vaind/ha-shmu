@@ -54,6 +54,7 @@ A Home Assistant integration for Slovak weather data published by the
   A separate **Rain gauge precipitation** sensor reports the nearest one, picked from your measurement location, with the gauge's name and distance as attributes.
   It is a *different* network from the station's own **Precipitation** sensor — the two measure different places and are expected to disagree, which is exactly why neither silently stands in for the other.
   If you later move your measurement location and a different gauge becomes the nearest, the sensor keeps its history rather than starting a new one — so a long-term graph spanning that change mixes readings from both gauges, and the gauge named in the attributes is the one in use now, not the one behind older data.
+- **Upper air (opt-in)** — a **freezing level** (the height of the 0 °C isotherm above sea level) and the **850 hPa temperature** (the standard air-mass indicator, ~1450 m up), both read from the same ALADIN run that drives the forecast. The freezing level *indicates* the snow line rather than being it: snow keeps falling and melting below the isotherm, so it typically settles a few hundred metres lower, depending on how humid the air below is and how hard it is snowing. Disabled by default — enable them from the device page if you want them.
 - **Weather warnings** — a binary sensor (with full alert details as
   attributes) that is on while a SHMÚ CAP alert covers your station, decided
   by the alert's own polygon.
