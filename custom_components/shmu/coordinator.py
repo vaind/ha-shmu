@@ -454,6 +454,26 @@ class ShmuDataUpdateCoordinator(DataUpdateCoordinator[ShmuData]):
             return None
         return obs
 
+    def _carry_forward_remaining(self) -> timedelta | None:
+        """How much longer the cached reading is served, for logging.
+
+        ``None`` when nothing is being carried forward — either no reading has
+        been cached yet (the station was already missing when we started) or
+        the cached one has aged out. In both cases entities are unavailable
+        *now*, not in ``OBSERVATION_STALE_AFTER``. The window runs from when
+        the reading was acquired, so by the time a dropout is noticed part of
+        it is already spent.
+        """
+        if self._last_observation_at is None:
+            return None
+        remaining = OBSERVATION_STALE_AFTER - (
+            dt_util.utcnow() - self._last_observation_at
+        )
+        if remaining <= timedelta():
+            return None
+        # Whole seconds: the microseconds are noise in a log line.
+        return timedelta(seconds=round(remaining.total_seconds()))
+
     @property
     def gauge_observation(self) -> GaugeObservation | None:
         """The nearest rain gauge's reading, carried across brief dropouts.
@@ -567,20 +587,34 @@ class ShmuDataUpdateCoordinator(DataUpdateCoordinator[ShmuData]):
     def _log_station_presence(self, data: ShmuData) -> None:
         """Log (once per transition) whether the chosen station is reporting.
 
-        A synoptic station can drop out of a 5-minute snapshot; its entities
-        then go unavailable. Without this an operator has no idea why.
+        A synoptic station can drop out of a 5-minute snapshot; its last
+        reading is carried forward (see :attr:`observation`) and only a
+        dropout outlasting the freshness window makes its entities go
+        unavailable. Without this an operator has no idea why.
         """
         ind_kli = self.station.ind_kli
         present = ind_kli in data.observations.observations
         if present and not self._station_present:
             _LOGGER.info("SHMÚ station %s is reporting again", ind_kli)
         elif not present and self._station_present:
-            _LOGGER.info(
-                "SHMÚ station %s is not in the latest observation snapshot "
-                "(%s); its entities will be unavailable until it reports again",
-                ind_kli,
-                data.observations.source,
-            )
+            remaining = self._carry_forward_remaining()
+            if remaining is None:
+                _LOGGER.info(
+                    "SHMÚ station %s is not in the latest observation snapshot "
+                    "(%s) and no recent reading is cached, so its entities are "
+                    "unavailable until it reports again",
+                    ind_kli,
+                    data.observations.source,
+                )
+            else:
+                _LOGGER.info(
+                    "SHMÚ station %s is not in the latest observation snapshot "
+                    "(%s); its last reading is served for another %s, after "
+                    "which its entities go unavailable until it reports again",
+                    ind_kli,
+                    data.observations.source,
+                    remaining,
+                )
         self._station_present = present
 
     def _log_gauge_presence(self, snapshot: GaugeSnapshot) -> None:
