@@ -283,9 +283,18 @@ class ShmuRainGaugePrecipitationSensor(ShmuStationEntity, SensorEntity):
     The two are expected to differ; the attributes say which gauge fed this.
 
     The gauge is chosen from the *measurement location* (as the forecast and
-    radar are), not the station, and is fixed for the life of the entry. The
-    unique id keys on the station, so long-term statistics survive a change of
-    measurement location — the attributes record which gauge fed each period.
+    radar are), not the station, and is fixed for the life of the entry.
+
+    The unique id keys on the **station**, not the gauge, so changing the
+    measurement location keeps this entity and its history rather than
+    orphaning it and starting afresh. The cost is that such a history is
+    *mixed*: long-term statistics keep only the aggregated value per period,
+    never the attributes, so a series spanning a location change holds
+    readings from two gauges with nothing recorded to say which fed when. The
+    attributes describe the gauge in use **now**, not the history. Keying on
+    the gauge would make the boundary explicit, but at the price of discarding
+    the history every time the location moves — the worse trade for a sensor
+    whose whole premise is "the gauge nearest wherever I am".
     """
 
     _attr_translation_key = "rain_gauge_precipitation"
