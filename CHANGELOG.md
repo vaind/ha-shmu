@@ -4,6 +4,27 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- New **Rain gauge precipitation** sensor, reading SHMÚ's automatic rain-gauge network — a second network of ~190 gauges, disjoint from and roughly three times denser than the 27 synoptic stations (~16 km spacing against ~40 km).
+Precipitation is the measurement that varies most sharply over short distances, so this matters: sampled over a grid of points across the country, the nearest rain gauge is a median **10 km** away against **28 km** for the nearest synoptic station, and is the closer of the two at 92% of points.
+The gauge is chosen from your measurement location (as the forecast and radar already are) and named in the sensor's attributes, along with its distance.
+Your station's existing **Precipitation** sensor is unchanged and still reads the station — the two are different networks measuring different places, so neither silently stands in for the other.
+- SHMÚ's open-data server publishes no coordinates for these gauges, which is why the network went unused until now; they were recovered from the SHMÚ website page that plots the gauges on a map, and cross-checked against the existing station catalogue, which the same page also carries (the two independent sources agree to a median of 272 m).
+- Two new **opt-in** sensors read from the ALADIN model run: **Freezing level** — the height of the 0 °C isotherm above sea level — and **Temperature at 850 hPa**, the standard air-mass indicator at roughly 1450 m, above the valley inversions and daytime heating a 2 m thermometer sees. The freezing level is an *indicator* of the snow line, not the snow line itself: snow goes on falling and melting below the isotherm, so it usually settles a few hundred metres lower. Both are disabled by default; enable them from the device page if you want them. They cost nothing extra upstream: the forecast files have always carried these fields on every download, and every message in them was already being decoded and then discarded.
+
+### Fixed
+
+- The weather entity's `observation_time` attribute is no longer an hour in the future. SHMÚ stamps the observation timestamp in SEC (Central European Time, a fixed UTC+1) — both feeds' metadata say so — but it was read as UTC. Readings themselves were never affected: every record in a file shares the offset, so "newest minute wins" picked the same reading either way; only the reported time of the observation was wrong.
+- The forecast now refreshes with every ALADIN run (4×/day) instead of once a day. SHMÚ publishes four runs daily, but only the 00 UTC one reaches +102 h — the 06/12/18 UTC runs stop at +72 h. The integration required every hour through +102, so it silently discarded three runs in four and served a forecast up to 24 hours old. Today's forecast is noticeably closer to reality as a result: on a live comparison the discarded 06 UTC run corrected the current afternoon by 1.5–2.4 °C and raised the next day's high by 0.7 °C.
+- Today's daily forecast no longer shows *yesterday* as its first entry in the hours after midnight. The series is now re-bounded to the current local day on every update, rather than only when a new model run appears — between local midnight and the next run being published (several hours), the leading day was the one that had just ended.
+
+### Changed
+
+- Forecast steps from successive model runs are now combined into one series, newest run winning per hour, instead of the newest run replacing the previous one. This keeps the full forecast length while still refreshing 4×/day: on its own a +72 h run stops short of its last local day, so that day would be dropped and the daily forecast would lose a day (in exchange for the freshness). Merging keeps both — today covered from midnight, the last day intact, and the near term from the newest run. Diagnostics gained a `contributing_runs` field showing which runs the series is built from.
+
 ## [0.8.0] - 2026-07-23
 
 ### Added

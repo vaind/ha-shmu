@@ -49,6 +49,24 @@ don't occur.
   parsing an HTML directory listing; hrefs are percent-encoded.
 - **Observations** (`climate/now/data/.../aws1min - ....json`): new file every
   5 min, ~95 stations, several 1-minute records each. Keyed by `ind_kli`.
+- **The rain gauges are a second, disjoint station network** (`precipitation/now/data/.../aps1min - ....json`, new upstream on 2026-07-06): same envelope and 5-minute cadence as `aws1min`, ~32 days kept, but keyed by `ind_zra` and carrying only `zra_uhrn` (mm, 1-minute sum) and `t` (°C at 2 m, 1-minute average). ~70 KB per file, against ~390 KB for `aws1min`.
+  **Verified live 2026-08-26**: ~1000 records from ~190 stations in one file, and the id set is *completely disjoint* from the 95 `ind_kli` AWS stations — a complementary network, not a re-cut of the observations we already fetch. It is roughly three times denser (~16 km spacing vs ~40 km), which is the whole point of using it: the nearest rain gauge is usually much closer than the nearest synoptic station.
+  It is now **used**, for the `rain_gauge_precipitation` sensor (`gauges.py`, issue #43). The station's own `precipitation` sensor still reads `aws1min` — the two networks are deliberately kept as separate entities rather than one silently standing in for the other.
+  **The gauge coordinates come from the website, not the open-data server**, which publishes none. `shmu.sk/sk/?page=838&uhrny=24` ("Úhrn zrážok") renders a Leaflet map whose marker list is an inline JS array in the page HTML, carrying `nazov`/`lat`/`lon`/`uid` — `uid` being `APS2<ind_zra>` (also `AWS2<ind_kli>` and `AHS<hydro id>` for the other two networks on that map). The exact regeneration recipe is in the `gauges.py` docstring. This is an *offline* regeneration step, not runtime scraping: `website.py` remains the only HTML-coupled runtime module.
+  **Cross-validated 2026-08-26**: the same array's 94 `AWS2` entries include 24 stations already in `stations.py` (curated from a different SHMÚ page, `?page=318`), and the two independent sources agree to a **median 272 m, max 1.2 km** — far below the network's spacing, so the map's coordinates are genuine station positions.
+  Two routes that look promising are **dead ends, both re-verified 2026-08-26** — don't repeat them: the INSPIRE record linked from `precipitation/` (`rpi.gov.sk/…/dfa31b86-…`) returns an *empty* `csw:GetRecordByIdResponse` from the RPI CSW (the record is not indexed), and the national open-data catalogue entry named in `aps1min_metadata.json` (`data.slovensko.sk/datasety/34c1c3ae-…`) carries exactly one distribution — the JSON feed itself.
+  The catalogue is **near-complete, not total**: sampling the feed across its 32-day archive found 197 distinct `ind_zra` against the 190 the map page lists, so parsers must tolerate an id that is not in `gauges.py`.
+  The feed also **mixes hours-old backfill in with the current minutes** (one snapshot spanned 8 hours), so only the newest record per gauge is meaningful — the same rule `parse_observations` already applies to `aws1min`.
+  Worse, **a gauge's presence in a snapshot does not mean it is still reporting**: verified 2026-08-26 across the archive, gauge 32100 was absent from every snapshot of 2026-08-11 and then published 73 rows at once at 23:00 whose *newest* was 29 hours old (2026-08-10 16:44). A second case lagged 67 min. A day-old reading would otherwise be served as the current one and renewed indefinitely.
+  Note that a *backfill dump advances*: those 73 rows step forward minute by minute, so "did this gauge's `measured_at` move forward since last poll?" accepts them and is **not** a sufficient test. The coordinator instead compares the gauge's newest record against the newest record **anywhere in the same snapshot** — that feed's own notion of "now" — and treats it as current only within `OBSERVATION_STALE_AFTER` of it. Sampled across the archive that separates cleanly: 99.8% of gauge readings sit within 10 minutes of their snapshot's newest, 0.14% are past 30 minutes, and the stragglers are hours behind.
+  That test compares the gauge against **its own snapshot** rather than against the wall clock. `minuta` is now parsed correctly (see the next bullet), so an absolute age check would also work; the relative one is kept because it measures the thing that actually goes wrong here — a gauge falling behind *its own network* — and stays right regardless of the HA host's clock. It does not, on its own, catch the whole feed freezing; that is covered separately by only counting a snapshot whose source path changed.
+  Also seen in the archive: an **empty** snapshot (`data: []`), so anything reducing over a snapshot must tolerate that.
+- **`minuta` is SEC (fixed UTC+1), not UTC — and the file *names* are not.**
+  Both feeds' metadata document the field as "termín merania v case SEC" / "time of observation SEC" (`climate/now/metadata/aws1min-metadata.txt`, `precipitation/now/metadata/aps1min_metadata.txt`); *SEC* = **stredoeurópsky čas**, the standard-time designation, so it means UTC+1 and not local summer time (which Slovak calls *SELČ*).
+  **Verified live 2026-08-26** over the whole 32-day retention (20260726–20260826), one file per day: the newest `minuta` runs a constant **+0.97 h** ahead of the file's HTTP `Last-Modified` — i.e. exactly +1 h, less the ~2-minute publish lag — while the file *name* runs a constant **+2.00 h** ahead of it.
+  So one file mixes two conventions: the name is local wall time (CEST that week) and `minuta` is an hour behind it.
+  That is the discriminating observation for the DST question: the check ran **during** summer time, and `minuta` still read UTC+1, so it does **not** track local DST. (The archive keeps only ~32 days, so no winter file is ever in range to confirm the other half directly; fixed-UTC+1 year-round follows from the SEC label plus the fact that it already diverges from local time.) If `minuta` ever starts matching the file name, SHMÚ has switched to local time — re-run the `Last-Modified` comparison before trusting timestamps.
+  `_parse_minuta` (`parsers.py`) attaches `_SEC` accordingly. **This was wrong until 2026-08-26**: the field was read as UTC, which put every observation an hour in the future. Ordering within a file was unaffected (all records share the offset), so the bug was invisible in "latest reading wins" — it surfaced only in the absolute value, via the weather entity's `observation_time` attribute.
 - **`tlak` is station-level pressure (QFE), *not* reduced to sea level.**
   Verified 2026-07-21 on live data: Lomnický Štít (elevation 2635 m) reports
   `tlak` ≈793 hPa — the raw barometer reading at altitude, not the ~1013 hPa
@@ -104,10 +122,13 @@ don't occur.
   encoder quirk and assume this one immutable grid. Each hour-file carries
   all needed surface fields: `2t`(0,0,0@103), `10u/10v`(0,2,2/3@103), gusts
   (0,2,23/24@103,pdt8), total-precip-accum(0,1,193@1,pdt8), TCC(192,128,
-  164@1), LCC/MCC(192,128,186/187@1), PRMSL(0,3,1@101), CAPE(0,7,6@1). Runs
-  cover forecast hours **000–102** (103 files/run, ≈161 KB each), 4 runs/day.
+  164@1), LCC/MCC(192,128,186/187@1), PRMSL(0,3,1@101), CAPE(0,7,6@1).
+  There are 4 runs/day but **they do not all reach the same horizon**: only the **00 UTC** run publishes forecast hours **000–102** (103 files, ≈161 KB each); the **06/12/18 UTC runs stop at +72 h** (73 files).
+  **Verified 2026-08-26** across the whole 32-day retention — these are finished runs, not runs caught mid-publication.
+  (An earlier note here claimed 103 files for all four; that generalised from a single 00 UTC run. The cost of believing it: the client required every requested hour through +102, so three runs in four were silently discarded and the forecast refreshed **once a day**, up to 24 h stale.)
+  `MIN_FORECAST_HOURS` (+72) is therefore the bar a run must clear, and the client takes a run's **contiguous leading run of published hours** — a *hole* still disqualifies it, because precipitation is accumulated since the run start and a missing file would widen a step's window past its interval.
   **This +102 h is the product's own horizon, not a limit of our request** — we
-  already fetch out to hour 102 (`FORECAST_HOURS`, the last file a run
+  already fetch out to hour 102 (`FORECAST_HOURS`, the last file a 00 UTC run
   publishes). The consequence for the **daily** forecast: the final local
   calendar day is almost always truncated (for a 00 UTC run, hour 102 lands
   ≈08:00 local, i.e. before the afternoon temperature peak), so summarising that
@@ -124,18 +145,34 @@ don't occur.
   would need a longer-range model (SHMÚ runs ECMWF to 8–10 days) but SHMÚ
   publishes ECMWF **only as rendered meteogram images** on the website, not as
   open GRIB2 in the `opendata` tree — so it is out of scope for the same
-  data-only reason as air quality. **Today's leading edge**: the newest complete
-  run begins at its reference hour (00/06/12/18 UTC), so it can start partway
-  through the current local day and omit today's earlier hours (a 06 UTC run
-  first covers ≈08:00 local, past the dawn minimum). Rather than fold in
-  observations (which would mix an observed station reading into a model,
-  location forecast), `coordinator._extend_forecast_to_day_start` carries the
-  previous run's steps for today that precede the new run's first step, so
-  today's daily high/low/precip are computed from model data spanning the whole
-  local day. The forecast stays purely model-sourced; carried steps are bounded
-  to the current local day (older ones age out, so no past day is ever emitted)
-  and stay strictly before the new run's first step (per-step precip deltas
-  never double-count). `run`/`source` keep identifying the newest run.
+  data-only reason as air quality.
+  **A single run is short at both ends**, which is why `coordinator._merge_forecast_runs` keeps a *series* rather than the newest run's steps.
+  At the **leading** edge, a run begins at its reference hour (00/06/12/18 UTC), so it can start partway through the current local day and omit today's earlier hours (a 06 UTC run first covers ≈08:00 local, past the dawn minimum) — today's high/low would then be computed from a partial day.
+  At the **trailing** edge, a +72 h run's horizon falls short of its last local day's end (end of local day is 22:00 UTC under CEST, 23:00 under CET), so `_aggregate_daily` would drop that day: using a fresh short run *alone* costs a whole forecast day, whatever hour it was issued.
+  Rather than fold in observations (which would mix an observed station reading into a model, location forecast), the merge keeps one step **per valid time with the newest run winning**, so whatever the newest run does not cover survives from the previous snapshot — today's earlier hours at the head, the 00 UTC run's longer reach at the tail — then bounds the result to the current local day (so a day rolling over drops yesterday even while the run is unchanged; that trim must run every cycle, not only on a run change).
+  The forecast stays purely model-sourced; each `ForecastStep` records its originating `run`, and `run`/`source` keep identifying the newest contributing one.
+  **The merge rests on an assumption**: that every run's step times are a subset of any denser run overlapping them.
+  That holds for today's grids (a +72 h run's last step lands on 00 UTC hours 78/84/90, all members of `range(51, 103, 3)`), so each step's precipitation window still meets its predecessor exactly.
+  It is an observation about the current product, not a guarantee — so `ForecastStep.span_hours` retains each window's width and `_accumulations_tile` checks it.
+  If SHMÚ ever changes the spacing we **opt out of the merge** (falling back to the newest run alone, losing the extra day) rather than silently double-count rain; the fallback logs, shows in diagnostics as a sole `contributing_runs` entry equal to `run`, and is re-evaluated each cycle so a return to tiling grids recovers on its own.
+- **The ALADIN hour-files also carry upper-air fields, and we decode every message whether or not we read it.** **Verified 2026-08-26** across hours 000/001/048/072 of the 06 UTC run, hour 102 of the 00 UTC run and hour 000 of the 12 UTC run: 36 messages each, of which **25 are pressure-level** at 925/850/700/500/250 hPa — temperature (0,0,0), relative humidity (0,1,1), `u`/`v` (0,2,2 / 0,2,3) and geopotential (0,3,4), all DRT 5.0 simple packing on the same grid under the same single bitmap (issue #44).
+  `(0,3,4)` is **Geopotential, m² s⁻²** — *not* geopotential height in gpm, whatever a parameter table's shorthand suggests (WMO 4.2-0-3: 4 = Geopotential, 5 = Geopotential height, 6 = Geometric height).
+  Divide by g₀ = 9.80665 to get metres; taking it as gpm puts 850 hPa at 15 000 m.
+  The hour-000 orography `(0,3,5)` *is* geopotential height in gpm, which is why it reads as a plain terrain height.
+  Reaching the pressure levels needed no new decoder, only a way to *address* them: `param` carries the level **type**, not its **value**, so all five same-quantity messages collapsed onto one key.
+  `Grib2Field.level` now carries the first fixed surface's value and `forecast.py` keys fields by `(*param, level)`.
+  Those keys match by float equality, which is safe because every live message has scale factor 0 and the decoded levels are therefore exact integers-as-floats (a *scaled* encoding is not automatically a problem — `_fixed_surface` divides the value back down, and e.g. `850000` scaled by 1 still decodes to exactly `85000.0`).
+  The re-verification trigger is narrower than "SHMÚ changed the encoding": it is a level that stops **decoding to the constant** — a changed level set, or a decimal-scaled value with no exact binary form — because the field then goes *silently* missing rather than raising.
+  The `tests/test_forecast.py` regression test asserting every surface field is non-None guards that in *our* code (a mistyped constant); an upstream change can only show up in production, as a sensor going unknown or a `null` in the diagnostics `current_step`.
+  **Pressure levels below the model terrain hold extrapolated values**: at a Chopok grid point (terrain 1501 m) the 925 hPa surface sits at 816 m, i.e. underground, so a vertical profile must drop them (`forecast._vertical_profile`) or a 0 °C crossing can be interpolated below the ground it is measured from.
+  **Hour 000 carries no total-precipitation message** (orography takes its slot in the 36) — accumulation since the run start is trivially zero there; it is not a truncated file.
+  What we surface is deliberately narrow: **850 hPa temperature** (the air-mass indicator) and a **freezing level** (0 °C isotherm, m above sea level, anchored at the 2 m screen over the terrain), both as **opt-in** sensors, because they are model output rather than measurements and most households will never look at them.
+  Relative humidity and the upper winds are decoded and dropped on the floor, on purpose.
+  The freezing level's accuracy follows the profile's spacing — good below 850 hPa, where winter freezing levels sit, but the 700→500 hPa gap spans ~2.6 km, so a summer isotherm interpolated inside it can be a few hundred metres out.
+  It is the **0 °C isotherm, not the snow line** — snow keeps falling and melting below the isotherm, so the snow level sits some way under it; don't let user-facing text equate the two.
+  It is derived **only from a surface-anchored profile** (hour-000 terrain + the 2 m temperature): without the ground, everything below the lowest pressure level is unobserved, so a sub-zero 925 hPa point would pose as the surface and hand back its own height — unknown is the honest answer there.
+  `derive_condition` was **left alone**: the textbook win is calling a warm-nose-aloft setup *snowy-rainy* instead of *snowy*, but that changes user-visible conditions on a heuristic no August data can confirm — revisit it against a live winter case, not with synthetic profiles.
+  SHMÚ's metadata (`weather/nwp/metadata/OpenData_AladinSHMU_metadata.json`) labels `tcc` "vysoká oblačnosť" (high cloud), but **no 188/HCC message exists in the files** — `192,128,164` is total cloud cover, as `grib2.py` decodes it. Trust the message inventory, not that label; there is no high-cloud field in this product.
 - **Warnings**: CAP 1.2 XML; the Slovak `<info>` block is preferred; polygons
   are used for point-in-station relevance. **Verified 2026-05-17**: every
   `HHMM/` issuance folder republishes the *full* active set (not deltas),
@@ -164,9 +201,8 @@ don't occur.
   Pillow — same no-binary-deps reason GRIB2 libs were rejected). If a radar
   read starts failing, re-verify the HDF5 structure of one file against this
   list before changing the reader.
-- **Air quality**: `airQuality/` exists but serves **no data files** — every
-  leaf is a Windows `.url` shortcut to the EEA download webapp
-  (`eeadmz1-downloads-webapp.azurewebsites.net`) or SHMÚ web pages (verified
-  2026-05-17, issue #6). It is **out of scope**: consuming it would need the
-  EEA portal or scraping, both against the project's constraints. Don't add an
-  air-quality source here without revisiting that decision.
+- **Three further trees exist and are deliberately unused** (surveyed 2026-08-26). `climate/recent/data/daily/` publishes monthly `kli-inter - YYYY-MM.json` files of daily climate elements, but lags ~2–3 months (newest month 2026-05 was published 2026-07-29), so it is a quality-controlled archive rather than a live source. `products/grids/climateAdaptation/` holds static GIS ZIPs (1991–2020 standard normals, RCP4.5/8.5 scenarios). `weather/radar/volume/{skjav,skkoj,skkub,sklaz}/` holds per-site dual-polarisation polar volumes (`dBZ`, `dBuZ`, `V`, `W`, `ZDR`, `KDP`, `PhiDP`, `RhoHV`) — far heavier than the national composite we already render, for no gain on a home dashboard.
+- **Only ALADIN is published as data.** `weather/nwp/` contains exactly `aladin/sk/4.5km/` (verified 2026-08-26). SHMÚ also runs **A-LAEF** (the 17-member ALARO ensemble, two runs a day, 3-day range) but surfaces it *only* as rendered epsgram and map images on the website — so it is out of scope for the same data-only reason as the ECMWF meteograms above. Re-check `weather/nwp/` before concluding that an ensemble is unavailable; that is where it would appear.
+- **Air quality**: `airQuality/` exists but serves **no data files** — every leaf is a Windows `.url` shortcut to the EEA download webapp (`eeadmz1-downloads-webapp.azurewebsites.net`) or to INSPIRE records on `rpi.gov.sk` (verified 2026-05-17, issue #6).
+  **Re-verified 2026-08-26**: the tree has since grown `historical/`, `recent/` and `products/{management,models,nmsko}` subtrees, but every leaf is still a shortcut (plus a `.docx` how-to) — more signposts, still no data.
+  It is **out of scope**: consuming it would need the EEA portal or scraping, both against the project's constraints. Don't add an air-quality source here without revisiting that decision.

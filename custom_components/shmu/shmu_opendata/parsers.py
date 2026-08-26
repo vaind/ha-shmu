@@ -10,19 +10,25 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Mapping
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import unquote
 from xml.etree import ElementTree as ET
 
 from .exceptions import ShmuDataError
-from .models import Observation, Warning
+from .models import GaugeObservation, Observation, Warning
 
 # Apache autoindex links: skip the column-sort links ("?C=...") and the
 # "Parent Directory" link ("/...").
 _HREF_RE = re.compile(r'<a\s+href="([^"?/][^"]*)"', re.IGNORECASE)
 
 _CAP_NS = "urn:oasis:names:tc:emergency:cap:1.2"
+
+#: The zone the observation feeds stamp ``minuta`` in: "SEC"
+#: (*stredoeurópsky čas*, Central European Time) is the **standard-time**
+#: designation, so it is a fixed UTC+1 and does not follow local summer time
+#: (which Slovak would call *SELČ*). See AGENTS.md for the live verification.
+_SEC = timezone(timedelta(hours=1))
 
 
 def list_directory(html: str) -> list[str]:
@@ -56,10 +62,11 @@ def _to_int(value: Any) -> int | None:
 def _parse_minuta(value: str) -> datetime:
     """Parse an observation timestamp.
 
-    SHMÚ documents ``minuta`` as UTC with no zone suffix
-    (e.g. ``2026-05-17T06:50:00``); attach UTC explicitly.
+    ``minuta`` carries no zone suffix (e.g. ``2026-05-17T06:50:00``); both
+    feeds' metadata document it as "termín merania v case SEC", i.e. a fixed
+    UTC+1, so attach that explicitly rather than reading it as UTC.
     """
-    return datetime.fromisoformat(value).replace(tzinfo=UTC)
+    return datetime.fromisoformat(value).replace(tzinfo=_SEC)
 
 
 def parse_observations(payload: bytes | str) -> dict[int, Observation]:
@@ -107,6 +114,47 @@ def parse_observations(payload: bytes | str) -> dict[int, Observation]:
     return latest
 
 
+def parse_gauge_observations(payload: bytes | str) -> dict[int, GaugeObservation]:
+    """Parse an ``aps1min`` snapshot into the latest reading per rain gauge.
+
+    Mirrors :func:`parse_observations`: a snapshot holds several 1-minute
+    records per gauge — and, unlike the ``aws1min`` feed, sometimes hours-old
+    backfill alongside them — so only the most recent record is kept for each
+    ``ind_zra``.
+
+    Ids absent from :mod:`shmu_opendata.gauges` are still parsed: the
+    catalogue is deliberately a near-complete snapshot of the network, and
+    callers look up the one gauge they care about rather than iterating.
+    """
+    try:
+        document = json.loads(payload)
+        records: list[Mapping[str, Any]] = document["data"]
+    except (json.JSONDecodeError, KeyError, TypeError) as err:
+        raise ShmuDataError(f"Malformed precipitation payload: {err}") from err
+
+    latest: dict[int, GaugeObservation] = {}
+    for record in records:
+        ind_zra = _to_int(record.get("ind_zra"))
+        raw_minuta = record.get("minuta")
+        if ind_zra is None or not raw_minuta:
+            continue
+        try:
+            measured_at = _parse_minuta(raw_minuta)
+        except ValueError:
+            continue
+        existing = latest.get(ind_zra)
+        if existing is not None and measured_at <= existing.measured_at:
+            continue
+        latest[ind_zra] = GaugeObservation(
+            ind_zra=ind_zra,
+            measured_at=measured_at,
+            precipitation=_to_float(record.get("zra_uhrn")),
+            temperature=_to_float(record.get("t")),
+            raw=record,
+        )
+    return latest
+
+
 def _parse_polygon(text: str | None) -> tuple[tuple[float, float], ...]:
     """Parse a CAP ``<polygon>`` ("lat,lon lat,lon …") into a ring."""
     if not text:
@@ -136,9 +184,14 @@ def _cap_datetime(element: ET.Element | None) -> datetime | None:
         parsed = datetime.fromisoformat(text)
     except ValueError:
         return None
-    # SHMÚ CAP times carry an explicit offset, but if one ever arrives naive,
-    # treat it as UTC (consistent with observation timestamps) rather than
-    # letting astimezone() silently assume the host's local zone.
+    # SHMÚ CAP times carry an explicit offset: CAP 1.2 requires one, and so
+    # defines no default for a value that has lost it. If one ever arrives
+    # naive we therefore have nothing to read the zone from, and UTC is this
+    # parser's deterministic fallback — a fixed (if possibly wrong) instant
+    # beats letting astimezone() vary the result with the host's local zone.
+    # Note it is deliberately *not* the observations' SEC: that zone is
+    # documented for `minuta` by the observation feeds, and says nothing about
+    # this one.
     if parsed.tzinfo is None:
         return parsed.replace(tzinfo=UTC)
     return parsed.astimezone(UTC)

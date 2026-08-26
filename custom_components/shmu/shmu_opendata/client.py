@@ -30,7 +30,9 @@ from .const import (
     DEFAULT_TIMEOUT,
     FORECAST_HOURS,
     FORECAST_PATH,
+    MIN_FORECAST_HOURS,
     OBSERVATIONS_PATH,
+    PRECIPITATION_PATH,
     RADAR_LOOP_FRAMES,
     RADAR_PATH,
     USER_AGENT,
@@ -38,8 +40,13 @@ from .const import (
 )
 from .exceptions import ShmuConnectionError, ShmuDataError
 from .forecast import ForecastStep, grid_index, parse_forecast
-from .models import Observation, Warning
-from .parsers import list_directory, parse_cap_alert, parse_observations
+from .models import GaugeObservation, Observation, Warning
+from .parsers import (
+    list_directory,
+    parse_cap_alert,
+    parse_gauge_observations,
+    parse_observations,
+)
 from .radar import RadarImage, encode_apng, render_radar
 from .website import WEBSITE_URL, WebCondition, parse_current_conditions
 
@@ -48,6 +55,7 @@ _LOGGER = logging.getLogger(__name__)
 _DAY_DIR_RE = re.compile(r"^\d{8}/$")
 _ISSUANCE_DIR_RE = re.compile(r"^\d{4}/$")
 _OBS_FILE_RE = re.compile(r"^aws1min .*\.json$")
+_GAUGE_FILE_RE = re.compile(r"^aps1min .*\.json$")
 _CAP_FILE_RE = re.compile(r"^[^/]+\.cap\.xml$")
 _FCAST_FILE_RE = re.compile(r"^al-grib_sk_(\d{3})-(\d{8})-(\d{4})-nwp-\.grb$")
 _RADAR_FILE_RE = re.compile(r"^T_PA[A-Z]V22_C_LZIB_(\d{14})\.hdf$")
@@ -66,6 +74,20 @@ class ObservationSnapshot:
     source: str
     fetched_at: datetime
     published_at: datetime | None
+
+
+@dataclass(frozen=True, slots=True)
+class GaugeSnapshot:
+    """Latest rain-gauge readings plus the source file they came from.
+
+    Deliberately carries no ``published_at``: the coordinator's poll offset is
+    auto-tuned from the ``aws1min`` feed alone, and mixing in a second feed's
+    publish lag would skew that tuning for no benefit.
+    """
+
+    observations: dict[int, GaugeObservation]
+    source: str
+    fetched_at: datetime
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,16 +116,24 @@ class ForecastSnapshot:
     """An ALADIN model run decoded at the configured location.
 
     ``run`` is the model reference time (UTC); ``source`` is the run folder
-    path and doubles as the cache identity — a run never changes once
-    complete, so an unchanged ``source`` means the (large) GRIB2 set need not
-    be re-downloaded until SHMÚ publishes the next run. ``grid_point`` is the
-    projected ALADIN cell ``(i, j)`` for the location, surfaced for
-    diagnostics provenance.
+    path. Together with ``forecast_hours`` — the hours actually decoded — it
+    forms the cache identity: a *published* file never changes, so an
+    unchanged pair means the (large) GRIB2 set need not be re-downloaded.
+    The hours are part of that identity because a run may be picked up while
+    still publishing; when it later reaches further, the longer set is a
+    different snapshot and is re-read. ``grid_point`` is the projected ALADIN
+    cell ``(i, j)`` for the location, surfaced for diagnostics provenance.
+
+    ``steps`` may be a *merged* series spanning several runs once the caller
+    combines successive snapshots; ``run``/``source``/``forecast_hours``
+    always describe the newest contributing run, and each step carries its
+    own originating run.
     """
 
     steps: list[ForecastStep]
     run: datetime
     source: str
+    forecast_hours: tuple[int, ...]
     grid_point: tuple[int, int]
     fetched_at: datetime
 
@@ -259,30 +289,35 @@ class ShmuClient:
             raise ShmuDataError(f"No entries matching {pattern.pattern!r} in {path}")
         return max(entries)
 
-    async def _latest_observation_file(self) -> tuple[str, str]:
-        """Return ``(day_path, filename)`` of the newest observation snapshot.
+    async def _latest_dated_file(
+        self, path: str, pattern: re.Pattern[str]
+    ) -> tuple[str, str]:
+        """Return ``(day_path, filename)`` of the newest file under ``path``.
 
         Walks day folders newest-first and returns the first that actually
-        contains a snapshot. SHMÚ creates the new ``YYYYMMDD/`` folder around
-        00:00 UTC slightly before the day's first 5-minute file lands; without
-        this fallback that gap would raise ``ShmuDataError`` once a day.
+        contains a matching snapshot. SHMÚ creates the new ``YYYYMMDD/`` folder
+        around 00:00 UTC slightly before the day's first 5-minute file lands;
+        without this fallback that gap would raise ``ShmuDataError`` once a day.
+
+        Shared by the observation and rain-gauge feeds, which have the same
+        ``YYYYMMDD/`` layout and 5-minute cadence.
         """
         days = sorted(
-            (e for e in await self._list(OBSERVATIONS_PATH) if _DAY_DIR_RE.match(e)),
+            (e for e in await self._list(path) if _DAY_DIR_RE.match(e)),
             reverse=True,
         )
         if not days:
-            raise ShmuDataError(f"No day folders in {OBSERVATIONS_PATH}")
+            raise ShmuDataError(f"No day folders in {path}")
         # Two folders is enough to bridge a midnight rollover; scanning more
         # would just mask a genuinely stalled feed.
         for day in days[:2]:
-            day_path = f"{OBSERVATIONS_PATH}/{day.rstrip('/')}"
-            files = [e for e in await self._list(day_path) if _OBS_FILE_RE.match(e)]
+            day_path = f"{path}/{day.rstrip('/')}"
+            files = [e for e in await self._list(day_path) if pattern.match(e)]
             if files:
                 return day_path, max(files)
         raise ShmuDataError(
-            f"No observation files in the {len(days[:2])} newest day folders "
-            f"under {OBSERVATIONS_PATH}"
+            f"No files matching {pattern.pattern!r} in the {len(days[:2])} newest "
+            f"day folders under {path}"
         )
 
     async def async_get_observations(
@@ -293,7 +328,9 @@ class ShmuClient:
         If the newest snapshot file is the same one ``previous`` was parsed
         from, the large body is not re-downloaded and ``previous`` is returned.
         """
-        day_path, filename = await self._latest_observation_file()
+        day_path, filename = await self._latest_dated_file(
+            OBSERVATIONS_PATH, _OBS_FILE_RE
+        )
         source = f"{day_path}/{filename}"
 
         if previous is not None and previous.source == source:
@@ -310,6 +347,35 @@ class ShmuClient:
             source=source,
             fetched_at=datetime.now(UTC),
             published_at=published_at,
+        )
+
+    async def async_get_gauge_observations(
+        self, previous: GaugeSnapshot | None = None
+    ) -> GaugeSnapshot:
+        """Fetch the latest rain-gauge snapshot.
+
+        The ``aps1min`` network is disjoint from the ``aws1min`` stations and
+        about three times denser, so it can report precipitation much closer
+        to a given location. Same layout, cadence and identity-cache as
+        :meth:`async_get_observations` — if the newest file is the one
+        ``previous`` was parsed from, the body is not re-downloaded.
+        """
+        day_path, filename = await self._latest_dated_file(
+            PRECIPITATION_PATH, _GAUGE_FILE_RE
+        )
+        source = f"{day_path}/{filename}"
+
+        if previous is not None and previous.source == source:
+            _LOGGER.debug("Gauge observations unchanged (%s); using cache", source)
+            return previous
+
+        payload = await self._get_url(f"{self._base_url}{day_path}/{quote(filename)}")
+        observations = parse_gauge_observations(payload)
+        _LOGGER.debug("Parsed %d rain gauges from %s", len(observations), source)
+        return GaugeSnapshot(
+            observations=observations,
+            source=source,
+            fetched_at=datetime.now(UTC),
         )
 
     async def async_get_warnings(
@@ -378,23 +444,37 @@ class ShmuClient:
         forecast_hours: Sequence[int] = FORECAST_HOURS,
         previous: ForecastSnapshot | None = None,
     ) -> ForecastSnapshot:
-        """Decode the newest *complete* ALADIN run at a location.
+        """Decode the newest usable ALADIN run at a location.
 
         Run discovery mirrors the observation pattern: only small directory
         listings are read each call; the large GRIB2 set is fetched solely
-        when the chosen run folder differs from ``previous``. A run is
-        immutable once complete, so its folder path is a stable cache key.
-        A run is used only when **every** requested hour is published: a
-        missing intermediate file would make a precipitation step span more
-        than its interval (totals are accumulated since the run start), so a
-        partially-published run is skipped entirely and ``previous`` keeps
-        serving. Newest two days are scanned to bridge a midnight rollover
-        (same rationale as the observation walk).
+        when the chosen run's identity differs from ``previous``. A published
+        file is immutable, so run folder plus decoded hours is a stable cache
+        key. Newest two days are scanned to bridge a midnight rollover (same
+        rationale as the observation walk).
+
+        A run is used from its **contiguous leading run of published hours**,
+        and only when that reaches at least ``MIN_FORECAST_HOURS``. Both halves
+        matter:
+
+        * *Contiguous* — precipitation is accumulated since the run start, so a
+          step's amount is the difference against its predecessor. A hole would
+          silently widen one step's window past its nominal interval, so the
+          scan stops at the first missing hour rather than skipping over it.
+        * *At least +72 h* — only the 00 UTC run reaches the full +102 h;
+          requiring that rejected the other three runs outright. Taking the
+          leading run also means a run still being published is usable as soon
+          as it is deep enough, and is re-read when it reaches further (hence
+          the hours in the cache identity).
         """
         wanted = sorted(set(forecast_hours))
         if not wanted:
             raise ShmuDataError("No forecast hours requested")
         target_hour = wanted[-1]
+        # The floor is a statement about the *product* (only the 00 UTC run
+        # goes past +72 h), so it cannot exceed what was actually asked for —
+        # a caller wanting a short horizon still requires all of it.
+        minimum_hour = min(MIN_FORECAST_HOURS, target_hour)
 
         days = sorted(
             (e for e in await self._list(FORECAST_PATH) if _DAY_DIR_RE.match(e)),
@@ -415,34 +495,51 @@ class ShmuClient:
                     match = _FCAST_FILE_RE.match(entry)
                     if match is not None:
                         available[int(match.group(1))] = entry
-                if any(hour not in available for hour in wanted):
-                    # Still publishing / a file is missing — using it would
-                    # misattribute accumulated precipitation. Try an older run.
+                usable: list[int] = []
+                for hour in wanted:
+                    if hour not in available:
+                        break  # a hole would misattribute accumulated precip
+                    usable.append(hour)
+                if not usable or usable[-1] < minimum_hour:
+                    # Too shallow to be worth using (or still publishing its
+                    # first hours) — try an older run.
                     continue
+                hours = tuple(usable)
 
-                if previous is not None and previous.source == run_path:
+                if (
+                    previous is not None
+                    and previous.source == run_path
+                    and previous.forecast_hours == hours
+                ):
                     _LOGGER.debug("Forecast run unchanged (%s); using cache", run_path)
                     return previous
 
                 pairs: list[tuple[int, bytes]] = []
-                for hour in wanted:
+                for hour in usable:
                     payload = await self._get(f"{run_path}/{quote(available[hour])}")
                     pairs.append((hour, payload))
 
                 run_dt = datetime.strptime(f"{day_dir}{run_dir}", "%Y%m%d%H%M").replace(
                     tzinfo=UTC
                 )
-                _LOGGER.debug("Decoded %d forecast hours from %s", len(pairs), run_path)
+                _LOGGER.debug(
+                    "Decoded %d forecast hours (through %03d) from %s",
+                    len(pairs),
+                    hours[-1],
+                    run_path,
+                )
                 return ForecastSnapshot(
                     steps=parse_forecast(pairs, latitude, longitude),
                     run=run_dt,
                     source=run_path,
+                    forecast_hours=hours,
                     grid_point=grid_index(latitude, longitude),
                     fetched_at=datetime.now(UTC),
                 )
         raise ShmuDataError(
-            f"No ALADIN run with all {len(wanted)} requested hours "
-            f"(through {target_hour:03d}) under {FORECAST_PATH}"
+            f"No ALADIN run publishing the requested hours contiguously to at "
+            f"least +{minimum_hour:03d} h (of {len(wanted)} requested, through "
+            f"{target_hour:03d}) under {FORECAST_PATH}"
         )
 
     async def _recent_radar_files(

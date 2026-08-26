@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator
-from datetime import UTC, datetime, timedelta
+from collections.abc import AsyncIterator, Callable, Iterator
+from datetime import UTC, date, datetime, timedelta
 from unittest.mock import patch
 
 import pytest
@@ -11,6 +11,7 @@ from homeassistant.components.weather import WeatherEntityFeature
 from homeassistant.const import STATE_UNKNOWN
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
+from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.shmu.const import CONF_IND_KLI, DOMAIN
@@ -24,7 +25,7 @@ from .test_init import _FakeClient
 @pytest.fixture
 async def setup_entry(
     hass: HomeAssistant, load: Callable[[str], bytes]
-) -> MockConfigEntry:
+) -> AsyncIterator[MockConfigEntry]:
     # Pin the zone so local-day grouping of the daily forecast is deterministic.
     await hass.config.async_set_time_zone("Europe/Bratislava")
     entry = MockConfigEntry(
@@ -34,10 +35,29 @@ async def setup_entry(
         data={CONF_IND_KLI: 11858},
     )
     entry.add_to_hass(hass)
-    with patch("custom_components.shmu.ShmuClient", return_value=_FakeClient(load)):
-        assert await hass.config_entries.async_setup(entry.entry_id)
-        await hass.async_block_till_done()
-    return entry
+    # The coordinator bounds the forecast series to the current local day so a
+    # day rolling over drops yesterday. The fixtures are a real 2026-05-17
+    # 12:00Z run, so against the wall clock every step is a past day and would
+    # be dropped; pin *today* to the fixture's own day (same reason as
+    # ``frozen_now``). Only the no-argument call means "today" — the daily
+    # aggregation asks for a specific day's start and must keep the real
+    # answer, and ``dt_util`` is one shared module object, so the patch has to
+    # discriminate rather than pin every call to one value.
+    real_start_of_local_day = dt_util.start_of_local_day
+
+    def _pinned_start_of_local_day(day: date | None = None) -> datetime:
+        if day is None:
+            return datetime(2026, 5, 16, 22, tzinfo=UTC)  # local midnight, CEST
+        return real_start_of_local_day(day)
+
+    with patch(
+        "custom_components.shmu.coordinator.dt_util.start_of_local_day",
+        _pinned_start_of_local_day,
+    ):
+        with patch("custom_components.shmu.ShmuClient", return_value=_FakeClient(load)):
+            assert await hass.config_entries.async_setup(entry.entry_id)
+            await hass.async_block_till_done()
+        yield entry
 
 
 @pytest.fixture
@@ -139,7 +159,11 @@ def _step(when: datetime, temperature: float) -> ForecastStep:
         pressure=1000.0,
         cloud_coverage=50.0,
         cape=0.0,
+        temperature_850hpa=None,
+        freezing_level=None,
         condition="partlycloudy",
+        span_hours=1.0,
+        run=when,
     )
 
 

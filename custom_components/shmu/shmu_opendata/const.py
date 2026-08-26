@@ -9,6 +9,13 @@ BASE_URL: Final = "https://opendata.shmu.sk"
 #: Directory holding per-day folders of 5-minute automatic-station snapshots.
 OBSERVATIONS_PATH: Final = "/meteorology/climate/now/data"
 
+#: Directory holding per-day folders of 5-minute rain-gauge snapshots. A
+#: second, complementary observation network to :data:`OBSERVATIONS_PATH`:
+#: ~190 gauges keyed by ``ind_zra`` (disjoint from the ``ind_kli`` stations),
+#: carrying only a 1-minute precipitation sum and a 2 m temperature. Same
+#: envelope and 5-minute cadence; ~70 KB per file.
+PRECIPITATION_PATH: Final = "/meteorology/precipitation/now/data"
+
 #: Directory holding per-day / per-issuance folders of CAP 1.2 alert XML.
 WARNINGS_PATH: Final = "/meteorology/weather/alerts/cap"
 
@@ -36,6 +43,14 @@ RADAR_LOOP_FRAMES: Final = 12
 #: (the model's horizon). ≈67 files (~11 MB) once per run — *not* per
 #: observation poll. Trimmed if a run does not publish the full set.
 FORECAST_HOURS: Final = (*range(0, 49), *range(51, 103, 3))
+
+#: Shortest run we will use. Only the **00 UTC** run publishes out to +102 h;
+#: the 06/12/18 UTC runs stop at +72 h (verified 2026-08-26 across the full
+#: 32-day retention). Demanding +102 h therefore rejected three runs in four
+#: and pinned the forecast to one refresh a day, up to 24 h stale. Accepting
+#: +72 h lets every run be used; the caller merges successive runs, so the
+#: longer 00 UTC horizon is still what sets the daily forecast's reach.
+MIN_FORECAST_HOURS: Final = 72
 
 DEFAULT_TIMEOUT: Final = 30.0
 

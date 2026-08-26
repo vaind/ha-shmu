@@ -49,6 +49,15 @@ async def async_get_config_entry_diagnostics(
     forecast = data.forecast
     radar = data.radar
 
+    gauge = coordinator.gauge
+    gauge_snapshot = data.gauge_observations
+    gauge_record = (
+        gauge_snapshot.observations.get(gauge.ind_zra)
+        if gauge_snapshot is not None
+        else None
+    )
+    gauge_served = coordinator.gauge_observation  # what the sensor shows
+
     # Shared resolver — exactly what the weather entity uses, but the full
     # evaluation (every candidate + which won) so a dump explains the result.
     resolution = data.explain_condition(station, served)
@@ -110,6 +119,31 @@ async def async_get_config_entry_diagnostics(
             # Full original SHMÚ row — invaluable for "why is sensor X null".
             "raw_record": dict(observation.raw) if observation else None,
         },
+        # The gauge is identified but its *distance* is deliberately not
+        # reported, and neither are its coordinates. Naming the gauge is
+        # harmless on its own — it narrows the measurement location no further
+        # than the ~0.1° radar box below already does, since this network's
+        # per-gauge cell is the larger of the two. A distance is different in
+        # kind: combined with the gauge's public coordinates it places the
+        # location on a narrow ring, and intersecting that ring with the radar
+        # box would pin it down roughly a hundred times more tightly than
+        # either value alone — defeating the coarsening that the module
+        # docstring's no-home-coordinates rule depends on. The sensor's own
+        # attributes still carry the exact distance; they stay on the user's
+        # instance rather than going into a shareable dump.
+        "rain_gauge": {
+            "ind_zra": gauge.ind_zra,
+            "name": gauge.name,
+            "source": gauge_snapshot.source if gauge_snapshot else None,
+            "fetched_at": gauge_snapshot.fetched_at.isoformat()
+            if gauge_snapshot
+            else None,
+            "gauge_count": len(gauge_snapshot.observations) if gauge_snapshot else None,
+            "gauge_present": gauge_record is not None,
+            # False while a carried-forward reading is still being served.
+            "reading_stale": gauge_served is None,
+            "raw_record": dict(gauge_record.raw) if gauge_record else None,
+        },
         "web_conditions": None
         if web is None
         else {
@@ -128,9 +162,34 @@ async def async_get_config_entry_diagnostics(
         else {
             "source": forecast.source,
             "run": forecast.run.isoformat(),
+            # First and last decoded forecast hour of the newest run — named a
+            # range, not ``forecast_hours``, because the snapshot's field of
+            # that name is the full hour tuple and the two must not be read as
+            # the same thing. The endpoints bound the run's reach; they do not
+            # imply every hour between is present (the requested set is hourly
+            # only to +48 h, 3-hourly beyond) — what the client guarantees is
+            # that no *requested* hour inside the range is missing.
+            "forecast_hour_range": [
+                forecast.forecast_hours[0],
+                forecast.forecast_hours[-1],
+            ]
+            if forecast.forecast_hours
+            else None,
             "fetched_at": forecast.fetched_at.isoformat(),
             "grid_point": list(forecast.grid_point),
             "step_count": len(forecast.steps),
+            # Which runs the series is actually built from, newest last. More
+            # than one is the normal merged case. A sole entry equal to ``run``
+            # means nothing was merged in — either the first fetch after a
+            # restart, or the merge opted out because the steps stopped tiling
+            # (see ``coordinator._merge_forecast_runs``); only its warning log
+            # tells the two apart. An entry *older* than ``run`` is a carried
+            # tail, which is normal — but one lagging by more than a day is a
+            # tail left behind by a failing fetch, visible here and nowhere
+            # else.
+            "contributing_runs": sorted(
+                {step.run.isoformat() for step in forecast.steps}
+            ),
             "first_step": (
                 forecast.steps[0].time.isoformat() if forecast.steps else None
             ),
@@ -146,6 +205,12 @@ async def async_get_config_entry_diagnostics(
                 "condition": current_step.condition,
                 "cloud_coverage": current_step.cloud_coverage,
                 "precipitation": current_step.precipitation,
+                # Upper-air quantities behind the two opt-in sensors; ``None``
+                # here means the run's files carried no pressure levels (or,
+                # for the freezing level, that the profile could not support
+                # one) rather than a sensor fault.
+                "freezing_level": current_step.freezing_level,
+                "temperature_850hpa": current_step.temperature_850hpa,
             },
         },
         "radar": None

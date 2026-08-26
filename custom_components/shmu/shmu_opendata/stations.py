@@ -19,9 +19,8 @@ Latitude/longitude are WGS84 degrees; elevation is metres above sea level.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from math import asin, cos, radians, sin, sqrt
 
-_EARTH_RADIUS_KM = 6371.0088
+from .distance import haversine_km
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,13 +39,7 @@ class Station:
 
     def distance_km(self, latitude: float, longitude: float) -> float:
         """Great-circle distance in km from this station to a point."""
-        d_lat = radians(latitude - self.latitude)
-        d_lon = radians(longitude - self.longitude)
-        a = (
-            sin(d_lat / 2) ** 2
-            + cos(radians(self.latitude)) * cos(radians(latitude)) * sin(d_lon / 2) ** 2
-        )
-        return 2 * _EARTH_RADIUS_KM * asin(sqrt(a))
+        return haversine_km(self.latitude, self.longitude, latitude, longitude)
 
 
 # Ordered by ind_kli. See module docstring for provenance.
