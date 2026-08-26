@@ -14,6 +14,7 @@ import logging
 from collections import deque
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
+from itertools import pairwise
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_LATITUDE, CONF_LONGITUDE, CONF_NAME
@@ -91,37 +92,97 @@ def _keep_previous[T](
     return result
 
 
-def _extend_forecast_to_day_start(
+#: Slack when comparing a step's accumulation window to the gap before it.
+#: Both are whole hours derived from integer forecast hours, so this only
+#: absorbs float noise — it is not a tolerance for genuinely misaligned steps.
+_TILING_TOLERANCE_H = 1e-6
+
+
+def _accumulations_tile(steps: list[ForecastStep]) -> bool:
+    """Whether each step's accumulation window meets its predecessor exactly.
+
+    ``precipitation`` is an amount gathered over ``span_hours`` ending at
+    ``time``. Within one run that always tiles, but a series merged from
+    several runs only does so while every step's window equals the gap to the
+    step before it. Where it does not, the overlap is counted twice in any
+    daily total (or a hole is silently dropped) — so this is checked rather
+    than assumed. The first step has no predecessor and is taken on trust,
+    exactly as in a single-run series.
+    """
+    return all(
+        abs((later.time - earlier.time).total_seconds() / 3600 - later.span_hours)
+        <= _TILING_TOLERANCE_H
+        for earlier, later in pairwise(steps)
+    )
+
+
+def _merge_forecast_runs(
     previous: ForecastSnapshot | None,
     current: ForecastSnapshot | None,
     day_start: datetime,
 ) -> ForecastSnapshot | None:
-    """Backfill the current local day's earlier hours from the previous run.
+    """Fold the newest run into the running series, newest run winning.
 
-    A model run begins at its reference hour (00/06/12/18 UTC), so the newest
-    *complete* run can start partway through the current local day — its earlier
-    hours are simply absent. Left alone, today's daily summary would then be
-    computed from only the part of the day the run covers (a low taken from
-    mid-morning rather than the dawn minimum, a partial precipitation total).
-    Carry the still-relevant steps from the previous snapshot — model data for
-    the same fixed grid point — so today is covered from ``day_start`` (local
-    midnight). The carried steps stay strictly before the new run's first step,
-    so nothing is double-counted, and retention is bounded to ``day_start``
-    onward, so as the day rolls the older steps age out and no past day is ever
-    emitted. Every step remains model-sourced; only its originating run differs
-    (``run``/``source`` keep identifying the newest run for provenance).
+    Two gaps make a single run insufficient, at opposite ends:
+
+    * A run begins at its reference hour (00/06/12/18 UTC), so the newest run
+      can start partway through the current local day. Left alone, today's
+      summary would be computed from only the part of the day it covers — a
+      low taken from mid-morning rather than the dawn minimum.
+    * Only the **00 UTC** run reaches +102 h; the others stop at +72 h, which
+      is short of the last local day's end. Using a newer short run on its own
+      would therefore drop a whole day from the daily forecast (see
+      ``weather._aggregate_daily``), trading a day for the freshness.
+
+    Both disappear under one rule: keep a step per valid time, the newest run
+    winning, so whatever the newest run does not cover survives from the
+    previous snapshot — its earlier hours of today at the head, its longer
+    reach at the tail. The result is then bounded to ``day_start`` (local
+    midnight) onward, so past days age out as the day rolls. Every step stays
+    model-sourced for the same fixed grid point; only its originating run
+    differs, and each step records that. ``run``/``source`` keep identifying
+    the newest contributing run.
+
+    Merging is only sound while the merged steps' accumulation windows still
+    tile (see :func:`_accumulations_tile`). That holds for SHMÚ's current step
+    grids because every run's step times are a subset of any denser run
+    overlapping them — an observation about today's product, not a guarantee.
+    If it ever stops holding we opt out of the merge rather than serve
+    double-counted rain, falling back to the newest run alone: always
+    self-consistent, always the freshest data, at the cost of the extra day.
+    The fallback is re-evaluated every cycle, so a return to tiling grids picks
+    the merge back up on its own.
     """
-    if current is None or previous is None or not current.steps:
+    if current is None or not current.steps:
         return current
-    if previous.source == current.source:
-        return current  # same run (cache hit) — already extended in prior cycles
-    first_current = current.steps[0].time
-    if first_current <= day_start:
-        return current  # the run already covers the whole local day
-    carried = [s for s in previous.steps if day_start <= s.time < first_current]
-    if not carried:
-        return current
-    return replace(current, steps=[*carried, *current.steps])
+
+    if previous is None or previous is current:
+        merged = list(current.steps)
+    else:
+        by_time = {step.time: step for step in previous.steps}
+        by_time.update({step.time: step for step in current.steps})
+        merged = list(by_time.values())
+    # Chronological order is what makes "the gap to its predecessor" mean
+    # anything, so sort here rather than inheriting a decoded run's ordering:
+    # the tiling check below then holds whatever the caller hands in.
+    merged.sort(key=lambda step: step.time)
+
+    kept = [step for step in merged if step.time >= day_start]
+    if _accumulations_tile(kept):
+        return replace(current, steps=kept)
+
+    _LOGGER.warning(
+        "ALADIN steps from runs %s do not tile into a single series; using run "
+        "%s alone. SHMÚ has likely changed the forecast-hour spacing — the "
+        "merged series is dropped so daily precipitation cannot double-count.",
+        ", ".join(sorted({s.run.isoformat() for s in kept})),
+        current.run.isoformat(),
+    )
+    fallback = sorted(
+        (step for step in current.steps if step.time >= day_start),
+        key=lambda step: step.time,
+    )
+    return replace(current, steps=fallback)
 
 
 @dataclass(slots=True)
@@ -536,9 +597,12 @@ class ShmuDataUpdateCoordinator(DataUpdateCoordinator[ShmuData]):
         forecast = _keep_previous(
             forecast, "forecast", previous.forecast if previous else None
         )
-        # Keep today covered from local midnight even when the newest run starts
-        # partway through the day, by carrying the previous run's earlier steps.
-        forecast = _extend_forecast_to_day_start(
+        # Fold the newest run into the running series: it keeps today covered
+        # from local midnight when the run starts partway through the day, and
+        # keeps the 00 UTC run's longer reach when a newer +72 h run is in use.
+        # Runs unchanged, this still re-bounds the series to the current local
+        # day, so a day rolling over drops yesterday without waiting for a run.
+        forecast = _merge_forecast_runs(
             previous.forecast if previous else None,
             forecast,
             dt_util.start_of_local_day(),

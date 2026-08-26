@@ -190,7 +190,7 @@ async def test_get_forecast_no_complete_run_raises(session, fixture) -> None:
             repeat=True,
         )
         client = ShmuClient(session)
-        with pytest.raises(ShmuDataError, match="No ALADIN run with all"):
+        with pytest.raises(ShmuDataError, match="No ALADIN run publishing"):
             await client.async_get_forecast(48.1717, 17.2, forecast_hours=(0, 1, 2))
 
 
@@ -209,8 +209,76 @@ async def test_get_forecast_rejects_run_missing_intermediate_hour(
             repeat=True,
         )
         client = ShmuClient(session)
-        with pytest.raises(ShmuDataError, match="No ALADIN run with all"):
+        with pytest.raises(ShmuDataError, match="No ALADIN run publishing"):
             await client.async_get_forecast(48.1717, 17.2, forecast_hours=(0, 1, 2))
+
+
+async def test_get_forecast_accepts_a_run_short_of_the_full_request(
+    session, fixture, monkeypatch
+) -> None:
+    """A run reaching the floor is used even without every requested hour.
+
+    Only the 00 UTC run publishes the full +102 h; the 06/12/18 UTC runs stop
+    at +72 h. Demanding the whole request rejected three runs in four and
+    pinned the forecast to one refresh a day. The floor is patched down here so
+    the assertion does not need 73 GRIB2 fixtures.
+    """
+    monkeypatch.setattr(
+        "custom_components.shmu.shmu_opendata.client.MIN_FORECAST_HOURS", 1
+    )
+    with aioresponses() as m:
+        m.get(f"{BASE}{FCAST}/", body=_listing("20260517/"), repeat=True)
+        m.get(f"{BASE}{FCAST}/20260517/", body=_listing("1200/"), repeat=True)
+        # Hour 2 was requested but is not published; 0 and 1 are contiguous.
+        _register_run(m, fixture, "20260517", "1200", [0, 1])
+
+        client = ShmuClient(session)
+        snap = await client.async_get_forecast(48.1717, 17.2, forecast_hours=(0, 1, 2))
+
+        assert snap.forecast_hours == (0, 1)
+        assert len(snap.steps) == 2
+
+
+async def test_get_forecast_refetches_when_a_run_publishes_further(
+    session, fixture, monkeypatch
+) -> None:
+    """A run picked up mid-publication must be re-read once it reaches further.
+
+    The run folder alone is not a sufficient cache key any more: the same
+    folder can yield a longer series later, and holding the short one would
+    silently cap the horizon until the next run.
+    """
+    monkeypatch.setattr(
+        "custom_components.shmu.shmu_opendata.client.MIN_FORECAST_HOURS", 1
+    )
+    with aioresponses() as m:
+        m.get(f"{BASE}{FCAST}/", body=_listing("20260517/"), repeat=True)
+        m.get(f"{BASE}{FCAST}/20260517/", body=_listing("1200/"), repeat=True)
+        run_url = f"{BASE}{FCAST}/20260517/1200/"
+        # First poll sees two hours, the second sees three (same run folder).
+        m.get(run_url, body=_listing(_grib_name(0), _grib_name(1)))
+        m.get(
+            run_url,
+            body=_listing(_grib_name(0), _grib_name(1), _grib_name(2)),
+            repeat=True,
+        )
+        for hour, times in ((0, 2), (1, 2), (2, 1)):
+            for _ in range(times):
+                m.get(
+                    f"{run_url}{_grib_name(hour)}",
+                    body=fixture(f"aladin_{hour:03d}.grb"),
+                )
+
+        client = ShmuClient(session)
+        first = await client.async_get_forecast(48.1717, 17.2, forecast_hours=(0, 1, 2))
+        assert first.forecast_hours == (0, 1)
+
+        again = await client.async_get_forecast(
+            48.1717, 17.2, forecast_hours=(0, 1, 2), previous=first
+        )
+        assert again is not first  # same folder, longer set -> re-read
+        assert again.forecast_hours == (0, 1, 2)
+        assert len(again.steps) == 3
 
 
 _RADAR_OLD = "T_PABV22_C_LZIB_20260517201000.hdf"

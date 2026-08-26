@@ -4,6 +4,17 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- The forecast now refreshes with every ALADIN run (4×/day) instead of once a day. SHMÚ publishes four runs daily, but only the 00 UTC one reaches +102 h — the 06/12/18 UTC runs stop at +72 h. The integration required every hour through +102, so it silently discarded three runs in four and served a forecast up to 24 hours old. Today's forecast is noticeably closer to reality as a result: on a live comparison the discarded 06 UTC run corrected the current afternoon by 1.5–2.4 °C and raised the next day's high by 0.7 °C.
+- Today's daily forecast no longer shows *yesterday* as its first entry in the hours after midnight. The series is now re-bounded to the current local day on every update, rather than only when a new model run appears — between local midnight and the next run being published (several hours), the leading day was the one that had just ended.
+
+### Changed
+
+- Forecast steps from successive model runs are now combined into one series, newest run winning per hour, instead of the newest run replacing the previous one. This keeps the full forecast length while still refreshing 4×/day: on its own a +72 h run stops short of its last local day, so that day would be dropped and the daily forecast would lose a day (in exchange for the freshness). Merging keeps both — today covered from midnight, the last day intact, and the near term from the newest run. Diagnostics gained a `contributing_runs` field showing which runs the series is built from.
+
 ## [0.8.0] - 2026-07-23
 
 ### Added

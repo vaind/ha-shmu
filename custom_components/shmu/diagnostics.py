@@ -128,9 +128,34 @@ async def async_get_config_entry_diagnostics(
         else {
             "source": forecast.source,
             "run": forecast.run.isoformat(),
+            # First and last decoded forecast hour of the newest run — named a
+            # range, not ``forecast_hours``, because the snapshot's field of
+            # that name is the full hour tuple and the two must not be read as
+            # the same thing. The endpoints bound the run's reach; they do not
+            # imply every hour between is present (the requested set is hourly
+            # only to +48 h, 3-hourly beyond) — what the client guarantees is
+            # that no *requested* hour inside the range is missing.
+            "forecast_hour_range": [
+                forecast.forecast_hours[0],
+                forecast.forecast_hours[-1],
+            ]
+            if forecast.forecast_hours
+            else None,
             "fetched_at": forecast.fetched_at.isoformat(),
             "grid_point": list(forecast.grid_point),
             "step_count": len(forecast.steps),
+            # Which runs the series is actually built from, newest last. More
+            # than one is the normal merged case. A sole entry equal to ``run``
+            # means nothing was merged in — either the first fetch after a
+            # restart, or the merge opted out because the steps stopped tiling
+            # (see ``coordinator._merge_forecast_runs``); only its warning log
+            # tells the two apart. An entry *older* than ``run`` is a carried
+            # tail, which is normal — but one lagging by more than a day is a
+            # tail left behind by a failing fetch, visible here and nowhere
+            # else.
+            "contributing_runs": sorted(
+                {step.run.isoformat() for step in forecast.steps}
+            ),
             "first_step": (
                 forecast.steps[0].time.isoformat() if forecast.steps else None
             ),
