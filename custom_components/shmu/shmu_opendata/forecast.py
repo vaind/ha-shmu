@@ -23,9 +23,10 @@ offline-testable.
 from __future__ import annotations
 
 import math
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from itertools import pairwise
 
 from .exceptions import ShmuDataError
 from .grib2 import Grib2Field, iter_fields
@@ -42,18 +43,52 @@ _DY = 4500.0
 _NX = 94
 _NY = 48
 
-# --- Surface fields we need, by (discipline, category, number, level type) ---
-# Verified present in every hourly file. Wind/precip gusts are PDT 4.8
-# (time-processed) but the tuple still uniquely identifies them.
-_T2M = (0, 0, 0, 103)  # 2 m temperature (K)
-_U10 = (0, 2, 2, 103)  # 10 m u-wind (m/s)
-_V10 = (0, 2, 3, 103)  # 10 m v-wind (m/s)
-_GUST_U = (0, 2, 23, 103)  # 10 m u-wind gust (m/s)
-_GUST_V = (0, 2, 24, 103)  # 10 m v-wind gust (m/s)
-_TP = (0, 1, 193, 1)  # total precipitation, accumulated since run (kg/m²≡mm)
-_TCC = (192, 128, 164, 1)  # total cloud cover (fraction 0..1)
-_PRMSL = (0, 3, 1, 101)  # pressure reduced to MSL (Pa)
-_CAPE = (0, 7, 6, 1)  # convective available potential energy (J/kg)
+#: How a field is addressed inside one hour-file: *what* it is
+#: ``(discipline, category, number, level type)`` plus *where* it sits (the
+#: level value, in that level type's units — see :class:`grib2.Grib2Field`).
+#: The level is part of the key because ALADIN publishes the same quantity on
+#: five pressure levels; keyed by ``param`` alone they collapse onto one entry.
+#: Matching is by float equality, which holds because SHMÚ's levels decode to
+#: exact integers-as-floats. A level that stopped decoding to its constant
+#: would make that field go *silently* missing — see AGENTS.md for the
+#: re-verification trigger.
+type _FieldKey = tuple[int, int, int, int, float | None]
+
+# --- Surface fields we need ------------------------------------------------
+# Verified present in every hourly file (levels re-verified on live 2026-08-26
+# bytes). Wind/precip gusts are PDT 4.8 (time-processed), which carries the
+# level at the same octets, so the key form is the same.
+_T2M: _FieldKey = (0, 0, 0, 103, 2.0)  # 2 m temperature (K)
+_U10: _FieldKey = (0, 2, 2, 103, 10.0)  # 10 m u-wind (m/s)
+_V10: _FieldKey = (0, 2, 3, 103, 10.0)  # 10 m v-wind (m/s)
+_GUST_U: _FieldKey = (0, 2, 23, 103, 10.0)  # 10 m u-wind gust (m/s)
+_GUST_V: _FieldKey = (0, 2, 24, 103, 10.0)  # 10 m v-wind gust (m/s)
+_TP: _FieldKey = (0, 1, 193, 1, 0.0)  # total precip, accumulated (kg/m²≡mm)
+_TCC: _FieldKey = (192, 128, 164, 1, 0.0)  # total cloud cover (fraction 0..1)
+_PRMSL: _FieldKey = (0, 3, 1, 101, 0.0)  # pressure reduced to MSL (Pa)
+_CAPE: _FieldKey = (0, 7, 6, 1, 0.0)  # convective available potential (J/kg)
+#: Model terrain height (gpm). Published **only in a run's hour-000 file**, and
+#: constant — decoded once per run and reused for every step.
+_OROGRAPHY: _FieldKey = (0, 3, 5, 1, 0.0)
+
+# --- Upper-air fields (issue #44, verified live 2026-08-26) ----------------
+# The same hour-files carry temperature, humidity, wind and geopotential on
+# five pressure levels; we read only temperature and geopotential, which is
+# what a vertical temperature profile needs. Humidity and upper winds are
+# decoded too (``iter_fields`` decodes every message) but deliberately not
+# surfaced — see AGENTS.md.
+_T_PRESSURE = (0, 0, 0, 100)  # temperature on a pressure level (K)
+_Z_PRESSURE = (0, 3, 4, 100)  # geopotential on a pressure level (m²/s²)
+#: The published levels, bottom-up (Pa).
+_PRESSURE_LEVELS_PA: tuple[float, ...] = (92500.0, 85000.0, 70000.0, 50000.0, 25000.0)
+#: The air-mass level: ~1450 m, i.e. above the boundary layer but still inside
+#: the weather, which is why 850 hPa temperature is the standard air-mass chart.
+_AIR_MASS_LEVEL_PA = 85000.0
+#: WMO standard gravity: geopotential (m²/s²) / g₀ = geopotential metres, which
+#: differ from geometric metres by <0.3 % below 10 km — immaterial here.
+_G0 = 9.80665
+#: Height (m) of the 2 m screen above the model terrain, the profile's anchor.
+_SCREEN_HEIGHT = 2.0
 
 # Home Assistant weather condition strings (plain values; no HA import).
 SUNNY = "sunny"
@@ -86,6 +121,11 @@ class ForecastStep:
     step*, cloud cover %, CAPE J/kg. Any field may be ``None`` if its source
     message was absent. ``condition`` is an HA condition string (plain text).
 
+    ``temperature_850hpa`` (°C) and ``freezing_level`` (metres **above sea
+    level**) come from the upper-air fields on the same grid point. The
+    freezing level is ``None`` when the profile cannot support one — see
+    :func:`derive_freezing_level`.
+
     ``span_hours`` is the width of the accumulation window ``precipitation``
     represents — the gap to the previous step *of the same run*. It is
     retained (rather than being a local of :func:`parse_forecast`) because a
@@ -107,6 +147,8 @@ class ForecastStep:
     pressure: float | None
     cloud_coverage: float | None
     cape: float | None
+    temperature_850hpa: float | None
+    freezing_level: float | None
     condition: str | None
     span_hours: float
     run: datetime
@@ -180,6 +222,45 @@ def sky_from_cloud(cloud_coverage: float | None) -> str | None:
     return CLOUDY
 
 
+def derive_freezing_level(profile: Sequence[tuple[float, float]]) -> float | None:
+    """Lowest height (m) at which a temperature profile reaches 0 °C.
+
+    ``profile`` is ``(height, temperature °C)`` ordered bottom-up and anchored
+    at the surface — :func:`_vertical_profile` returns nothing else, because
+    "lowest" is only meaningful when the ground is where the profile starts.
+    *Lowest* follows the standard
+    definition of the freezing level ("the lowest altitude at which the air
+    temperature is 0 °C"); a winter valley inversion can produce several
+    crossings and the one nearest the ground is the one that decides what
+    reaches it.
+
+    Returns ``None`` when the profile cannot support an answer: fewer than two
+    points (a single reading is not a profile — pinning the freezing level to
+    the ground from one number would claim more than the data says), or no
+    crossing at all. With a real profile topped by 250 hPa, always far below
+    freezing, "no crossing" only happens for degenerate input, so ``None``
+    uniformly reads as *not derivable* rather than as a physical claim.
+
+    A first point already at or below 0 °C is itself the answer: that is a
+    surface frost, and the freezing level is *at the ground* by definition.
+    Accuracy follows the profile's spacing: dense below
+    850 hPa, where winter freezing levels sit, but the 700→500 hPa gap spans
+    ~2.6 km, so a summer isotherm interpolated there can be a few hundred
+    metres out.
+    """
+    if len(profile) < 2:
+        return None
+    base_height, base_temperature = profile[0]
+    if base_temperature <= 0.0:
+        return base_height
+    for (lower_h, lower_t), (upper_h, upper_t) in pairwise(profile):
+        if upper_t <= 0.0 < lower_t:
+            # Temperature is ~linear in height within a layer, so interpolate
+            # in height rather than in log-pressure.
+            return lower_h + (upper_h - lower_h) * lower_t / (lower_t - upper_t)
+    return None
+
+
 def derive_condition(
     *,
     cloud_coverage: float | None,
@@ -218,6 +299,45 @@ def derive_condition(
     return sky_from_cloud(cloud_coverage)
 
 
+def _vertical_profile(
+    value: Callable[[_FieldKey], float | None],
+    surface_temperature: float | None,
+    terrain: float | None,
+) -> list[tuple[float, float]]:
+    """Temperature profile ``(height m, °C)`` at one grid point, bottom-up.
+
+    Always anchored at the 2 m screen over the model terrain, then every
+    pressure level above it — **an unanchored profile is not returned at all**
+    (empty list). The anchor is what makes the result answerable: without the
+    ground the profile starts at whatever pressure level happens to be lowest,
+    and everything below it — where a winter freezing level actually sits — is
+    simply unobserved. A sub-zero 925 hPa point would then look like a frozen
+    "surface" and yield its own height as the freezing level, a number the data
+    cannot support. Unknown is the honest answer, so both inputs are required.
+
+    Levels *below* the terrain are dropped: the model fills them by
+    extrapolation, so at a mountain grid point the 925 hPa "temperature"
+    describes air that is underground (verified live 2026-08-26 — a Chopok
+    point has its terrain at 1501 m and 925 hPa at 816 m), and interpolating a
+    crossing through it can place the freezing level below the ground it is
+    measured from.
+    """
+    if terrain is None or surface_temperature is None:
+        return []
+    anchor_height = terrain + _SCREEN_HEIGHT
+    profile: list[tuple[float, float]] = [(anchor_height, surface_temperature)]
+    for level_pa in _PRESSURE_LEVELS_PA:
+        level_t = value((*_T_PRESSURE, level_pa))
+        geopotential = value((*_Z_PRESSURE, level_pa))
+        if level_t is None or geopotential is None:
+            continue
+        height = geopotential / _G0
+        if height <= anchor_height:
+            continue
+        profile.append((height, level_t - 273.15))
+    return profile
+
+
 def parse_forecast(
     hourly_files: Sequence[tuple[int, bytes]],
     latitude: float,
@@ -229,18 +349,27 @@ def parse_forecast(
     ordered by forecast hour because total precipitation is accumulated since
     the run start, so the per-step amount is the difference between successive
     files' accumulations (the first available step is reported as-is).
+
+    The model terrain height is published only in a run's hour-000 file and is
+    constant, so it is picked up from whichever file carries it and reused for
+    every step's upper-air profile. In production that file is always present
+    and first (the client takes a run's *contiguous leading* hours, and
+    ``FORECAST_HOURS`` starts at 0). A caller passing later hours only gets no
+    ``freezing_level`` at all rather than an unanchored guess at one; the
+    850 hPa temperature, a plain lookup, is unaffected.
     """
     steps: list[ForecastStep] = []
     grid: tuple[int, int] | None = None
     prev_accum: float | None = None
     prev_hour: int | None = None
+    terrain: float | None = None
 
     for forecast_hour, payload in hourly_files:
-        fields: dict[tuple[int, int, int, int], Grib2Field] = {}
+        fields: dict[_FieldKey, Grib2Field] = {}
         reference_time: datetime | None = None
         for field in iter_fields(payload):
             reference_time = field.reference_time
-            fields.setdefault(field.param, field)
+            fields.setdefault((*field.param, field.level), field)
         if reference_time is None:
             raise ShmuDataError(f"No fields in forecast hour {forecast_hour}")
 
@@ -250,8 +379,8 @@ def parse_forecast(
         i, j = grid
 
         def value(
-            key: tuple[int, int, int, int],
-            _fields: dict[tuple[int, int, int, int], Grib2Field] = fields,
+            key: _FieldKey,
+            _fields: dict[_FieldKey, Grib2Field] = fields,
             _i: int = i,
             _j: int = j,
         ) -> float | None:
@@ -301,6 +430,22 @@ def parse_forecast(
 
         cape = value(_CAPE)
 
+        if terrain is None:
+            terrain = value(_OROGRAPHY)
+        t850 = value((*_T_PRESSURE, _AIR_MASS_LEVEL_PA))
+        # The published 850 hPa value is reported as-is, even where that level
+        # is below the model terrain — the Lomnický Štít grid cell has its
+        # terrain at 1858 m against an 850 hPa surface near 1530 m, so the
+        # value there is the model's downward extrapolation. That is
+        # deliberate: an 850 hPa chart shows a value over every mountain range
+        # for exactly the same reason, and blanking it would make the air-mass
+        # indicator unavailable at the stations where an air mass is most
+        # interesting, while disagreeing with SHMÚ's own charts for the same
+        # point. The freezing-level profile *does* drop such levels, because
+        # there the fiction is not merely reported but interpolated through:
+        # it moves a real 0 °C crossing to a wrong height.
+        temperature_850hpa = None if t850 is None else t850 - 273.15
+
         steps.append(
             ForecastStep(
                 time=reference_time + timedelta(hours=forecast_hour),
@@ -312,6 +457,10 @@ def parse_forecast(
                 pressure=pressure,
                 cloud_coverage=cloud_coverage,
                 cape=cape,
+                temperature_850hpa=temperature_850hpa,
+                freezing_level=derive_freezing_level(
+                    _vertical_profile(value, temperature, terrain)
+                ),
                 condition=derive_condition(
                     cloud_coverage=cloud_coverage,
                     precipitation=precipitation,

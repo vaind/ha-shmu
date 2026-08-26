@@ -159,6 +159,8 @@ def _step(when: datetime, temperature: float) -> ForecastStep:
         pressure=1000.0,
         cloud_coverage=50.0,
         cape=0.0,
+        temperature_850hpa=None,
+        freezing_level=None,
         condition="partlycloudy",
         span_hours=1.0,
         run=when,

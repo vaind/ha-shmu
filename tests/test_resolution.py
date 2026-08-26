@@ -36,6 +36,8 @@ def _step(condition: str | None, *, cloud: float | None = None) -> ForecastStep:
         pressure=None,
         cloud_coverage=cloud,
         cape=None,
+        temperature_850hpa=None,
+        freezing_level=None,
         condition=condition,
         span_hours=1.0,
         run=datetime(2026, 6, 5, 0, 0, tzinfo=UTC),

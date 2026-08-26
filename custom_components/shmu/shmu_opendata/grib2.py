@@ -32,6 +32,10 @@ _END = b"7777"
 _SIMPLE_PACKING = 0
 _IEEE_PACKING = 4
 _SUPPORTED_TEMPLATES = frozenset({_SIMPLE_PACKING, _IEEE_PACKING})
+#: GRIB marks an absent numeric field by setting every bit — see
+#: :func:`_fixed_surface`.
+_MISSING_U8 = 0xFF
+_MISSING_U32 = 0xFFFFFFFF
 
 
 def _u(data: bytes, offset: int, length: int) -> int:
@@ -52,6 +56,20 @@ def _grib_int(data: bytes, offset: int, length: int) -> int:
     return raw
 
 
+def _fixed_surface(section4: bytes) -> float | None:
+    """Value of the first fixed surface, in the units of its level type.
+
+    Section 4 gives the level as a sign-magnitude scale factor (octet 24) and
+    a scaled value (octets 25-28): ``value = scaled / 10**scale``. Either is
+    all-ones when the encoder marks the level as absent, which is GRIB's own
+    "missing" convention — reported as ``None`` rather than decoded, since a
+    255 scale factor would otherwise read as an exponent of -127.
+    """
+    if section4[23] == _MISSING_U8 or _u(section4, 24, 4) == _MISSING_U32:
+        return None
+    return _u(section4, 24, 4) / 10.0 ** _grib_int(section4, 23, 1)
+
+
 @dataclass(frozen=True, slots=True)
 class Grib2Field:
     """One decoded GRIB2 message (a single 2-D field on the grid).
@@ -62,10 +80,18 @@ class Grib2Field:
     enough to pick e.g. 2 m temperature out of a multi-field file. Geometry is
     deliberately limited to ``nx``/``ny``/``scan_mode``; the projection is the
     caller's concern (the grid is fixed, see :mod:`forecast`).
+
+    ``level`` is *where* that quantity sits — the first fixed surface's value
+    in its own level type's units (Pa for isobaric level type 100, m for
+    height-above-ground 103), or ``None`` if the message marks it missing.
+    ``param`` alone cannot separate the five pressure levels ALADIN publishes
+    the same quantity on, so a caller picking one addresses it as
+    ``(*param, level)``.
     """
 
     reference_time: datetime
     param: tuple[int, int, int, int]
+    level: float | None
     nx: int
     ny: int
     scan_mode: int
@@ -186,6 +212,7 @@ def iter_fields(data: bytes) -> Iterator[Grib2Field]:
 
         reference_time: datetime | None = None
         param: tuple[int, int, int, int] | None = None
+        level: float | None = None
         npts = nx = ny = scan_mode = 0
         data_template = -1
         bitmap: list[bool] | None = None
@@ -219,7 +246,11 @@ def iter_fields(data: bytes) -> Iterator[Grib2Field]:
                 ny = _u(sec, 34, 4)
                 scan_mode = sec[64]
             elif sec_num == 4:
+                # Octets 10/11 (category/number) and 23-28 (the first fixed
+                # surface) sit at the same offsets in templates 4.0 and 4.8,
+                # the only two SHMÚ uses, so one path reads both.
                 param = (discipline, sec[9], sec[10], sec[22])
+                level = _fixed_surface(sec)
             elif sec_num == 5:
                 data_template = _u(sec, 9, 2)
                 if data_template not in _SUPPORTED_TEMPLATES:
@@ -258,6 +289,7 @@ def iter_fields(data: bytes) -> Iterator[Grib2Field]:
         yield Grib2Field(
             reference_time=reference_time,
             param=param,
+            level=level,
             nx=nx,
             ny=ny,
             scan_mode=scan_mode,

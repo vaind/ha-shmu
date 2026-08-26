@@ -17,6 +17,7 @@ from custom_components.shmu.shmu_opendata.client import _frame_label
 
 BASE = "https://opendata.shmu.sk"
 OBS = "/meteorology/climate/now/data"
+GAUGE = "/meteorology/precipitation/now/data"
 WARN = "/meteorology/weather/alerts/cap"
 FCAST = "/meteorology/weather/nwp/aladin/sk/4.5km"
 RADAR = "/meteorology/weather/radar/composite/skcomp/zmax"
@@ -64,6 +65,63 @@ async def test_get_observations_and_change_detection(session, fixture) -> None:
         # (it was only registered once; a second GET would raise).
         again = await client.async_get_observations(previous=snap)
         assert again is snap
+
+
+async def test_get_gauge_observations_and_change_detection(session, fixture) -> None:
+    gauge_file = "aps1min%20-%202026-05-17%2006-55-00.json"
+    with aioresponses() as m:
+        m.get(f"{BASE}{GAUGE}/", body=_listing("20260517/"), repeat=True)
+        m.get(
+            f"{BASE}{GAUGE}/20260517/",
+            body=_listing(gauge_file, "aps1min%20-%202026-05-17%2006-50-00.json"),
+            repeat=True,
+        )
+        # Registered ONCE on purpose: a second GET would raise.
+        m.get(
+            f"{BASE}{GAUGE}/20260517/{gauge_file}",
+            body=fixture("gauge_observations.json"),
+        )
+
+        client = ShmuClient(session)
+        snap = await client.async_get_gauge_observations()
+        assert snap.source == f"{GAUGE}/20260517/aps1min - 2026-05-17 06-55-00.json"
+        assert snap.observations[17720].precipitation == 0.4
+
+        # Same newest file -> previous returned, body NOT re-fetched.
+        again = await client.async_get_gauge_observations(previous=snap)
+        assert again is snap
+
+
+async def test_gauge_observations_fall_back_to_previous_day_folder(
+    session, fixture
+) -> None:
+    # Midnight rollover: the new day's folder exists but has no file yet.
+    gauge_file = "aps1min%20-%202026-05-17%2006-55-00.json"
+    with aioresponses() as m:
+        m.get(f"{BASE}{GAUGE}/", body=_listing("20260518/", "20260517/"))
+        m.get(f"{BASE}{GAUGE}/20260518/", body=_listing())  # empty new folder
+        m.get(f"{BASE}{GAUGE}/20260517/", body=_listing(gauge_file))
+        m.get(
+            f"{BASE}{GAUGE}/20260517/{gauge_file}",
+            body=fixture("gauge_observations.json"),
+        )
+
+        snap = await ShmuClient(session).async_get_gauge_observations()
+
+        assert snap.source.endswith("20260517/aps1min - 2026-05-17 06-55-00.json")
+
+
+async def test_gauge_observations_ignore_the_other_feeds_files(session) -> None:
+    """Only ``aps1min`` files count, even though the layout is shared."""
+    with aioresponses() as m:
+        m.get(f"{BASE}{GAUGE}/", body=_listing("20260517/"))
+        m.get(
+            f"{BASE}{GAUGE}/20260517/",
+            body=_listing("aws1min%20-%202026-05-17%2006-55-00.json"),
+        )
+
+        with pytest.raises(ShmuDataError):
+            await ShmuClient(session).async_get_gauge_observations()
 
 
 async def test_observations_fall_back_to_previous_day_folder(session, fixture) -> None:

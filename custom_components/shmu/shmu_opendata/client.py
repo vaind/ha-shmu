@@ -32,6 +32,7 @@ from .const import (
     FORECAST_PATH,
     MIN_FORECAST_HOURS,
     OBSERVATIONS_PATH,
+    PRECIPITATION_PATH,
     RADAR_LOOP_FRAMES,
     RADAR_PATH,
     USER_AGENT,
@@ -39,8 +40,13 @@ from .const import (
 )
 from .exceptions import ShmuConnectionError, ShmuDataError
 from .forecast import ForecastStep, grid_index, parse_forecast
-from .models import Observation, Warning
-from .parsers import list_directory, parse_cap_alert, parse_observations
+from .models import GaugeObservation, Observation, Warning
+from .parsers import (
+    list_directory,
+    parse_cap_alert,
+    parse_gauge_observations,
+    parse_observations,
+)
 from .radar import RadarImage, encode_apng, render_radar
 from .website import WEBSITE_URL, WebCondition, parse_current_conditions
 
@@ -49,6 +55,7 @@ _LOGGER = logging.getLogger(__name__)
 _DAY_DIR_RE = re.compile(r"^\d{8}/$")
 _ISSUANCE_DIR_RE = re.compile(r"^\d{4}/$")
 _OBS_FILE_RE = re.compile(r"^aws1min .*\.json$")
+_GAUGE_FILE_RE = re.compile(r"^aps1min .*\.json$")
 _CAP_FILE_RE = re.compile(r"^[^/]+\.cap\.xml$")
 _FCAST_FILE_RE = re.compile(r"^al-grib_sk_(\d{3})-(\d{8})-(\d{4})-nwp-\.grb$")
 _RADAR_FILE_RE = re.compile(r"^T_PA[A-Z]V22_C_LZIB_(\d{14})\.hdf$")
@@ -67,6 +74,20 @@ class ObservationSnapshot:
     source: str
     fetched_at: datetime
     published_at: datetime | None
+
+
+@dataclass(frozen=True, slots=True)
+class GaugeSnapshot:
+    """Latest rain-gauge readings plus the source file they came from.
+
+    Deliberately carries no ``published_at``: the coordinator's poll offset is
+    auto-tuned from the ``aws1min`` feed alone, and mixing in a second feed's
+    publish lag would skew that tuning for no benefit.
+    """
+
+    observations: dict[int, GaugeObservation]
+    source: str
+    fetched_at: datetime
 
 
 @dataclass(frozen=True, slots=True)
@@ -268,30 +289,35 @@ class ShmuClient:
             raise ShmuDataError(f"No entries matching {pattern.pattern!r} in {path}")
         return max(entries)
 
-    async def _latest_observation_file(self) -> tuple[str, str]:
-        """Return ``(day_path, filename)`` of the newest observation snapshot.
+    async def _latest_dated_file(
+        self, path: str, pattern: re.Pattern[str]
+    ) -> tuple[str, str]:
+        """Return ``(day_path, filename)`` of the newest file under ``path``.
 
         Walks day folders newest-first and returns the first that actually
-        contains a snapshot. SHMÚ creates the new ``YYYYMMDD/`` folder around
-        00:00 UTC slightly before the day's first 5-minute file lands; without
-        this fallback that gap would raise ``ShmuDataError`` once a day.
+        contains a matching snapshot. SHMÚ creates the new ``YYYYMMDD/`` folder
+        around 00:00 UTC slightly before the day's first 5-minute file lands;
+        without this fallback that gap would raise ``ShmuDataError`` once a day.
+
+        Shared by the observation and rain-gauge feeds, which have the same
+        ``YYYYMMDD/`` layout and 5-minute cadence.
         """
         days = sorted(
-            (e for e in await self._list(OBSERVATIONS_PATH) if _DAY_DIR_RE.match(e)),
+            (e for e in await self._list(path) if _DAY_DIR_RE.match(e)),
             reverse=True,
         )
         if not days:
-            raise ShmuDataError(f"No day folders in {OBSERVATIONS_PATH}")
+            raise ShmuDataError(f"No day folders in {path}")
         # Two folders is enough to bridge a midnight rollover; scanning more
         # would just mask a genuinely stalled feed.
         for day in days[:2]:
-            day_path = f"{OBSERVATIONS_PATH}/{day.rstrip('/')}"
-            files = [e for e in await self._list(day_path) if _OBS_FILE_RE.match(e)]
+            day_path = f"{path}/{day.rstrip('/')}"
+            files = [e for e in await self._list(day_path) if pattern.match(e)]
             if files:
                 return day_path, max(files)
         raise ShmuDataError(
-            f"No observation files in the {len(days[:2])} newest day folders "
-            f"under {OBSERVATIONS_PATH}"
+            f"No files matching {pattern.pattern!r} in the {len(days[:2])} newest "
+            f"day folders under {path}"
         )
 
     async def async_get_observations(
@@ -302,7 +328,9 @@ class ShmuClient:
         If the newest snapshot file is the same one ``previous`` was parsed
         from, the large body is not re-downloaded and ``previous`` is returned.
         """
-        day_path, filename = await self._latest_observation_file()
+        day_path, filename = await self._latest_dated_file(
+            OBSERVATIONS_PATH, _OBS_FILE_RE
+        )
         source = f"{day_path}/{filename}"
 
         if previous is not None and previous.source == source:
@@ -319,6 +347,35 @@ class ShmuClient:
             source=source,
             fetched_at=datetime.now(UTC),
             published_at=published_at,
+        )
+
+    async def async_get_gauge_observations(
+        self, previous: GaugeSnapshot | None = None
+    ) -> GaugeSnapshot:
+        """Fetch the latest rain-gauge snapshot.
+
+        The ``aps1min`` network is disjoint from the ``aws1min`` stations and
+        about three times denser, so it can report precipitation much closer
+        to a given location. Same layout, cadence and identity-cache as
+        :meth:`async_get_observations` — if the newest file is the one
+        ``previous`` was parsed from, the body is not re-downloaded.
+        """
+        day_path, filename = await self._latest_dated_file(
+            PRECIPITATION_PATH, _GAUGE_FILE_RE
+        )
+        source = f"{day_path}/{filename}"
+
+        if previous is not None and previous.source == source:
+            _LOGGER.debug("Gauge observations unchanged (%s); using cache", source)
+            return previous
+
+        payload = await self._get_url(f"{self._base_url}{day_path}/{quote(filename)}")
+        observations = parse_gauge_observations(payload)
+        _LOGGER.debug("Parsed %d rain gauges from %s", len(observations), source)
+        return GaugeSnapshot(
+            observations=observations,
+            source=source,
+            fetched_at=datetime.now(UTC),
         )
 
     async def async_get_warnings(
