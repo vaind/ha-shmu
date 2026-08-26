@@ -558,11 +558,12 @@ class ShmuDataUpdateCoordinator(DataUpdateCoordinator[ShmuData]):
         elif not present and self._gauge_present:
             _LOGGER.info(
                 "SHMÚ rain gauge %s (%s) is not in the latest precipitation "
-                "snapshot (%s); its sensor will be unavailable until it "
-                "reports again",
+                "snapshot (%s); its last reading is served for up to %s more, "
+                "after which the sensor goes unavailable until it reports again",
                 ind_zra,
                 self.gauge.name,
                 snapshot.source,
+                OBSERVATION_STALE_AFTER,
             )
         self._gauge_present = present
 
