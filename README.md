@@ -124,12 +124,11 @@ The plugin that puts the radar on it **ships with this integration** and is serv
 
 ```yaml
 type: custom:map-card
-x: 48.15 # latitude of the initial view (the card's own x/y convention)
-y: 17.11 # longitude
+focus_entity: zone.home # centre on your Home Assistant location
 zoom: 8
 card_size: 8
 entities:
-  - zone.home
+  - zone.home # optional: also draw a marker there
 plugins:
   - name: shmu-radar
     url: /shmu_static/radar-map-overlay.js
@@ -137,6 +136,10 @@ plugins:
       entity: image.<station>_radar_map_loop
       opacity: 0.6
 ```
+
+The card has no home-location default of its own, so give it `focus_entity` (or fixed coordinates).
+With neither, it fits the bounds of the entity markers you listed and *ignores* `zoom` — which for a single marker means it opens at street level, far too close for a radar view.
+To pin the view somewhere other than home, use `x` and `y` instead: `x` is the **latitude** and `y` the longitude, whichever way round the card's own option table lists them.
 
 Plugin options: `entity` (required) is any of the three map entities, `opacity` defaults to `0.6`, and `attribution` overrides the SHMÚ credit shown in the map's corner.
 Point `entity` at `image.<station>_radar_map_frame` and add the scrubber card to the same view to step through the last hour on the map.
