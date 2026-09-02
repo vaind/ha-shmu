@@ -72,8 +72,7 @@ Each frame is rendered two ways from one download: cropped to the vicinity of yo
 It is **national data**, so the radar entities stay available even if your station momentarily drops out of an observation snapshot.
 The colour ramp is reflectivity (rain/storm intensity); this is *not* cloud cover.
 
-Entities (grouped under the station device; `<station>` is your station's
-slug, e.g. `bratislava_letisko`):
+Entities (grouped under the station device; `<station>` is your station's slug, e.g. `bratislava_letisko`):
 
 | Entity | What it shows |
 |---|---|
@@ -109,7 +108,7 @@ in a plain `picture-entity` card instead — it animates on its own.
 
 The pictures above are fixed crops, so there is nothing to zoom into.
 The `*_radar_map*` entities are the same frames rendered for a map instead: the whole national composite at the radar's own resolution, undecorated, and geo-referenced by the `bbox_*` attributes.
-Draping one over a Leaflet map card gives you pan and zoom, with the basemap supplying the borders, towns and roads that the picture-card renders bake in.
+Draping one over a Leaflet map card gives you pan and zoom, and sets the echo against towns, roads and terrain — none of which a radar picture can show on its own, since all the picture cards draw for reference is country borders and a marker at your station.
 
 This needs one custom card — [ha-map-card](https://github.com/nathan-gs/ha-map-card) by nathan-gs — which you install once from HACS (*Frontend* → search for **Map card**).
 The plugin that puts the radar on it **ships with this integration** and is served at `/shmu_static/radar-map-overlay.js`, so there is nothing else to download and no Lovelace resource to register.
