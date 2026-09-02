@@ -74,16 +74,24 @@ async def _async_register_frontend(hass: HomeAssistant) -> None:
     """
     if hass.data.get(DATA_FRONTEND):
         return
+    # Claim the route *before* awaiting, so two entries setting up
+    # concurrently cannot both try to register it. Release the claim if the
+    # registration fails, or the retry would skip it and bring the entry up
+    # with a plugin URL that 404s until Home Assistant is restarted.
     hass.data[DATA_FRONTEND] = True
-    await hass.http.async_register_static_paths(
-        [
-            StaticPathConfig(
-                FRONTEND_URL,
-                str(Path(__file__).parent / "frontend" / FRONTEND_FILE),
-                cache_headers=False,
-            )
-        ]
-    )
+    try:
+        await hass.http.async_register_static_paths(
+            [
+                StaticPathConfig(
+                    FRONTEND_URL,
+                    str(Path(__file__).parent / "frontend" / FRONTEND_FILE),
+                    cache_headers=False,
+                )
+            ]
+        )
+    except Exception:
+        hass.data[DATA_FRONTEND] = False
+        raise
 
 
 async def _async_reload_on_update(hass: HomeAssistant, entry: ShmuConfigEntry) -> None:

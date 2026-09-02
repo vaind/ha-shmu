@@ -12,9 +12,11 @@ from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import CONF_LATITUDE, CONF_LONGITUDE, CONF_NAME
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
+from homeassistant.setup import async_setup_component
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 from pytest_homeassistant_custom_component.typing import ClientSessionGenerator
 
+from custom_components.shmu import _async_register_frontend
 from custom_components.shmu.const import (
     CONF_IND_KLI,
     CONF_LOCATION,
@@ -890,4 +892,27 @@ async def test_second_station_does_not_re_register_the_plugin(
 
     assert entry.state is ConfigEntryState.LOADED
     assert second.state is ConfigEntryState.LOADED
+    assert (await (await hass_client()).get(FRONTEND_URL)).status == 200
+
+
+async def test_failed_plugin_registration_is_not_remembered(
+    hass: HomeAssistant, hass_client: ClientSessionGenerator
+) -> None:
+    """A registration that raised must not count as done.
+
+    The route is claimed before the await so two entries cannot register it at
+    once, but keeping that claim after a failure would let the next attempt
+    skip registration and bring the entry up with a plugin URL that 404s.
+    """
+    await async_setup_component(hass, "http", {})
+
+    with (
+        patch.object(
+            hass.http, "async_register_static_paths", side_effect=OSError("nope")
+        ),
+        pytest.raises(OSError, match="nope"),
+    ):
+        await _async_register_frontend(hass)
+
+    await _async_register_frontend(hass)
     assert (await (await hass_client()).get(FRONTEND_URL)).status == 200
