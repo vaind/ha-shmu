@@ -3,20 +3,24 @@
 from __future__ import annotations
 
 import itertools
+import math
 import struct
 import zlib
 
 import pytest
 
 from custom_components.shmu.shmu_opendata.exceptions import ShmuDataError
-from custom_components.shmu.shmu_opendata.geo import vicinity_box
+from custom_components.shmu.shmu_opendata.geo import pixel_to_lonlat, vicinity_box
 from custom_components.shmu.shmu_opendata.odim import read_odim
 from custom_components.shmu.shmu_opendata.radar import (
     _IDX_BORDER,
     _IDX_DOT,
     _IDX_LABEL_BG,
+    _IDX_RING,
     _N_DBZ,
+    MAP_OVERLAY,
     RadarImage,
+    RadarStyle,
     _draw_label,
     _draw_progress,
     _filtered_zstream,
@@ -99,8 +103,8 @@ def test_extent_is_the_crop_box_containing_the_station(fixture) -> None:
 
 def test_radius_controls_crop_size(fixture) -> None:
     data = fixture("radar_zmax.hdf")
-    small = render_radar(data, _LAT, _LON, radius_km=60.0)
-    large = render_radar(data, _LAT, _LON, radius_km=150.0)
+    small = render_radar(data, _LAT, _LON, style=RadarStyle(radius_km=60.0))
+    large = render_radar(data, _LAT, _LON, style=RadarStyle(radius_km=150.0))
     assert small.width <= large.width
     assert small.height <= large.height
     assert (small.north - small.south) < (large.north - large.south)
@@ -112,7 +116,7 @@ def test_reports_actual_strongest_echo_not_band_boundary(fixture) -> None:
     the crop the whole grid, so the oracle is simple and deterministic."""
     raw_bytes = fixture("radar_zmax.hdf")
     o = read_odim(raw_bytes)
-    img = render_radar(raw_bytes, _LAT, _LON, radius_km=1.0e6)
+    img = render_radar(raw_bytes, _LAT, _LON, style=RadarStyle(radius_km=1.0e6))
     assert img.product == "MAX"
     assert img.max_dbz is not None
 
@@ -126,6 +130,96 @@ def test_reports_actual_strongest_echo_not_band_boundary(fixture) -> None:
             peak_raw = b
     assert img.max_dbz == round(o.offset + o.gain * peak_raw, 1)
     assert img.max_dbz != float("inf")
+
+
+def test_map_overlay_is_the_whole_grid_at_native_resolution(fixture) -> None:
+    """A map card zooms into the picture, so no crop and no stride sampling —
+    and the box must be the composite's own corners, or the overlay sits off
+    the ground."""
+    data = fixture("radar_zmax.hdf")
+    composite = read_odim(data)
+    img = render_radar(data, _LAT, _LON, style=MAP_OVERLAY)
+
+    assert (img.width, img.height) == (composite.width, composite.height)
+    assert img.west == pytest.approx(composite.ll_lon)
+    assert img.east == pytest.approx(composite.ur_lon)
+    assert img.south == pytest.approx(composite.ll_lat)
+    assert img.north == pytest.approx(composite.ur_lat)
+
+
+def test_map_overlay_draws_no_decoration(fixture) -> None:
+    """Borders, station marker and timestamp belong to the map card, not to a
+    raster stretched over its terrain."""
+    data = fixture("radar_zmax.hdf")
+    overlay = render_radar(data, _LAT, _LON, style=MAP_OVERLAY)
+    station = render_radar(data, _LAT, _LON, label="2026-05-17 20:20")
+
+    drawn = _indexed_pixels(overlay.png, _png_chunks(overlay.png))
+    assert drawn.isdisjoint({_IDX_BORDER, _IDX_RING, _IDX_DOT, _IDX_LABEL_BG})
+    # The contrast is the point: the station view does draw all of it.
+    assert {_IDX_BORDER, _IDX_RING, _IDX_DOT, _IDX_LABEL_BG} <= _indexed_pixels(
+        station.png, _png_chunks(station.png)
+    )
+    # Echo is still there — this is a bare picture, not an empty one.
+    assert drawn & set(range(1, _N_DBZ + 1))
+
+
+@pytest.mark.parametrize("max_edge", [None, 10])
+def test_box_covers_whole_source_cells(fixture, max_edge) -> None:
+    """Each drawn pixel stands for a whole number of source cells.
+
+    Stride sampling makes the rendered span wider than the requested crop
+    (the last sampled column still represents a full `step`-wide cell), so a
+    box taken from the crop would shift the picture against the ground.
+    """
+    data = fixture("radar_zmax.hdf")
+    composite = read_odim(data)
+    img = render_radar(
+        data, _LAT, _LON, style=RadarStyle(radius_km=None, max_edge=max_edge)
+    )
+
+    per_source_px = (composite.ur_lon - composite.ll_lon) / composite.width
+    per_drawn_px = (img.east - img.west) / img.width
+    cells = per_drawn_px / per_source_px
+    assert cells == pytest.approx(round(cells))
+    # The 64px-wide fixture forces a stride of 7 at max_edge=10, so this is a
+    # real multi-cell case and not a restatement of the native one.
+    assert round(cells) == (1 if max_edge is None else 7)
+
+
+def _web_mercator(lat: float, lon: float) -> tuple[float, float]:
+    """EPSG:3857 as a web map projects it (spherical; the radius cancels)."""
+    return math.radians(lon), math.log(math.tan(math.pi / 4 + math.radians(lat) / 2))
+
+
+@pytest.mark.parametrize(("max_edge", "step"), [(None, 1), (10, 7)])
+def test_overlay_lands_where_a_web_map_puts_it(fixture, max_edge, step) -> None:
+    """A map card stretches the picture linearly between the reported corners,
+    in Web Mercator. Every pixel must then land where our own projection put
+    it, or the echo sits off the ground.
+
+    Checked against real Leaflet 1.9.4 on a live composite (2026-09-02): zero
+    pixels of error across the full 2270x1560 grid, corners included. This
+    keeps that property from regressing offline.
+    """
+    data = fixture("radar_zmax.hdf")
+    composite = read_odim(data)
+    img = render_radar(
+        data, _LAT, _LON, style=RadarStyle(radius_km=None, max_edge=max_edge)
+    )
+
+    x_west, y_north = _web_mercator(img.north, img.west)
+    x_east, y_south = _web_mercator(img.south, img.east)
+    for col, row in itertools.product((0.0, 7.5, 31.0), (0.0, 5.5, 23.0)):
+        lon, lat = pixel_to_lonlat(composite, col, row)
+        x, y = _web_mercator(lat, lon)
+        # Fraction across the overlay, in the map's own projected space.
+        assert (x - x_west) / (x_east - x_west) * img.width == pytest.approx(
+            col / step, abs=1e-6
+        )
+        assert (y - y_north) / (y_south - y_north) * img.height == pytest.approx(
+            row / step, abs=1e-6
+        )
 
 
 def test_unsupported_product_raises_loudly(fixture) -> None:
@@ -195,6 +289,24 @@ def test_encode_apng_single_frame_degrades_to_one_frame(fixture) -> None:
     assert tags.count(b"IDAT") == 1
 
 
+def test_encode_apng_without_progress_splices_frames_untouched(fixture) -> None:
+    """The map loop skips the step markers (they would be drawn into the
+    terrain), which also makes assembly pure chunk concatenation."""
+    data = fixture("radar_zmax.hdf")
+    frames = [render_radar(data, _LAT, _LON, style=MAP_OVERLAY)] * 3
+    apng = encode_apng(frames, progress=False)
+
+    chunks = _ordered_chunks(apng)
+    assert [t for t, _ in chunks].count(b"fcTL") == 3
+    # Frame 0 goes in as a plain IDAT, the rest as fdAT after their sequence
+    # number — each one the frame's own cached stream, byte for byte.
+    bodies = [b for t, b in chunks if t == b"IDAT"]
+    bodies += [b[4:] for t, b in chunks if t == b"fdAT"]
+    assert bodies == [frames[0].zstream] * 3
+    # With markers on, the same frames are re-encoded rather than reused.
+    assert frames[0].zstream not in encode_apng(frames)
+
+
 def test_encode_apng_rejects_empty() -> None:
     with pytest.raises(ShmuDataError, match="zero frames"):
         encode_apng([])
@@ -202,8 +314,8 @@ def test_encode_apng_rejects_empty() -> None:
 
 def test_encode_apng_rejects_mismatched_frame_sizes(fixture) -> None:
     data = fixture("radar_zmax.hdf")
-    small = render_radar(data, _LAT, _LON, radius_km=60.0)
-    large = render_radar(data, _LAT, _LON, radius_km=150.0)
+    small = render_radar(data, _LAT, _LON, style=RadarStyle(radius_km=60.0))
+    large = render_radar(data, _LAT, _LON, style=RadarStyle(radius_km=150.0))
     assert (small.width, small.height) != (large.width, large.height)
     with pytest.raises(ShmuDataError, match="differ in size"):
         encode_apng([small, large])

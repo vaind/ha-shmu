@@ -93,7 +93,10 @@
     "image": {
       "radar": { "name": "Radar" },
       "radar_loop": { "name": "Radarová slučka" },
-      "radar_frame": { "name": "Snímka radaru" }
+      "radar_frame": { "name": "Snímka radaru" },
+      "radar_map": { "name": "Radar pre mapu" },
+      "radar_map_loop": { "name": "Radarová slučka pre mapu" },
+      "radar_map_frame": { "name": "Snímka radaru pre mapu" }
     },
     "number": {
       "radar_frame": { "name": "Výber snímky radaru" }

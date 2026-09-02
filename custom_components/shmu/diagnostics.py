@@ -225,6 +225,12 @@ async def async_get_config_entry_diagnostics(
             "loop_end": radar.frames[-1].valid_at.isoformat(),
             "selected_offset": coordinator.radar_frame_offset,
             "size": [radar.image.width, radar.image.height],
+            # The map overlay's size and the bytes both pictures cost, so a
+            # report about a missing or misplaced overlay says which rendering
+            # is in play without needing the images themselves.
+            "map_size": [radar.map_image.width, radar.map_image.height],
+            "png_bytes": [len(radar.image.png), len(radar.map_image.png)],
+            "loop_bytes": [len(radar.loop_png), len(radar.map_loop_png)],
             "max_dbz": radar.image.max_dbz,
             # Coarsened: the crop is centred on the measurement location, which
             # may be the user's home (see ``_coarse``).

@@ -12,6 +12,7 @@ re-downloaded — only the tiny listing is read.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 import ssl
@@ -41,13 +42,20 @@ from .const import (
 from .exceptions import ShmuConnectionError, ShmuDataError
 from .forecast import ForecastStep, grid_index, parse_forecast
 from .models import GaugeObservation, Observation, Warning
+from .odim import read_odim
 from .parsers import (
     list_directory,
     parse_cap_alert,
     parse_gauge_observations,
     parse_observations,
 )
-from .radar import RadarImage, encode_apng, render_radar
+from .radar import (
+    MAP_OVERLAY,
+    STATION_VIEW,
+    RadarImage,
+    encode_apng,
+    render_composite,
+)
 from .website import WEBSITE_URL, WebCondition, parse_current_conditions
 
 _LOGGER = logging.getLogger(__name__)
@@ -140,7 +148,13 @@ class ForecastSnapshot:
 
 @dataclass(frozen=True, slots=True)
 class RadarFrame:
-    """One decoded radar composite in the loop buffer.
+    """One decoded radar composite in the loop buffer, in both renderings.
+
+    ``image`` is the station-centred picture (see
+    :data:`~shmu_opendata.radar.STATION_VIEW`) and ``map_image`` the bare,
+    full-coverage raster for a map card
+    (:data:`~shmu_opendata.radar.MAP_OVERLAY`). Both come from **one** decode
+    of the same file, so the pair costs an extra render, not an extra fetch.
 
     ``source`` is the ODIM file path. A published frame never changes, so its
     path is a stable cache identity: the next poll reuses this frame instead
@@ -150,6 +164,7 @@ class RadarFrame:
     """
 
     image: RadarImage
+    map_image: RadarImage
     source: str
     valid_at: datetime
 
@@ -165,15 +180,23 @@ class RadarSnapshot:
     the precipitation's movement is visible at a glance. Frame identity by
     ``source`` means a poll re-fetches only the one newly published composite
     and reuses the rest.
+
+    ``map_image`` and ``map_loop_png`` are the same newest frame and the same
+    buffer rendered for a **map overlay** instead: full national coverage at
+    native resolution, undecorated and geo-referenced. They exist so a map
+    card can zoom and pan the radar, which a picture cropped and shrunk for a
+    fixed-size card cannot support.
     """
 
     image: RadarImage
+    map_image: RadarImage
     product: str
     source: str
     valid_at: datetime
     fetched_at: datetime
     frames: tuple[RadarFrame, ...]
     loop_png: bytes
+    map_loop_png: bytes
 
 
 #: Stamp format for a frame's ``valid_at`` — unambiguous, fixed-width, and
@@ -197,6 +220,24 @@ def _frame_label(valid_at: datetime, tz: str | None) -> str:
     return valid_at.astimezone(zone or UTC).strftime(_LABEL_FMT)
 
 
+def _render_frame(
+    payload: bytes, latitude: float, longitude: float, label: str
+) -> tuple[RadarImage, RadarImage]:
+    """Decode one composite once and render both of its pictures.
+
+    Pure CPU and the heaviest step of a radar poll (the native-resolution map
+    render dominates), so :meth:`ShmuClient.async_get_radar` runs it in a
+    worker thread rather than on the event loop.
+    """
+    composite = read_odim(payload)
+    return (
+        render_composite(
+            composite, latitude, longitude, style=STATION_VIEW, label=label
+        ),
+        render_composite(composite, latitude, longitude, style=MAP_OVERLAY),
+    )
+
+
 def _radar_snapshot(frames: Sequence[RadarFrame], product: str) -> RadarSnapshot:
     """Assemble a :class:`RadarSnapshot` from buffered frames (oldest→newest).
 
@@ -206,12 +247,17 @@ def _radar_snapshot(frames: Sequence[RadarFrame], product: str) -> RadarSnapshot
     newest = frames[-1]
     return RadarSnapshot(
         image=newest.image,
+        map_image=newest.map_image,
         product=product,
         source=newest.source,
         valid_at=newest.valid_at,
         fetched_at=datetime.now(UTC),
         frames=tuple(frames),
         loop_png=encode_apng([f.image for f in frames]),
+        # No step markers on the map loop: they are drawn in pixel space, so
+        # over a map they would land in a corner of the terrain and stretch
+        # with the zoom (see `encode_apng`).
+        map_loop_png=encode_apng([f.map_image for f in frames], progress=False),
     )
 
 
@@ -591,8 +637,14 @@ class ShmuClient:
         previous: RadarSnapshot | None = None,
         tz: str | None = None,
     ) -> RadarSnapshot:
-        """Fetch the recent ODIM composites as a short loop, cropped to the
-        station vicinity.
+        """Fetch the recent ODIM composites as a short loop.
+
+        Each frame is rendered twice from a single decode — cropped to the
+        station vicinity for a plain picture card, and whole-country at native
+        resolution for a map overlay (see :class:`RadarFrame`). Both renders
+        run in a worker thread: they are the poll's only heavy CPU work and
+        would otherwise stall the event loop, most visibly on the first poll
+        that backfills the whole buffer.
 
         Discovery reads only small directory listings. A frame's ~0.3 MB HDF5
         is downloaded and rendered **once**: a published frame is immutable,
@@ -622,13 +674,22 @@ class ShmuClient:
                 frames.append(reused)
                 continue
             payload = await self._get(f"{day_path}/{quote(filename)}")
-            image = render_radar(
+            image, map_image = await asyncio.get_running_loop().run_in_executor(
+                None,
+                _render_frame,
                 payload,
                 latitude,
                 longitude,
-                label=_frame_label(valid_at, tz),
+                _frame_label(valid_at, tz),
             )
-            frames.append(RadarFrame(image=image, source=source, valid_at=valid_at))
+            frames.append(
+                RadarFrame(
+                    image=image,
+                    map_image=map_image,
+                    source=source,
+                    valid_at=valid_at,
+                )
+            )
             fetched += 1
 
         if (

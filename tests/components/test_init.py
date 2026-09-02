@@ -12,13 +12,17 @@ from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import CONF_LATITUDE, CONF_LONGITUDE, CONF_NAME
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
+from homeassistant.setup import async_setup_component
 from pytest_homeassistant_custom_component.common import MockConfigEntry
+from pytest_homeassistant_custom_component.typing import ClientSessionGenerator
 
+from custom_components.shmu import _async_register_frontend
 from custom_components.shmu.const import (
     CONF_IND_KLI,
     CONF_LOCATION,
     CONF_LOCATION_MODE,
     DOMAIN,
+    FRONTEND_URL,
     LOCATION_MODE_CUSTOM,
     LOCATION_MODE_HASS,
     LOCATION_MODE_STATION,
@@ -35,14 +39,17 @@ from custom_components.shmu.shmu_opendata import (
     WebConditionsSnapshot,
     get_station,
 )
-from custom_components.shmu.shmu_opendata.client import _frame_label, _radar_snapshot
+from custom_components.shmu.shmu_opendata.client import (
+    _frame_label,
+    _radar_snapshot,
+    _render_frame,
+)
 from custom_components.shmu.shmu_opendata.forecast import grid_index, parse_forecast
 from custom_components.shmu.shmu_opendata.parsers import (
     parse_cap_alert,
     parse_gauge_observations,
     parse_observations,
 )
-from custom_components.shmu.shmu_opendata.radar import render_radar
 from custom_components.shmu.shmu_opendata.website import parse_current_conditions
 
 #: Forecast hours backed by the trimmed real GRIB2 fixtures.
@@ -171,14 +178,18 @@ class _FakeClient:
         frames = []
         for m in ("10", "15", "20"):
             valid_at = datetime(2026, 5, 17, 20, int(m), tzinfo=UTC)
+            # Render through the client's own helper, so the double cannot
+            # drift from the picture/map pair the real client produces.
+            image, map_image = _render_frame(
+                self._load("radar_zmax.hdf"),
+                latitude,
+                longitude,
+                _frame_label(valid_at, tz),
+            )
             frames.append(
                 RadarFrame(
-                    image=render_radar(
-                        self._load("radar_zmax.hdf"),
-                        latitude,
-                        longitude,
-                        label=_frame_label(valid_at, tz),
-                    ),
+                    image=image,
+                    map_image=map_image,
                     source=f"test-run/20260517/T_PABV22_C_LZIB_2026051720{m}00.hdf",
                     valid_at=valid_at,
                 )
@@ -833,3 +844,75 @@ async def test_gauge_feed_recovers_without_a_reload(
         await hass.async_block_till_done()
 
     assert hass.states.get("sensor.hurbanovo_rain_gauge_precipitation").state == "0.4"
+
+
+async def test_map_overlay_plugin_is_served(
+    hass: HomeAssistant,
+    entry: MockConfigEntry,
+    load: Callable[[str], bytes],
+    hass_client: ClientSessionGenerator,
+) -> None:
+    """The ha-map-card plugin ships with the integration and is served by it.
+
+    A dashboard imports it straight from this URL, so it needs no HACS
+    download and no Lovelace resource — but the response must be JavaScript,
+    or the card's dynamic import is rejected by the browser.
+    """
+    with patch("custom_components.shmu.ShmuClient", return_value=_FakeClient(load)):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    response = await (await hass_client()).get(FRONTEND_URL)
+    assert response.status == 200
+    assert "javascript" in response.headers["Content-Type"]
+    assert "imageOverlay" in await response.text()
+
+
+async def test_second_station_does_not_re_register_the_plugin(
+    hass: HomeAssistant,
+    entry: MockConfigEntry,
+    load: Callable[[str], bytes],
+    hass_client: ClientSessionGenerator,
+) -> None:
+    """Tracking two stations must still set up: the route is per instance, and
+    registering the same path twice raises."""
+    second = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="11813",
+        title="Bratislava - Koliba",
+        data={CONF_IND_KLI: 11813},
+    )
+    second.add_to_hass(hass)
+
+    # Setting up the component brings up every entry of the domain, so this
+    # one call exercises both stations.
+    with patch("custom_components.shmu.ShmuClient", return_value=_FakeClient(load)):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    assert entry.state is ConfigEntryState.LOADED
+    assert second.state is ConfigEntryState.LOADED
+    assert (await (await hass_client()).get(FRONTEND_URL)).status == 200
+
+
+async def test_failed_plugin_registration_is_not_remembered(
+    hass: HomeAssistant, hass_client: ClientSessionGenerator
+) -> None:
+    """A registration that raised must not count as done.
+
+    The route is claimed before the await so two entries cannot register it at
+    once, but keeping that claim after a failure would let the next attempt
+    skip registration and bring the entry up with a plugin URL that 404s.
+    """
+    await async_setup_component(hass, "http", {})
+
+    with (
+        patch.object(
+            hass.http, "async_register_static_paths", side_effect=OSError("nope")
+        ),
+        pytest.raises(OSError, match="nope"),
+    ):
+        await _async_register_frontend(hass)
+
+    await _async_register_frontend(hass)
+    assert (await (await hass_client()).get(FRONTEND_URL)).status == 200

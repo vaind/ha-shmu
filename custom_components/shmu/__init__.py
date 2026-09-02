@@ -6,10 +6,14 @@ https://opendata.shmu.sk/, licensed CC BY 4.0.
 
 from __future__ import annotations
 
+from pathlib import Path
+
+from homeassistant.components.http import StaticPathConfig
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
+from .const import DATA_FRONTEND, FRONTEND_FILE, FRONTEND_URL
 from .coordinator import ShmuConfigEntry, ShmuDataUpdateCoordinator
 from .shmu_opendata import ShmuClient, create_ssl_context
 
@@ -24,6 +28,8 @@ PLATFORMS: list[Platform] = [
 
 async def async_setup_entry(hass: HomeAssistant, entry: ShmuConfigEntry) -> bool:
     """Set up SHMÚ Weather from a config entry."""
+    await _async_register_frontend(hass)
+
     # SHMÚ omits a TLS intermediate; building the verifying context reads a
     # bundled certificate from disk, so do it off the event loop. The context
     # is applied per request, so HA's shared, auto-managed session can be used
@@ -51,6 +57,41 @@ async def async_setup_entry(hass: HomeAssistant, entry: ShmuConfigEntry) -> bool
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
+
+
+async def _async_register_frontend(hass: HomeAssistant) -> None:
+    """Serve the bundled radar map-overlay plugin, once per instance.
+
+    The file is a plain ES module that the ha-map-card custom card imports by
+    URL, so it needs no Lovelace resource registration and cannot affect a
+    dashboard that does not ask for it. The route is per-instance, not per
+    config entry, so a second configured station must not register it again
+    (aiohttp rejects a duplicate path).
+
+    Cache headers are deliberately off: the plugin is a few kilobytes and
+    ships with the integration, so an update must reach browsers without users
+    having to hard-reload a long-cached file.
+    """
+    if hass.data.get(DATA_FRONTEND):
+        return
+    # Claim the route *before* awaiting, so two entries setting up
+    # concurrently cannot both try to register it. Release the claim if the
+    # registration fails, or the retry would skip it and bring the entry up
+    # with a plugin URL that 404s until Home Assistant is restarted.
+    hass.data[DATA_FRONTEND] = True
+    try:
+        await hass.http.async_register_static_paths(
+            [
+                StaticPathConfig(
+                    FRONTEND_URL,
+                    str(Path(__file__).parent / "frontend" / FRONTEND_FILE),
+                    cache_headers=False,
+                )
+            ]
+        )
+    except Exception:
+        hass.data[DATA_FRONTEND] = False
+        raise
 
 
 async def _async_reload_on_update(hass: HomeAssistant, entry: ShmuConfigEntry) -> None:

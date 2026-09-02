@@ -58,9 +58,7 @@ A Home Assistant integration for Slovak weather data published by the
 - **Weather warnings** — a binary sensor (with full alert details as
   attributes) that is on while a SHMÚ CAP alert covers your station, decided
   by the alert's own polygon.
-- **Radar** — the national reflectivity composite cropped to your station,
-  as a still image, an autoplaying ~1-hour loop, and a slider-scrubbable
-  frame (see [Radar](#radar)).
+- **Radar** — the national reflectivity composite cropped to your station, as a still image, an autoplaying ~1-hour loop, and a slider-scrubbable frame — plus the same three as bare, geo-referenced overlays you can pan and zoom on a map card (see [Radar](#radar)).
 - One shared, change-detecting fetch per cycle, aligned to SHMÚ's upstream
   UTC 5-minute publish grid with an offset that auto-tunes to the observed
   publish lag, so data is fresh rather than up to a poll-interval behind.
@@ -69,16 +67,12 @@ A Home Assistant integration for Slovak weather data published by the
 
 ## Radar
 
-The SHMÚ national radar reflectivity composite (ODIM_H5, a new frame every
-~5 min), decoded in pure Python — no native dependency — and cropped to the
-vicinity of your configured station, with country borders and a station
-marker drawn on so the picture is self-locating. It is **national data**, so
-the radar entities stay available even if your station momentarily drops out
-of an observation snapshot. The colour ramp is reflectivity (rain/storm
-intensity); this is *not* cloud cover.
+The SHMÚ national radar reflectivity composite (ODIM_H5, a new frame every ~5 min), decoded in pure Python — no native dependency.
+Each frame is rendered two ways from one download: cropped to the vicinity of your configured station, with country borders and a station marker drawn on so the picture is self-locating in a plain card; and whole-country at native resolution with no decoration, for [draping over a map card](#zoomable-radar-on-a-map).
+It is **national data**, so the radar entities stay available even if your station momentarily drops out of an observation snapshot.
+The colour ramp is reflectivity (rain/storm intensity); this is *not* cloud cover.
 
-Entities (grouped under the station device; `<station>` is your station's
-slug, e.g. `bratislava_letisko`):
+Entities (grouped under the station device; `<station>` is your station's slug, e.g. `bratislava_letisko`):
 
 | Entity | What it shows |
 |---|---|
@@ -86,6 +80,9 @@ slug, e.g. `bratislava_letisko`):
 | `image.<station>_radar_loop` | An **autoplaying ~1-hour loop** (the last 12 frames, animated PNG). Every frame is stamped with its valid time in your Home Assistant timezone, plus a row of step markers under it that fills in across the hour and resets when the loop wraps. |
 | `image.<station>_radar_frame` | A **single buffered frame**, chosen by the scrubber below — for manually stepping through the loop. |
 | `number.<station>_radar_frame_selector` | The **scrubber** (slider). Reads like a timeline: `0` on the **right** is live/newest; drag **left** into the past — `-1` ≈ 5 min ago … down to `-(frames-1)` for the oldest buffered frame. |
+| `image.<station>_radar_map` | The latest frame **for a map card**: the whole country at the radar's native ~0.3 km resolution, with nothing drawn on it and transparent where there is no echo. `bbox_*` is the composite's own corners, and `max_dbz` is the strongest echo *anywhere in the country* rather than near your station. |
+| `image.<station>_radar_map_loop` | The same ~1-hour loop, for a map card. It carries no timestamp and no step markers: a map overlay is drawn in ground coordinates, so anything baked into a corner of the picture would sit in the terrain and stretch with the zoom. The entity's state is the newest frame's time. |
+| `image.<station>_radar_map_frame` | The scrubbed frame, for a map card — driven by the same slider as `radar_frame`. |
 
 ### Example dashboard card
 
@@ -106,6 +103,41 @@ cards:
 
 For a hands-off "just watch it move" view, use `image.<station>_radar_loop`
 in a plain `picture-entity` card instead — it animates on its own.
+
+### Zoomable radar on a map
+
+The pictures above are fixed crops, so there is nothing to zoom into.
+The `*_radar_map*` entities are the same frames rendered for a map instead: the whole national composite at the radar's own resolution, undecorated, and geo-referenced by the `bbox_*` attributes.
+Draping one over a Leaflet map card gives you pan and zoom, and sets the echo against towns, roads and terrain — none of which a radar picture can show on its own, since all the picture cards draw for reference is country borders and a marker at your station.
+
+This needs one custom card — [ha-map-card](https://github.com/nathan-gs/ha-map-card) by nathan-gs — which you install once from HACS (*Frontend* → search for **Map card**).
+The plugin that puts the radar on it **ships with this integration** and is served at `/shmu_static/radar-map-overlay.js`, so there is nothing else to download and no Lovelace resource to register.
+
+```yaml
+type: custom:map-card
+focus_entity: zone.home # centre on your Home Assistant location
+zoom: 8
+card_size: 8
+entities:
+  - zone.home # optional: also draw a marker there
+plugins:
+  - name: shmu-radar
+    url: /shmu_static/radar-map-overlay.js
+    options:
+      entity: image.<station>_radar_map_loop
+      opacity: 0.6
+```
+
+The card has no home-location default of its own, so give it `focus_entity` (or fixed coordinates).
+With neither, it fits the bounds of the entity markers you listed and *ignores* `zoom` — which for a single marker means it opens at street level, far too close for a radar view.
+To pin the view somewhere other than home, use `x` and `y` instead: `x` is the **latitude** and `y` the longitude, whichever way round the card's own option table lists them.
+
+Plugin options: `entity` (required) is any of the three map entities, `opacity` defaults to `0.6`, and `attribution` overrides the SHMÚ credit shown in the map's corner.
+Point `entity` at `image.<station>_radar_map_frame` and add the scrubber card to the same view to step through the last hour on the map.
+
+Two things worth knowing before you leave it on a wall dashboard.
+The animated map loop is ~330 KB and the browser re-fetches it every 5 minutes while the card is open, so prefer `image.<station>_radar_map` (~30 KB, still) where bandwidth matters.
+Overlay alignment is exact rather than approximate: the SHMÚ grid and web maps are both spherical Mercator, so stretching the picture between its reported corners puts every pixel where the map itself would put that coordinate.
 
 ## Installation (HACS)
 
