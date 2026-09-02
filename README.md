@@ -58,10 +58,7 @@ A Home Assistant integration for Slovak weather data published by the
 - **Weather warnings** — a binary sensor (with full alert details as
   attributes) that is on while a SHMÚ CAP alert covers your station, decided
   by the alert's own polygon.
-- **Radar** — the national reflectivity composite cropped to your station,
-  as a still image, an autoplaying ~1-hour loop, and a slider-scrubbable
-  frame — plus the same three as bare, geo-referenced overlays you can pan and
-  zoom on a map card (see [Radar](#radar)).
+- **Radar** — the national reflectivity composite cropped to your station, as a still image, an autoplaying ~1-hour loop, and a slider-scrubbable frame — plus the same three as bare, geo-referenced overlays you can pan and zoom on a map card (see [Radar](#radar)).
 - One shared, change-detecting fetch per cycle, aligned to SHMÚ's upstream
   UTC 5-minute publish grid with an offset that auto-tunes to the observed
   publish lag, so data is fresh rather than up to a poll-interval behind.
@@ -70,15 +67,10 @@ A Home Assistant integration for Slovak weather data published by the
 
 ## Radar
 
-The SHMÚ national radar reflectivity composite (ODIM_H5, a new frame every
-~5 min), decoded in pure Python — no native dependency. Each frame is rendered
-two ways from one download: cropped to the vicinity of your configured
-station, with country borders and a station marker drawn on so the picture is
-self-locating in a plain card; and whole-country at native resolution with no
-decoration, for [draping over a map card](#zoomable-radar-on-a-map). It is
-**national data**, so the radar entities stay available even if your station
-momentarily drops out of an observation snapshot. The colour ramp is
-reflectivity (rain/storm intensity); this is *not* cloud cover.
+The SHMÚ national radar reflectivity composite (ODIM_H5, a new frame every ~5 min), decoded in pure Python — no native dependency.
+Each frame is rendered two ways from one download: cropped to the vicinity of your configured station, with country borders and a station marker drawn on so the picture is self-locating in a plain card; and whole-country at native resolution with no decoration, for [draping over a map card](#zoomable-radar-on-a-map).
+It is **national data**, so the radar entities stay available even if your station momentarily drops out of an observation snapshot.
+The colour ramp is reflectivity (rain/storm intensity); this is *not* cloud cover.
 
 Entities (grouped under the station device; `<station>` is your station's
 slug, e.g. `bratislava_letisko`):

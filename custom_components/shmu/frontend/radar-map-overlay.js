@@ -15,8 +15,7 @@
  *
  * ```yaml
  * type: custom:map-card
- * x: 48.15          # latitude of the initial view
- * y: 17.11          # longitude of the initial view
+ * focus_entity: zone.home   # centre on your Home Assistant location
  * zoom: 8
  * plugins:
  *   - name: shmu-radar
@@ -55,7 +54,7 @@ export default function (L, PluginBase, Logger) {
       this.layer = null;
       // What the layer currently shows, so a repaint only happens on a real
       // change: update() runs on every Home Assistant state change.
-      this.url = null;
+      this.frameId = null;
       this.bounds = null;
       // Last problem reported, to keep that same cadence from spamming the log.
       this.complaint = null;
@@ -101,11 +100,11 @@ export default function (L, PluginBase, Logger) {
         if (this.bounds === null || !frame.bounds.equals(this.bounds)) {
           this.layer.setBounds(frame.bounds);
         }
-        if (frame.url !== this.url) {
+        if (frame.id !== this.frameId) {
           this.layer.setUrl(frame.url);
         }
       }
-      this.url = frame.url;
+      this.frameId = frame.id;
       this.bounds = frame.bounds;
       this.complaint = null;
     }
@@ -139,12 +138,20 @@ export default function (L, PluginBase, Logger) {
       }
 
       const [south, west, north, east] = box;
-      // The entity's state is the frame's valid time. Pin the URL to it: the
-      // access token in entity_picture rotates on its own schedule, so a
-      // browser that reuses a cached response would otherwise keep showing an
-      // old frame after a new one is published.
+      // The entity's state is the frame's valid time, which makes it both the
+      // frame's identity and the cache-buster the URL needs: the access token
+      // in entity_picture rotates on its own schedule, so a browser reusing a
+      // cached response would otherwise keep showing an old frame.
+      //
+      // Identity is the state alone, never the whole URL. Home Assistant
+      // rotates that token every five minutes and writes a new state for it,
+      // so repainting on a URL change would re-download the picture (~330 KB
+      // for a loop) and restart the animation for nothing. Keeping the applied
+      // URL is safe: Home Assistant still accepts the previous token, and
+      // every path that rebuilds the layer reads the current one anyway.
       const separator = attrs.entity_picture.includes("?") ? "&" : "?";
       return {
+        id: state.state,
         url: `${attrs.entity_picture}${separator}shmu_frame=${encodeURIComponent(
           state.state,
         )}`,
@@ -156,7 +163,7 @@ export default function (L, PluginBase, Logger) {
       if (this.layer !== null) {
         this.layer.remove();
         this.layer = null;
-        this.url = null;
+        this.frameId = null;
         this.bounds = null;
       }
     }
