@@ -3,6 +3,7 @@
   "name": "SHMÚ Weather",
   "codeowners": ["@vaind"],
   "config_flow": true,
+  "dependencies": ["http"],
   "documentation": "https://github.com/vaind/ha-shmu",
   "integration_type": "service",
   "iot_class": "cloud_polling",

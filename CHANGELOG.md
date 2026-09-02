@@ -4,6 +4,22 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **The radar can now be panned and zoomed on a map.** Three new image entities — `radar_map`, `radar_map_loop` and `radar_map_frame` — carry the same frames as the existing radar pictures, but rendered as the whole national composite at the radar's native ~0.3 km resolution, with no borders, station marker or timestamp drawn on and transparent where there is no echo. They publish the WGS84 box they cover, so a map card can drape them over its own basemap; the existing cropped pictures are unchanged, and the same scrubber slider drives both.
+- The plugin that puts them on a map **ships with the integration** and is served at `/shmu_static/radar-map-overlay.js`. The only thing you install is the [ha-map-card](https://github.com/nathan-gs/ha-map-card) Lovelace card itself — there is no second download and no Lovelace resource to register. The README has a ready-made card under [Zoomable radar on a map](https://github.com/vaind/ha-shmu#zoomable-radar-on-a-map).
+- The overlay lines up with the map exactly rather than approximately: the SHMÚ radar grid and web maps are both spherical Mercator, so stretching a frame between its reported corners puts every pixel where the map itself would put that coordinate. Verified against Leaflet on a live composite — no measurable error anywhere on the grid, corners included.
+
+### Fixed
+
+- The `bbox_*` attributes now describe the area a radar picture **actually covers**. When the renderer downsamples — which the station crop does — the box was taken from the requested crop rather than from the pixels drawn, so it fell short by up to one sampled cell. Anything positioning the image geographically was off by that constant sub-kilometre amount.
+
+### Changed
+
+- Radar frames are now decoded once and rendered twice (the cropped picture and the map overlay), and that work has moved off Home Assistant's event loop into a worker thread — so the first poll after a restart, which fills the whole 12-frame buffer, no longer blocks it. The extra rendering costs about 1.2 MB of memory for the buffer and a fraction of a second of CPU per new frame; a poll that brings no new frame still re-renders nothing.
+
 ## [0.9.0] - 2026-08-26
 
 ### Added

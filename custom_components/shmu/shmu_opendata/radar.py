@@ -1,15 +1,26 @@
 """Render a SHMÚ ODIM reflectivity composite to a PNG radar image.
 
 :mod:`shmu_opendata.odim` decodes the raw HDF5; this module knows what the
-SHMÚ ``skcomp`` reflectivity composite *means* and turns it into a small,
-map-overlayable PNG with a standard dBZ colour scale. The frame is cropped to
-the **vicinity of the configured station** (the full mosaic spans ~Central
-Europe, which is rarely what a user wants) and overlaid with **country
-borders** and a **marker at the station** so the picture is self-locating.
-Colour mapping, projection, border drawing and the PNG encoder are all pure
-standard library (``zlib`` + ``math``), so the vendored library stays
-HA-free, dependency-free and offline-testable — the same reason
-:mod:`grib2` hand-rolls its decoder instead of pulling a binary wheel.
+SHMÚ ``skcomp`` reflectivity composite *means* and turns it into a PNG with a
+standard dBZ colour scale. Colour mapping, projection, border drawing and the
+PNG encoder are all pure standard library (``zlib`` + ``math``), so the
+vendored library stays HA-free, dependency-free and offline-testable — the
+same reason :mod:`grib2` hand-rolls its decoder instead of pulling a binary
+wheel.
+
+A picture to *look at* and a picture to *drape over a map* want opposite
+things, so a render is asked for by :class:`RadarStyle`:
+
+- :data:`STATION_VIEW` crops to the **vicinity of the configured station**
+  (the full mosaic spans ~Central Europe, which is rarely what a user wants),
+  downsamples to a modest size and draws **country borders** and a **station
+  marker** on, so the picture is self-locating in a plain Lovelace card.
+- :data:`MAP_OVERLAY` keeps the **whole grid at its native resolution** and
+  draws no decoration at all: a map card brings its own basemap, borders,
+  markers and zoom, and anything baked in would be drawn *into the terrain*
+  and stretch with it. Its bounding box is the composite's own corners, so a
+  Leaflet ``imageOverlay`` placed between them registers exactly — the grid
+  and the web map are both spherical Mercator (see :mod:`shmu_opendata.geo`).
 
 :func:`encode_apng` splices a buffer of recent frames into one animated PNG
 (APNG — a backward-compatible PNG superset) so the same image entity can
@@ -31,6 +42,7 @@ import struct
 import zlib
 from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Final
 
 from .borders import BORDERS
 from .exceptions import ShmuDataError
@@ -44,10 +56,12 @@ _RAW_NO_ECHO = 0
 _RAW_NO_DATA = 255
 #: Reflectivity below this (dBZ) is drawn transparent (speckle / clutter).
 _MIN_DBZ = 5.0
-#: Longest output edge after downsampling. The cropped window is already a
-#: fraction of the 2270x1560 mosaic; this bounds the pure-Python per-pixel
-#: pass. Stride sampling can thin a very small cell — an accepted trade-off
-#: for an overview image refreshed every 5 minutes.
+#: Longest output edge after downsampling, for the station view. The cropped
+#: window is already a fraction of the 2270x1560 mosaic; this bounds the
+#: pure-Python per-pixel pass. Stride sampling can thin a very small cell — an
+#: accepted trade-off for an overview image refreshed every 5 minutes. A map
+#: overlay opts out (see :data:`MAP_OVERLAY`): it is zoomed into, so thinning
+#: a cell there would be throwing away the very detail the zoom is for.
 _MAX_EDGE = 760
 #: Default crop: ~150 km around the station (≈300 km across) — local, but you
 #: still see weather approaching from outside the immediate area.
@@ -123,15 +137,48 @@ _STAMP_LEN = 16
 
 
 @dataclass(frozen=True, slots=True)
+class RadarStyle:
+    """How a decoded composite is turned into a picture.
+
+    ``radius_km`` crops to roughly that distance around the requested point
+    (``None`` keeps the whole grid); ``max_edge`` caps the longest output edge,
+    stride-sampling to fit (``None`` renders every source pixel); ``overlays``
+    draws the country borders and the station marker.
+
+    The two combinations the integration ships are named constants because the
+    *combination* is the intent: decoration only makes sense on a picture with
+    no map under it, and native resolution only pays off on one that can be
+    zoomed.
+    """
+
+    radius_km: float | None = _DEFAULT_RADIUS_KM
+    max_edge: int | None = _MAX_EDGE
+    overlays: bool = True
+
+
+#: Self-contained picture for a plain Lovelace card: local crop, modest size,
+#: borders and station marker drawn on (the caller adds a timestamp).
+STATION_VIEW: Final = RadarStyle()
+
+#: Bare, geo-referenced raster to drape over a map card: full national
+#: coverage at native resolution, no decoration. Pass no ``label`` with it —
+#: a baked-in timestamp would sit in the far north-west of the *mapped area*
+#: and grow with the zoom.
+MAP_OVERLAY: Final = RadarStyle(radius_km=None, max_edge=None, overlays=False)
+
+
+@dataclass(frozen=True, slots=True)
 class RadarImage:
     """A rendered radar frame plus the geographic box it covers.
 
-    ``png`` is an 8-bit palette PNG (index 0 transparent) cropped to the
-    station vicinity, with country borders and a station marker drawn on.
-    ``south/west/north/east`` is that crop's WGS84 bounding box (ready for a
-    Home Assistant map overlay); ``center_lat/center_lon`` is the station the
-    crop is centred on. ``max_dbz`` is the strongest echo in the (downsampled)
-    frame, or ``None`` when echo-free — handy as an "is it raining" signal.
+    ``png`` is an 8-bit palette PNG (index 0 transparent), rendered in the
+    :class:`RadarStyle` the caller asked for. ``south/west/north/east`` is the
+    WGS84 bounding box of **what was actually drawn**, so an overlay lines up
+    with the ground; ``center_lat/center_lon`` is the point the render was
+    centred on. ``max_dbz`` is the strongest echo in the (possibly
+    downsampled) frame, or ``None`` when echo-free — handy as an "is it
+    raining" signal, though on a :data:`MAP_OVERLAY` render it is the peak
+    anywhere in the country, not near the station.
 
     ``zstream`` is the zlib-compressed, PNG-filtered pixel stream backing
     ``png``. It is cached so :func:`encode_apng` can splice this frame into a
@@ -377,20 +424,29 @@ def _encode_png(width: int, height: int, zstream: bytes, palette: bytes) -> byte
     )
 
 
-def encode_apng(images: Sequence[RadarImage], *, frame_ms: int = _FRAME_MS) -> bytes:
+def encode_apng(
+    images: Sequence[RadarImage], *, frame_ms: int = _FRAME_MS, progress: bool = True
+) -> bytes:
     """Splice buffered :class:`RadarImage` frames into one animated PNG.
 
     Frames must share the palette and dimensions — they always do here: the
-    ODIM grid is fixed and the crop is centred on one constant station. A
-    single image yields a valid one-frame APNG, i.e. it degrades to a still.
+    ODIM grid is fixed, and a buffer is rendered in one style around one
+    constant point. A single image yields a valid one-frame APNG, i.e. it
+    degrades to a still.
 
-    Each frame gets a row of step markers under the timestamp marking its
-    place in the sequence, so the forever-rolling loop is readable (you can
-    see "now" advance and reset). It is loop-only: the cached ``zstream``
-    (used by the still and the scrubbed-frame image) is expanded, stamped and
-    recompressed here transiently — the costly ODIM decode/crop still runs
-    once per frame, this only adds a cheap zlib round-trip per frame at
-    assembly time.
+    With ``progress`` (the default), each frame gets a row of step markers
+    under the timestamp marking its place in the sequence, so the
+    forever-rolling loop is readable (you can see "now" advance and reset).
+    That is loop-only: the cached ``zstream`` (used by the still and the
+    scrubbed-frame image) is expanded, stamped and recompressed here
+    transiently — the costly ODIM decode/crop still runs once per frame, this
+    only adds a cheap zlib round-trip per frame at assembly time.
+
+    A :data:`MAP_OVERLAY` loop passes ``progress=False``: the markers are
+    drawn in *pixel* space, which on a geo-referenced overlay is a corner of
+    the mapped area, stretched by whatever zoom the viewer is at. Skipping
+    them also makes the loop pure chunk concatenation — the cached streams go
+    in untouched, with no zlib round-trip at all.
 
     APNG is a backward-compatible PNG superset (extra ``acTL``/``fcTL``/
     ``fdAT`` chunks), so the same ``image/png`` entity renders the animation
@@ -414,9 +470,12 @@ def encode_apng(images: Sequence[RadarImage], *, frame_ms: int = _FRAME_MS) -> b
     seq = 0
     total = len(images)
     for i, im in enumerate(images):
-        rows = _rows_from_zstream(im.zstream, width, height)
-        _draw_progress(rows, width, height, i, total)
-        zstream = _filtered_zstream(rows)
+        if progress:
+            rows = _rows_from_zstream(im.zstream, width, height)
+            _draw_progress(rows, width, height, i, total)
+            zstream = _filtered_zstream(rows)
+        else:
+            zstream = im.zstream
         # fcTL: seq, w, h, x_off, y_off, delay_num, delay_den, dispose, blend.
         fctl = struct.pack(">IIIII", seq, width, height, 0, 0) + delay + b"\x00\x00"
         parts.append(_png_chunk(b"fcTL", fctl))
@@ -435,22 +494,40 @@ def render_radar(
     latitude: float,
     longitude: float,
     *,
-    radius_km: float = _DEFAULT_RADIUS_KM,
+    style: RadarStyle = STATION_VIEW,
     label: str | None = None,
 ) -> RadarImage:
-    """Decode a SHMÚ ODIM reflectivity composite, crop it to ``radius_km``
-    around ``(latitude, longitude)``, overlay borders + a station marker and
-    render it to a PNG.
+    """Decode a SHMÚ ODIM reflectivity composite and render it in ``style``.
+
+    A convenience wrapper for the one-shot case. Rendering the *same*
+    composite in several styles should decode once and call
+    :func:`render_composite` for each — the decode is the cheaper half of the
+    work, but it is not free.
+    """
+    return render_composite(
+        read_odim(data), latitude, longitude, style=style, label=label
+    )
+
+
+def render_composite(
+    composite: OdimComposite,
+    latitude: float,
+    longitude: float,
+    *,
+    style: RadarStyle = STATION_VIEW,
+    label: str | None = None,
+) -> RadarImage:
+    """Render a decoded composite to a PNG, centred on ``(latitude,
+    longitude)`` and shaped by ``style``.
 
     ``label``, when given, is stamped top-left as an opaque timestamp so the
-    frames are tellable apart while the loop plays. It is drawn verbatim:
+    frames are tellable apart while a loop plays. It is drawn verbatim:
     timezone conversion / formatting is the caller's job, keeping this
     renderer free of any Home Assistant (locale/tz) coupling.
 
     Raises :class:`ShmuDataError` for a non-reflectivity product so an
     upstream change is loud rather than silently mis-coloured.
     """
-    composite: OdimComposite = read_odim(data)
     if composite.quantity != _DBZH or composite.dtype != "u8":
         raise ShmuDataError(
             f"Unsupported radar product {composite.product!r} "
@@ -459,9 +536,18 @@ def render_radar(
 
     src = composite.raw
     src_w = composite.width
-    col0, row0, col1, row1 = vicinity_box(composite, latitude, longitude, radius_km)
+    if style.radius_km is None:
+        col0, row0, col1, row1 = 0, 0, composite.width, composite.height
+    else:
+        col0, row0, col1, row1 = vicinity_box(
+            composite, latitude, longitude, style.radius_km
+        )
     crop_w, crop_h = col1 - col0, row1 - row0
-    step = max(1, (max(crop_w, crop_h) + _MAX_EDGE - 1) // _MAX_EDGE)
+    step = (
+        1
+        if style.max_edge is None
+        else max(1, (max(crop_w, crop_h) + style.max_edge - 1) // style.max_edge)
+    )
     out_w = (crop_w + step - 1) // step
     out_h = (crop_h + step - 1) // step
 
@@ -492,27 +578,36 @@ def render_radar(
                 peak_raw = raw_val
         rows.append(row)
 
-    # Borders & marker: project geo → full-grid px → cropped/downsampled px.
-    def to_out(lon: float, lat: float) -> tuple[int, int]:
-        col, r = lonlat_to_pixel(composite, lon, lat)
-        return round((col - col0) / step), round((r - row0) / step)
+    if style.overlays:
+        # Borders & marker: project geo → full-grid px → cropped/downsampled px.
+        def to_out(lon: float, lat: float) -> tuple[int, int]:
+            col, r = lonlat_to_pixel(composite, lon, lat)
+            return round((col - col0) / step), round((r - row0) / step)
 
-    for line in BORDERS:
-        prev = to_out(*line[0])
-        for lon, lat in line[1:]:
-            cur = to_out(lon, lat)
-            _draw_line(rows, out_w, out_h, prev, cur, _IDX_BORDER)
-            prev = cur
-    mx, my = to_out(longitude, latitude)
-    _draw_marker(rows, out_w, out_h, mx, my)
+        for line in BORDERS:
+            prev = to_out(*line[0])
+            for lon, lat in line[1:]:
+                cur = to_out(lon, lat)
+                _draw_line(rows, out_w, out_h, prev, cur, _IDX_BORDER)
+                prev = cur
+        mx, my = to_out(longitude, latitude)
+        _draw_marker(rows, out_w, out_h, mx, my)
     if label:
         _draw_label(rows, out_w, out_h, label)
 
     zstream = _filtered_zstream(rows)
     png = _encode_png(out_w, out_h, zstream, _palette())
     max_dbz = None if peak_raw < 0 else round(offset + gain * peak_raw, 1)
+    # The box is the span actually **drawn**, which is not always the crop
+    # that was asked for: output pixel `ox` stands for the whole `step`-wide
+    # source cell starting at `col0 + ox * step`, so the picture reaches
+    # `col0 + out_w * step` — up to `step - 1` source pixels past `col1`
+    # whenever the stride does not divide the crop. Reporting the requested
+    # crop instead would shift a map overlay by that much (sub-km, but a
+    # constant, avoidable offset). A MAP_OVERLAY render has step 1 and no
+    # crop, so its box is exactly the composite's own corners.
     west, north = pixel_to_lonlat(composite, col0, row0)
-    east, south = pixel_to_lonlat(composite, col1, row1)
+    east, south = pixel_to_lonlat(composite, col0 + out_w * step, row0 + out_h * step)
     return RadarImage(
         png=png,
         width=out_w,

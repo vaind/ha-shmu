@@ -65,4 +65,17 @@ CURRENT_FORECAST_TOLERANCE: Final = timedelta(minutes=90)
 #: SHMÚ data is CC BY 4.0 and must be attributed wherever it is shown.
 ATTRIBUTION: Final = "Data © Slovenský hydrometeorologický ústav (SHMÚ), CC BY 4.0"
 
+#: The bundled ha-map-card plugin that drapes the radar overlay entities on a
+#: Leaflet map, and the URL it is served from. Shipping it with the
+#: integration keeps the two halves versioned together — the plugin reads the
+#: ``bbox_*`` attributes this integration defines — and means users add no
+#: Lovelace resource: the map card imports a plugin straight from its URL.
+FRONTEND_FILE: Final = "radar-map-overlay.js"
+FRONTEND_URL: Final = f"/{DOMAIN}_static/{FRONTEND_FILE}"
+
+#: Marks the one-per-instance static-path registration for the file above
+#: (registering the same path twice raises), kept out of the per-entry
+#: ``runtime_data`` because the route outlives any single config entry.
+DATA_FRONTEND: Final = f"{DOMAIN}_frontend_registered"
+
 MANUFACTURER: Final = "Slovenský hydrometeorologický ústav"

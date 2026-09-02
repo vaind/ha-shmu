@@ -93,7 +93,10 @@
     "image": {
       "radar": { "name": "Radar" },
       "radar_loop": { "name": "Radar loop" },
-      "radar_frame": { "name": "Radar frame" }
+      "radar_frame": { "name": "Radar frame" },
+      "radar_map": { "name": "Radar map" },
+      "radar_map_loop": { "name": "Radar map loop" },
+      "radar_map_frame": { "name": "Radar map frame" }
     },
     "number": {
       "radar_frame": { "name": "Radar frame selector" }
