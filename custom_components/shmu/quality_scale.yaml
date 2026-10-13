@@ -19,11 +19,12 @@ rules:
     comment: The integration registers no service actions.
   appropriate-polling: done
   brands:
-    status: exempt
+    status: done
     comment: >
-      Deliberate HACS-only integration; not registered in home-assistant/brands
-      (that happens only on a HA-core / HACS-default submission). The HACS CI
-      action explicitly ignores this check for the same reason.
+      Brand images are bundled in custom_components/shmu/brand/ and served by
+      HA's Brands Proxy (HA 2026.3+), the supported route for custom
+      integrations now that home-assistant/brands no longer accepts them. The
+      HACS action's brands check passes on the bundled icon, with no `ignore`.
   common-modules: done
   config-flow-test-coverage: done
   config-flow: done

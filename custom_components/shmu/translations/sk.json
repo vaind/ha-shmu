@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "Počasie SHMÚ",
-        "description": "Neoficiálna integrácia — nie je spojená so SHMÚ ani ním schválená. Skorá verzia, použitie na vlastné riziko. Vyberte synoptickú stanicu SHMÚ; predvolená je stanica najbližšie k polohe vášho Home Assistant.",
+        "description": "Neoficiálna integrácia — nie je spojená so SHMÚ ani ním schválená; použitie na vlastné riziko. Vyberte synoptickú stanicu SHMÚ; predvolená je stanica najbližšie k polohe vášho Home Assistant.",
         "data": {
           "ind_kli": "Stanica",
           "name": "Názov",
