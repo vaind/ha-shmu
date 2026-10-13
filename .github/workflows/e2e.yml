@@ -1,0 +1,49 @@
+name: E2E (live SHMÚ)
+
+# The offline suite cannot see SHMÚ change what it serves (an emptied folder,
+# a moved feed, a new GRIB2 encoding). This runs tests_e2e/ against the real
+# servers once a day so such a change fails here first. A failed scheduled run
+# notifies by GitHub's usual workflow-failure email.
+
+on:
+  schedule:
+    # Off the hour to dodge the scheduler's top-of-hour backlog; mid-morning
+    # so the 00 UTC ALADIN run is fully published.
+    - cron: "17 7 * * *"
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "tests_e2e/**"
+      - ".github/workflows/e2e.yml"
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  live:
+    name: E2E tests against live SHMÚ
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Set up uv + Python 3.13
+        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4
+        with:
+          python-version: "3.13"
+          enable-cache: true
+
+      # See ci.yml: setup-uv does not create the venv the later steps use.
+      - name: Create virtualenv
+        run: uv venv --python 3.13 .venv
+
+      - name: Install dev dependencies
+        run: uv pip install --group dev
+
+      # -p no:homeassistant: that plugin blocks all non-localhost sockets.
+      - name: pytest (e2e, live network)
+        run: .venv/bin/python -m pytest tests_e2e/ -p no:homeassistant

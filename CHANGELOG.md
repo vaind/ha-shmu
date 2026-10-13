@@ -4,6 +4,12 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- No more `SHMÚ warnings unavailable, keeping previous: No entries matching '^\\d{8}/$' …` warning every five minutes during calm weather. When nothing is in force, SHMÚ empties its CAP warnings folder completely rather than publishing an empty issuance. The integration took that as a failed fetch, so it logged every poll and kept the last snapshot it had; it now reads it as "no warnings".
+
 ## [0.10.0] - 2026-09-02
 
 ### Added
