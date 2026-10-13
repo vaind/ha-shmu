@@ -58,7 +58,7 @@ It is part of the **default HACS store** — no custom repository needed.
 
    [![Open your Home Assistant instance and start setting up SHMÚ Weather.](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=shmu)
 
-It is distributed through HACS rather than Home Assistant core because the current sky condition is read from the SHMÚ website — the open-data files carry no cloud information (see [Why HACS](CONTRIBUTING.md#why-hacs-and-not-home-assistant-core)).
+It is distributed through HACS rather than Home Assistant core because part of the current condition is read from the SHMÚ website — the open-data observations carry no cloud cover — and because it bundles its own SHMÚ client (see [Why HACS](CONTRIBUTING.md#why-hacs-and-not-home-assistant-core)).
 
 ## Configuration
 
