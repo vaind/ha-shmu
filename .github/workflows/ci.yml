@@ -16,17 +16,16 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
-      - name: Set up uv + Python 3.13
+      - name: Set up uv  # Python version from .python-version
         uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4
         with:
-          python-version: "3.13"
           enable-cache: true
 
-      # Required: setup-uv only exports UV_PYTHON, it does not create a venv
-      # (its implicit venv behavior is unstable across majors). Later steps
-      # invoke .venv/bin/* directly — do not drop this step.
+      # Required: setup-uv does not create a venv (its implicit venv behavior
+      # is unstable across majors). Later steps invoke .venv/bin/* directly —
+      # do not drop this step.
       - name: Create virtualenv
-        run: uv venv --python 3.13 .venv
+        run: uv venv .venv
 
       - name: Install dev dependencies
         run: uv pip install --group dev

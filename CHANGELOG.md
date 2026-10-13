@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- **Requires Home Assistant 2026.3 or newer** (was 2025.1). Home Assistant supports one Python version at a time, and 2026.3 is the first release on Python 3.14, which the integration is now developed and tested on. Older Home Assistant versions keep the release they have; HACS will not offer them this update.
+
 ### Fixed
 
 - No more `SHMÚ warnings unavailable, keeping previous: No entries matching '^\\d{8}/$' …` warning every five minutes during calm weather. When nothing is in force, SHMÚ empties its CAP warnings folder completely rather than publishing an empty issuance. The integration took that as a failed fetch, so it logged every poll and kept the last snapshot it had; it now reads it as "no warnings".

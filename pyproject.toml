@@ -7,7 +7,7 @@
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
-    "ruff>=0.6",
+    "ruff>=0.12",  # first with target-version py314
     "mypy>=1.11",
     "pytest-homeassistant-custom-component",
 ]
@@ -18,14 +18,14 @@ testpaths = ["tests"]
 addopts = "-q"
 
 [tool.ruff]
-target-version = "py312"
+target-version = "py314"
 line-length = 88
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "ASYNC", "RUF"]
 
 [tool.mypy]
-python_version = "3.12"
+python_version = "3.14"
 strict = true
 warn_unused_ignores = true
 # Strict-type only the vendored library, analysed in isolation as the

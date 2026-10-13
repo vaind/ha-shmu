@@ -5,10 +5,11 @@ Thanks for helping improve **SHMÚ Weather**. This is an unofficial community pr
 ## Setup
 
 ```bash
-uv venv --python 3.13 .venv
+uv venv .venv
 uv pip install --group dev
 ```
 
+uv takes the Python version from `.python-version`, which tracks the one Python minor the newest Home Assistant runs on; the daily e2e run fails when Home Assistant moves to a newer one.
 The dev tools are listed once, in the `dev` dependency group in `pyproject.toml`, which CI installs the same way.
 Add a new tool there rather than to a command line.
 They are loose lower bounds with no lockfile, so Dependabot does not track them (it only bumps the GitHub Actions pins).
