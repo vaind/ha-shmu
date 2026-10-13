@@ -410,6 +410,10 @@ class ShmuDataUpdateCoordinator(DataUpdateCoordinator[ShmuData]):
         #: Grid scheduling state.
         self._next_refresh_at: datetime | None = None
         self._unsub_refresh: CALLBACK_TYPE | None = None
+        #: Set on unload; an in-flight refresh must not re-arm the timer after
+        #: it (see ``async_cancel_refresh``). Our own flag rather than the
+        #: base class's private shutdown state, which is not API.
+        self._refresh_stopped = False
         #: UI scrub position for the radar loop: how many 5-minute frames back
         #: from the newest one to show (0 = live). Set by the "Radar frame"
         #: number entity, read by the selectable-frame image; runtime-only,
@@ -552,6 +556,8 @@ class ShmuDataUpdateCoordinator(DataUpdateCoordinator[ShmuData]):
     @callback
     def async_schedule_refresh(self) -> None:
         """(Re)arm the one-shot timer for the next grid boundary + offset."""
+        if self._refresh_stopped:
+            return
         if self._unsub_refresh is not None:
             self._unsub_refresh()
         now = dt_util.utcnow()
@@ -565,7 +571,14 @@ class ShmuDataUpdateCoordinator(DataUpdateCoordinator[ShmuData]):
 
     @callback
     def async_cancel_refresh(self) -> None:
-        """Cancel the pending grid timer (called on unload)."""
+        """Stop grid polling for good (called on unload).
+
+        Cancelling the pending timer is not enough on its own: a scheduled
+        refresh already in flight has cleared its handle and re-arms when it
+        finishes, so the stop is recorded for :meth:`async_schedule_refresh`
+        to honour. A reload builds a new coordinator, so this is one-way.
+        """
+        self._refresh_stopped = True
         if self._unsub_refresh is not None:
             self._unsub_refresh()
             self._unsub_refresh = None
@@ -575,7 +588,8 @@ class ShmuDataUpdateCoordinator(DataUpdateCoordinator[ShmuData]):
         try:
             await self.async_request_refresh()
         finally:
-            # Always keep polling, even if this cycle failed.
+            # Always keep polling, even if this cycle failed — unless the
+            # entry was unloaded meanwhile, which the scheduler checks.
             self.async_schedule_refresh()
 
     def _record_publish_lag(self, snapshot: ObservationSnapshot) -> None:
