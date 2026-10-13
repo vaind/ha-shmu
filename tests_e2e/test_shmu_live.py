@@ -18,9 +18,11 @@ was unusual.
 
 from __future__ import annotations
 
+import re
 import sys
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import aiohttp
 import pytest
@@ -48,6 +50,11 @@ FRESH_WITHIN = timedelta(minutes=30)
 FUTURE_SLACK = timedelta(minutes=5)
 
 _PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+
+_BRATISLAVA = ZoneInfo("Europe/Bratislava")
+# Upload lag between a snapshot's nominal time and its Last-Modified: seconds
+# when verified, loose so a slow publish isn't mistaken for a convention change.
+PUBLISH_LAG = timedelta(minutes=10)
 
 
 def test_library_loads_without_home_assistant() -> None:
@@ -81,6 +88,29 @@ async def test_observations(client: ShmuClient) -> None:
     ]
     assert len(reporting) >= 0.8 * len(STATIONS), (
         f"only {len(reporting)}/{len(STATIONS)} catalogue stations report"
+    )
+
+
+async def test_observation_file_names_are_local_time(client: ShmuClient) -> None:
+    # AGENTS.md: day folders and file names are Slovak wall time (CET/CEST),
+    # unlike `minuta`, which is fixed UTC+1. Read as UTC instead, the name
+    # would sit one or two hours *after* the file's Last-Modified.
+    snap = await client.async_get_observations()
+    assert snap.published_at is not None, "no Last-Modified on the newest file"
+    match = re.search(r"(\d{4}-\d{2}-\d{2} \d{2}-\d{2}-\d{2})\.json$", snap.source)
+    assert match, f"unexpected file name {snap.source}"
+    named = (
+        datetime.strptime(match[1], "%Y-%m-%d %H-%M-%S")
+        .replace(tzinfo=_BRATISLAVA)
+        .astimezone(UTC)
+    )
+    # The day folder follows the same local date, so just after local
+    # midnight it is a UTC day ahead.
+    assert snap.source.split("/")[-2] == match[1][:10].replace("-", "")
+    lag = snap.published_at - named
+    assert timedelta(0) <= lag <= PUBLISH_LAG, (
+        f"{snap.source}: Last-Modified {snap.published_at} is {lag} after the "
+        "name read as Europe/Bratislava time"
     )
 
 

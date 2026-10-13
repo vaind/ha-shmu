@@ -69,27 +69,79 @@ def _parse_minuta(value: str) -> datetime:
     return datetime.fromisoformat(value).replace(tzinfo=_SEC)
 
 
+def _snapshot_records(payload: bytes | str, feed: str) -> list[Mapping[str, Any]]:
+    """Decode a ``{"data": [{...}, ...]}`` snapshot envelope, or raise.
+
+    Shared by both observation feeds. Anything that is not that shape is a
+    :class:`ShmuDataError` — never a stray ``AttributeError``/``TypeError`` —
+    so the caller can tell "SHMÚ sent something unreadable" from a bug here.
+    An empty ``data`` list is valid: the gauge archive has carried one.
+    """
+    try:
+        document = json.loads(payload)
+    # ValueError covers JSONDecodeError and the UnicodeDecodeError json.loads
+    # raises for bytes that are not valid UTF-8.
+    except ValueError as err:
+        raise ShmuDataError(
+            f"Malformed {feed} payload: not valid JSON ({err})"
+        ) from err
+    records = document.get("data") if isinstance(document, dict) else None
+    if not isinstance(records, list):
+        if not isinstance(document, dict):
+            found = f"top level is {type(document).__name__}"
+        elif "data" not in document:
+            found = "it has no 'data' key"
+        else:
+            found = f"'data' is {type(records).__name__}"
+        raise ShmuDataError(
+            f"Malformed {feed} payload: expected an object with a 'data' list, "
+            f"but {found}"
+        )
+    for index, record in enumerate(records):
+        if not isinstance(record, dict):
+            raise ShmuDataError(
+                f"Malformed {feed} payload: record {index} is "
+                f"{type(record).__name__}, expected an object"
+            )
+    return records
+
+
+def _record_minuta(record: Mapping[str, Any], feed: str) -> datetime | None:
+    """Return a record's ``minuta`` timestamp, or ``None`` to skip the record.
+
+    A missing or unparsable timestamp string skips just that record, as one
+    odd row is not worth failing a snapshot over. A non-string value is a
+    schema change rather than a bad row, so it fails the snapshot loudly.
+    """
+    raw = record.get("minuta")
+    if raw is None or raw == "":
+        return None
+    if not isinstance(raw, str):
+        raise ShmuDataError(
+            f"Malformed {feed} payload: 'minuta' is {type(raw).__name__} "
+            f"({raw!r}), expected an ISO timestamp string"
+        )
+    try:
+        return _parse_minuta(raw)
+    except ValueError:
+        return None
+
+
 def parse_observations(payload: bytes | str) -> dict[int, Observation]:
     """Parse an ``aws1min`` snapshot into the latest reading per station.
 
     A snapshot holds several 1-minute records per station; only the most
     recent (largest ``minuta``) is kept for each ``ind_kli``.
     """
-    try:
-        document = json.loads(payload)
-        records: list[Mapping[str, Any]] = document["data"]
-    except (json.JSONDecodeError, KeyError, TypeError) as err:
-        raise ShmuDataError(f"Malformed observations payload: {err}") from err
+    records = _snapshot_records(payload, "observations")
 
     latest: dict[int, Observation] = {}
     for record in records:
         ind_kli = _to_int(record.get("ind_kli"))
-        raw_minuta = record.get("minuta")
-        if ind_kli is None or not raw_minuta:
+        if ind_kli is None:
             continue
-        try:
-            measured_at = _parse_minuta(raw_minuta)
-        except ValueError:
+        measured_at = _record_minuta(record, "observations")
+        if measured_at is None:
             continue
         existing = latest.get(ind_kli)
         if existing is not None and measured_at <= existing.measured_at:
@@ -126,21 +178,15 @@ def parse_gauge_observations(payload: bytes | str) -> dict[int, GaugeObservation
     catalogue is deliberately a near-complete snapshot of the network, and
     callers look up the one gauge they care about rather than iterating.
     """
-    try:
-        document = json.loads(payload)
-        records: list[Mapping[str, Any]] = document["data"]
-    except (json.JSONDecodeError, KeyError, TypeError) as err:
-        raise ShmuDataError(f"Malformed precipitation payload: {err}") from err
+    records = _snapshot_records(payload, "precipitation")
 
     latest: dict[int, GaugeObservation] = {}
     for record in records:
         ind_zra = _to_int(record.get("ind_zra"))
-        raw_minuta = record.get("minuta")
-        if ind_zra is None or not raw_minuta:
+        if ind_zra is None:
             continue
-        try:
-            measured_at = _parse_minuta(raw_minuta)
-        except ValueError:
+        measured_at = _record_minuta(record, "precipitation")
+        if measured_at is None:
             continue
         existing = latest.get(ind_zra)
         if existing is not None and measured_at <= existing.measured_at:

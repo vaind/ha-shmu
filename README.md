@@ -37,10 +37,11 @@ A Home Assistant integration for Slovak weather data published by the **Slovak H
 ## Features
 
 - **Weather entity** — current conditions from a chosen SHMÚ synoptic station, plus the daily and hourly forecast from SHMÚ's ALADIN model.
-- **Sensors** — temperature, ground temperature, humidity, pressure (the raw station reading), sea-level pressure (that reading reduced to mean sea level, comparable between stations), wind speed/gust/bearing, precipitation, snow depth, visibility, global radiation, and a warning-level sensor. The raw WMO weather code and the data's release/fetch times are available as diagnostics.
+- **Sensors** — temperature, ground temperature, humidity, pressure (the raw station reading), sea-level pressure (that reading reduced to mean sea level, comparable between stations), wind speed/gust/bearing, precipitation intensity, snow depth, visibility, global radiation, and a warning-level sensor. The raw WMO weather code and the data's release/fetch times are available as diagnostics.
 - **Rain gauge precipitation** — SHMÚ also runs a second, roughly three times denser network of automatic rain gauges: across the country the nearest gauge is a median 10 km away, against 28 km for the nearest synoptic station.
   This sensor reports the gauge nearest your [measurement location](#configuration), with its name and distance as attributes.
   It is deliberately separate from the station's own **Precipitation** sensor — the two measure different places and are expected to disagree.
+  Both precipitation sensors report **intensity in mm/h**: SHMÚ publishes only the rain that fell in one minute out of every five, so each shows the hourly rate that minute implies (the 1-minute sum × 60) rather than an amount that would leave four minutes in five out of any total.
 - **Upper air (opt-in)** — a **freezing level** (the height of the 0 °C isotherm above sea level) and the **850 hPa temperature** (the standard air-mass indicator, ~1450 m up), both from the same ALADIN run as the forecast. The freezing level is *not* the snow line: snow keeps falling and melting below the isotherm, so it typically settles a few hundred metres lower. Disabled by default — enable them from the device page.
 - **Weather warnings** — a binary sensor (with full alert details as attributes) that is on while a SHMÚ CAP alert's own polygon covers your measurement location.
 - **Radar** — the national reflectivity composite cropped to your measurement location, as a still image, an autoplaying ~1-hour loop and a slider-scrubbable frame — plus the same three as geo-referenced overlays you can pan and zoom on a map card (see [Radar](#radar)).
@@ -91,6 +92,9 @@ Entities (grouped under the station device; `<device>` is the device name you ch
 | `image.<device>_radar_map_loop` | The same ~1-hour loop, for a map card. It carries no timestamp and no step markers: a map overlay is drawn in ground coordinates, so anything baked into a corner of the picture would sit in the terrain and stretch with the zoom. The entity's state is the newest frame's time. |
 | `image.<device>_radar_map_frame` | The scrubbed frame, for a map card — driven by the same slider as `radar_frame`. |
 
+The scrubber and the two frames it drives (`radar_frame_selector`, `radar_frame`, `radar_map_frame`) are **provisional**: they are likely to be replaced by frame-by-frame playback in the map plugin itself ([#52](https://github.com/vaind/ha-shmu/issues/52)).
+The other radar entities are not affected.
+
 ### Example dashboard card
 
 A plain Lovelace card — no custom frontend resources — pairing the scrubbable frame with its slider:
@@ -140,6 +144,7 @@ To pin the view somewhere other than home, use `x` and `y` instead: `x` is the *
 
 Plugin options: `entity` (required) is any of the three map entities, `opacity` defaults to `0.6`, and `attribution` overrides the SHMÚ credit shown in the map's corner.
 Point `entity` at `image.<device>_radar_map_frame` and add the scrubber card to the same view to step through the last hour on the map.
+That pairing is provisional, like the scrubber itself — see the note under the radar entities.
 
 On a wall dashboard, mind the bandwidth: the animated map loop is ~330 KB and the browser re-fetches it every 5 minutes while the card is open, so prefer the still `image.<device>_radar_map` (~30 KB) where that matters.
 
