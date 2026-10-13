@@ -42,8 +42,10 @@ from .stations import (
 )
 from .website import WebCondition
 
-#: Vendored library version (no PyPI distribution to read it from).
-__version__ = "0.1.0"
+#: Vendored library version (no PyPI distribution to read it from). It ships
+#: only inside the integration, so it is bumped with ``manifest.json`` rather
+#: than read from it — the library must not depend on its host package.
+__version__ = "0.10.0"
 
 __all__ = [
     "GAUGES",
