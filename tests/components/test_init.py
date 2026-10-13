@@ -872,6 +872,51 @@ async def test_setup_succeeds_when_the_gauge_feed_fails_from_the_start(
     assert entry.runtime_data.gauge.ind_zra == 17720
 
 
+async def test_supplementary_outage_logs_once_and_recovery_once(
+    hass: HomeAssistant,
+    entry: MockConfigEntry,
+    load: Callable[[str], bytes],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """An hours-long feed outage warns on the way down, not on every poll.
+
+    Home Assistant's ``log-when-unavailable`` convention: one warning when a
+    source becomes unavailable, one info line when it comes back, and only
+    debug output for the polls in between.
+    """
+    client = _FakeClient(load)
+    with patch("custom_components.shmu.ShmuClient", return_value=client):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+        caplog.clear()
+
+        client.fail_gauges_with = ShmuConnectionError("gauge feed down")
+        for _ in range(3):
+            await entry.runtime_data.async_refresh()
+            await hass.async_block_till_done()
+
+        outage = [
+            r
+            for r in caplog.records
+            if "rain gauges unavailable" in r.getMessage() and r.levelname == "WARNING"
+        ]
+        assert len(outage) == 1
+        assert "keeping previous: gauge feed down" in outage[0].getMessage()
+
+        caplog.clear()
+        client.fail_gauges_with = None
+        await entry.runtime_data.async_refresh()
+        await hass.async_block_till_done()
+
+    recovered = [
+        r
+        for r in caplog.records
+        if "rain gauges" in r.getMessage() and "available again" in r.getMessage()
+    ]
+    assert [r.levelname for r in recovered] == ["INFO"]
+    assert not [r for r in caplog.records if r.levelname == "WARNING"]
+
+
 async def test_gauge_feed_recovers_without_a_reload(
     hass: HomeAssistant, entry: MockConfigEntry, load: Callable[[str], bytes]
 ) -> None:
