@@ -35,7 +35,7 @@ When it fails, re-verify against the live server before changing code, then reco
 ## Ground rules
 
 - **Two layers, one boundary.** The SHMÚ client is vendored at `custom_components/shmu/shmu_opendata/` and must **not** import Home Assistant (it stays swappable / extractable). The HA glue is the rest of `custom_components/shmu/`.
-- **Tests are deterministic and offline.** HTTP is mocked (`aioresponses`); HA tests use fixture-derived snapshots. Don't add tests that hit the network outside `tests_e2e/`.
+- **Tests are deterministic and offline.** HTTP is mocked (HA's `AiohttpClientMocker`); HA tests use fixture-derived snapshots. Don't add tests that hit the network outside `tests_e2e/`.
   Add or update a fixture under `tests/fixtures/` instead.
 - **Never disable TLS verification** to "fix" an opendata.shmu.sk handshake.
   The server omits an intermediate; refresh the bundled cert instead (see [AGENTS.md](AGENTS.md)).
