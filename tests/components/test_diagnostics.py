@@ -68,6 +68,7 @@ async def test_config_entry_diagnostics(
     # The full original SHMÚ row is included for debugging.
     assert diag["observations"]["raw_record"]["stav_poc"] == 61
     assert diag["web_conditions"]["station"]["weather_text"] == "Dážď"
+    assert diag["web_conditions"]["ignored_as_stale"] is False
     # No active warning covers Hurbanovo (polygon is around Bratislava).
     assert diag["warnings"]["active_for_location"] == []
     # The measurement-location mode is surfaced (default = same as station).

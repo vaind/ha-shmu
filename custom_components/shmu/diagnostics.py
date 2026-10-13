@@ -148,6 +148,10 @@ async def async_get_config_entry_diagnostics(
         if web is None
         else {
             "fetched_at": web.fetched_at.isoformat(),
+            # True when the held scrape is too old to enter the condition
+            # ladder (a website outage), so its row below is shown but did not
+            # take part in ``derived_condition``.
+            "ignored_as_stale": data.web_conditions_ignored(dt_util.utcnow()),
             "station_count": len(web.conditions),
             "station": None
             if web_condition is None

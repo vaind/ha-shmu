@@ -37,6 +37,7 @@ from .const import (
     POLL_OFFSET_MAX_SECONDS,
     POLL_OFFSET_MIN_SECONDS,
     POLL_OFFSET_PAD_SECONDS,
+    WEB_CONDITIONS_STALE_AFTER,
 )
 from .shmu_opendata import (
     ConditionResolution,
@@ -76,24 +77,6 @@ def _grid_floor(when: datetime, interval_minutes: int) -> datetime:
 def _next_grid_time(now: datetime, interval_minutes: int) -> datetime:
     """Return the next UTC time strictly after ``now`` on the N-minute grid."""
     return _grid_floor(now, interval_minutes) + timedelta(minutes=interval_minutes)
-
-
-def _keep_previous[T](
-    result: T | BaseException, label: str, fallback: T | None
-) -> T | None:
-    """Resolve a supplementary fetch result for the coordinator.
-
-    Returns ``result`` on success, or ``fallback`` (the last good value) if it
-    failed with an ordinary ``Exception``. A non-``Exception`` ``BaseException``
-    — ``CancelledError`` from a gather() on shutdown/reload — is re-raised so
-    cooperative cancellation is never swallowed.
-    """
-    if isinstance(result, BaseException):
-        if not isinstance(result, Exception):
-            raise result
-        _LOGGER.warning("SHMÚ %s unavailable, keeping previous: %s", label, result)
-        return fallback
-    return result
 
 
 def _gauge_reading_is_current(
@@ -280,9 +263,10 @@ class ShmuData:
         whole :class:`ConditionResolution` so a diagnostics dump can show why a
         condition won, not just the result.
         """
+        now = dt_util.utcnow()
         web = (
             self.web_conditions.conditions.get(station.ind_kli)
-            if self.web_conditions is not None
+            if self.web_conditions is not None and not self.web_conditions_ignored(now)
             else None
         )
         return explain_condition(
@@ -291,7 +275,21 @@ class ShmuData:
             precipitation=(
                 observation.precipitation if observation is not None else None
             ),
-            forecast_step=self.current_forecast_step(dt_util.utcnow()),
+            forecast_step=self.current_forecast_step(now),
+        )
+
+    def web_conditions_ignored(self, now: datetime) -> bool:
+        """Whether a held website scrape is too old to enter the ladder.
+
+        A failed scrape keeps the previous snapshot, so ``fetched_at`` is the
+        last time the page was actually read. Past
+        :data:`WEB_CONDITIONS_STALE_AFTER` the scrape is left out and the
+        ladder falls through to the open-data and model sources, as it does
+        for a station the page does not list.
+        """
+        return (
+            self.web_conditions is not None
+            and now - self.web_conditions.fetched_at > WEB_CONDITIONS_STALE_AFTER
         )
 
     def current_forecast_step(self, now: datetime) -> ForecastStep | None:
@@ -380,12 +378,20 @@ class ShmuDataUpdateCoordinator(DataUpdateCoordinator[ShmuData]):
         #: Same, for the rain gauge — it drops out of snapshots more readily
         #: than a synoptic station, so a silent sensor must be diagnosable.
         self._gauge_present = True
+        #: Labels of the supplementary feeds whose last fetch failed, so an
+        #: outage is logged once on the way down and once on recovery (see
+        #: ``_keep_previous``).
+        self._failing_feeds: set[str] = set()
         #: Last reading we saw for the station and when we obtained it; served
         #: across one-cycle dropouts so entities don't flicker (see
         #: `observation`). Freshness is measured from acquisition time, not the
         #: reading's upstream timestamp.
         self._last_observation: Observation | None = None
         self._last_observation_at: datetime | None = None
+        #: Source path of the newest observation snapshot we have actually
+        #: seen; tells a new snapshot from a cache hit, exactly as
+        #: ``_last_gauge_source`` does for the rain gauges.
+        self._last_observation_source: str | None = None
         #: Same carry-forward for the rain gauge. Updated only from a genuine
         #: gauge fetch (see ``_fetch``), never from a kept-previous snapshot —
         #: otherwise a total gauge-feed outage would refresh the acquisition
@@ -406,6 +412,10 @@ class ShmuDataUpdateCoordinator(DataUpdateCoordinator[ShmuData]):
         #: Grid scheduling state.
         self._next_refresh_at: datetime | None = None
         self._unsub_refresh: CALLBACK_TYPE | None = None
+        #: Set on unload; an in-flight refresh must not re-arm the timer after
+        #: it (see ``async_cancel_refresh``). Our own flag rather than the
+        #: base class's private shutdown state, which is not API.
+        self._refresh_stopped = False
         #: UI scrub position for the radar loop: how many 5-minute frames back
         #: from the newest one to show (0 = live). Set by the "Radar frame"
         #: number entity, read by the selectable-frame image; runtime-only,
@@ -548,6 +558,8 @@ class ShmuDataUpdateCoordinator(DataUpdateCoordinator[ShmuData]):
     @callback
     def async_schedule_refresh(self) -> None:
         """(Re)arm the one-shot timer for the next grid boundary + offset."""
+        if self._refresh_stopped:
+            return
         if self._unsub_refresh is not None:
             self._unsub_refresh()
         now = dt_util.utcnow()
@@ -561,7 +573,14 @@ class ShmuDataUpdateCoordinator(DataUpdateCoordinator[ShmuData]):
 
     @callback
     def async_cancel_refresh(self) -> None:
-        """Cancel the pending grid timer (called on unload)."""
+        """Stop grid polling for good (called on unload).
+
+        Cancelling the pending timer is not enough on its own: a scheduled
+        refresh already in flight has cleared its handle and re-arms when it
+        finishes, so the stop is recorded for :meth:`async_schedule_refresh`
+        to honour. A reload builds a new coordinator, so this is one-way.
+        """
+        self._refresh_stopped = True
         if self._unsub_refresh is not None:
             self._unsub_refresh()
             self._unsub_refresh = None
@@ -571,8 +590,43 @@ class ShmuDataUpdateCoordinator(DataUpdateCoordinator[ShmuData]):
         try:
             await self.async_request_refresh()
         finally:
-            # Always keep polling, even if this cycle failed.
+            # Always keep polling, even if this cycle failed — unless the
+            # entry was unloaded meanwhile, which the scheduler checks.
             self.async_schedule_refresh()
+
+    def _keep_previous[T](
+        self, result: T | BaseException, label: str, fallback: T | None
+    ) -> T | None:
+        """Resolve a supplementary fetch result for the coordinator.
+
+        Returns ``result`` on success, or ``fallback`` (the last good value) if
+        it failed with an ordinary ``Exception``. A non-``Exception``
+        ``BaseException`` — ``CancelledError`` from a gather() on
+        shutdown/reload — is re-raised so cooperative cancellation is never
+        swallowed.
+
+        Logs per feed on transitions only (Home Assistant's
+        ``log-when-unavailable`` rule): a warning when ``label`` starts failing,
+        an info line when it recovers, debug in between. An outage lasting
+        hours would otherwise write the same warning every five minutes.
+        """
+        if isinstance(result, BaseException):
+            if not isinstance(result, Exception):
+                raise result
+            if label in self._failing_feeds:
+                _LOGGER.debug(
+                    "SHMÚ %s still unavailable, keeping previous: %s", label, result
+                )
+            else:
+                self._failing_feeds.add(label)
+                _LOGGER.warning(
+                    "SHMÚ %s unavailable, keeping previous: %s", label, result
+                )
+            return fallback
+        if label in self._failing_feeds:
+            self._failing_feeds.discard(label)
+            _LOGGER.info("SHMÚ %s available again", label)
+        return result
 
     def _record_publish_lag(self, snapshot: ObservationSnapshot) -> None:
         """Feed the offset auto-tuner from the file's Last-Modified time."""
@@ -654,12 +708,24 @@ class ShmuDataUpdateCoordinator(DataUpdateCoordinator[ShmuData]):
 
         self._last_success_at = dt_util.utcnow()
         self._failures_since_success = 0
-        self._record_publish_lag(data.observations)
-        obs = data.observations.observations.get(self.station.ind_kli)
-        if obs is not None:
-            self._last_observation = obs
-            self._last_observation_at = self._last_success_at
-        self._log_station_presence(data)
+        # Only a *new* snapshot carries a new reading. When the newest file is
+        # unchanged the client hands back the previous object, and counting
+        # that as an acquisition would renew the station's last reading on
+        # every poll — so a feed that stopped publishing while its directory
+        # listing kept answering would never go unavailable. Same rule as the
+        # rain gauges (see ``_last_gauge_source``).
+        if data.observations.source != self._last_observation_source:
+            self._last_observation_source = data.observations.source
+            # A cache hit's Last-Modified is the lag already sampled when the
+            # file was new; re-feeding it every poll of a stall would flush the
+            # deque down to that one value and could shrink the offset below a
+            # genuinely observed worse lag.
+            self._record_publish_lag(data.observations)
+            obs = data.observations.observations.get(self.station.ind_kli)
+            if obs is not None:
+                self._last_observation = obs
+                self._last_observation_at = self._last_success_at
+            self._log_station_presence(data)
         return data
 
     async def _async_refresh(self, *args: object, **kwargs: object) -> None:
@@ -734,13 +800,13 @@ class ShmuDataUpdateCoordinator(DataUpdateCoordinator[ShmuData]):
 
         # Warnings & website conditions are supplementary — keep the last good
         # value on an ordinary failure instead of blanking every entity.
-        warnings = _keep_previous(
+        warnings = self._keep_previous(
             warnings, "warnings", previous.warnings if previous else None
         )
-        web = _keep_previous(
+        web = self._keep_previous(
             web, "website conditions", previous.web_conditions if previous else None
         )
-        forecast = _keep_previous(
+        forecast = self._keep_previous(
             forecast, "forecast", previous.forecast if previous else None
         )
         # Fold the newest run into the running series: it keeps today covered
@@ -753,11 +819,13 @@ class ShmuDataUpdateCoordinator(DataUpdateCoordinator[ShmuData]):
             forecast,
             dt_util.start_of_local_day(),
         )
-        radar = _keep_previous(radar, "radar", previous.radar if previous else None)
+        radar = self._keep_previous(
+            radar, "radar", previous.radar if previous else None
+        )
 
         # Record the gauge reading *here*, while a genuine fetch is still
         # distinguishable from the kept-previous fallback below. Doing it
-        # after `_keep_previous` would refresh the acquisition time from a
+        # after `self._keep_previous` would refresh the acquisition time from a
         # stale snapshot on every cycle of a gauge-feed outage, so the sensor
         # would never go unavailable.
         #
@@ -780,7 +848,7 @@ class ShmuDataUpdateCoordinator(DataUpdateCoordinator[ShmuData]):
             if gauge_obs is not None and _gauge_reading_is_current(gauge_obs, gauges):
                 self._last_gauge_observation = gauge_obs
                 self._last_gauge_observation_at = dt_util.utcnow()
-        gauges = _keep_previous(
+        gauges = self._keep_previous(
             gauges,
             "rain gauges",
             previous.gauge_observations if previous else None,

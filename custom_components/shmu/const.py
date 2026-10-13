@@ -56,6 +56,20 @@ POLL_OFFSET_MAX_SECONDS: Final = 120
 #: unavailable once we have not obtained a fresh reading for this long.
 OBSERVATION_STALE_AFTER: Final = timedelta(minutes=30)
 
+#: How long the last successful website scrape may stand in the condition
+#: ladder. A failed scrape keeps the previous snapshot, and the website's
+#: observed weather outranks every other source, so without a limit a website
+#: outage would pin the condition to an old reading for as long as it lasted.
+#:
+#: The page carries one report per hour (verified live 2026-10-13, see
+#: AGENTS.md): its caption names the full hour and switches to the next one
+#: about two minutes past it. So one update period after our last good scrape
+#: the page has certainly published a newer report we failed to read, and the
+#: one we hold is known to be superseded. The report itself was up to an hour
+#: old when scraped, so the oldest one ever served is about two update periods
+#: (2 h) old. Measured from ``fetched_at``, i.e. the last successful scrape.
+WEB_CONDITIONS_STALE_AFTER: Final = timedelta(hours=1)
+
 #: How far an ALADIN forecast step may be from "now" to still count as the
 #: current conditions when filling the condition gap. The model is hourly near
 #: term, so a step is normally within ~30 min; this bounds how stale a run may

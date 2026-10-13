@@ -5,11 +5,22 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
+from homeassistant.util import dt as dt_util
+
+from custom_components.shmu.const import WEB_CONDITIONS_STALE_AFTER
 from custom_components.shmu.coordinator import (
+    ShmuData,
     _accumulations_tile,
     _merge_forecast_runs,
 )
-from custom_components.shmu.shmu_opendata import ForecastSnapshot, ForecastStep
+from custom_components.shmu.shmu_opendata import (
+    ForecastSnapshot,
+    ForecastStep,
+    ObservationSnapshot,
+    WebCondition,
+    WebConditionsSnapshot,
+    get_station,
+)
 
 # Europe/Bratislava is UTC+2 in July, so local midnight on the 21st is 22:00 UTC
 # on the 20th. The helper compares instants, so a UTC-aware value is enough.
@@ -226,3 +237,56 @@ def test_accumulations_tile_detects_a_double_counted_window() -> None:
     assert not _accumulations_tile(steps)
     assert _accumulations_tile(steps[:2])
     assert _accumulations_tile([])  # nothing to contradict
+
+
+def _web_data(fetched_at: datetime) -> ShmuData:
+    """Coordinator data whose only condition source is a website scrape."""
+    ind_kli = 11858
+    return ShmuData(
+        observations=ObservationSnapshot(
+            observations={}, source="t", fetched_at=fetched_at, published_at=None
+        ),
+        warnings=None,
+        web_conditions=WebConditionsSnapshot(
+            conditions={
+                ind_kli: WebCondition(
+                    ind_kli=ind_kli,
+                    cloud_text="Zamračené",
+                    weather_text="Dážď",
+                    weather_condition="rainy",
+                    cloud_condition="cloudy",
+                    condition="rainy",
+                )
+            },
+            fetched_at=fetched_at,
+        ),
+        forecast=None,
+        radar=None,
+        gauge_observations=None,
+    )
+
+
+def test_recent_website_conditions_win_the_ladder() -> None:
+    station = get_station(11858)
+    assert station is not None
+    data = _web_data(dt_util.utcnow() - timedelta(minutes=5))
+
+    assert data.resolve_condition(station, None) == ("rainy", "website")
+    assert not data.web_conditions_ignored(dt_util.utcnow())
+
+
+def test_stale_website_conditions_do_not_win_the_ladder() -> None:
+    """A scrape kept through a long website outage must stop pinning the state.
+
+    Website conditions sit at the top of the ladder, and a failed scrape keeps
+    the previous snapshot — so without an age limit, an outage of hours would
+    hold the condition at whatever the page last said.
+    """
+    station = get_station(11858)
+    assert station is not None
+    data = _web_data(
+        dt_util.utcnow() - WEB_CONDITIONS_STALE_AFTER - timedelta(minutes=1)
+    )
+
+    assert data.resolve_condition(station, None) == (None, "unknown")
+    assert data.web_conditions_ignored(dt_util.utcnow())
