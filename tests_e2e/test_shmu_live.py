@@ -9,7 +9,9 @@ as a user's log full of warnings.
 
 They hit the network on purpose, so they live outside ``tests/`` (whose
 contract is offline and deterministic) and run only when asked:
-``pytest tests_e2e/``. Thresholds are deliberately loose — they must pass on
+``python -m pytest tests_e2e/ -p no:homeassistant`` (that plugin blocks every
+non-localhost socket; ``conftest.py`` refuses to run without the opt-out).
+Thresholds are deliberately loose — they must pass on
 any ordinary day — so a failure means the contract moved, not that the weather
 was unusual.
 """
@@ -90,10 +92,15 @@ async def test_rain_gauges(client: ShmuClient) -> None:
 async def test_warnings(client: ShmuClient) -> None:
     snap = await client.async_get_warnings()
 
-    if not snap.warnings:
+    if snap.source == WARNINGS_PATH:
         # Calm weather empties the tree; nothing more to check today.
+        assert snap.warnings == []
         return
+    # An issuance exists, so it must yield alerts: the client skips CAP files
+    # it cannot parse, and an empty list here would hide a parser broken by an
+    # upstream format change behind what looks like calm weather.
     assert snap.source.startswith(f"{WARNINGS_PATH}/")
+    assert snap.warnings, f"no parseable alerts in {snap.source}"
     for warning in snap.warnings:
         assert warning.identifier
         assert warning.event
