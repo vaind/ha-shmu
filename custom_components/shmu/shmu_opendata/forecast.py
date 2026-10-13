@@ -29,7 +29,7 @@ from datetime import datetime, timedelta
 from itertools import pairwise
 
 from .exceptions import ShmuDataError
-from .grib2 import Grib2Field, iter_fields
+from .grib2 import Grib2Field, Grib2Message, iter_messages
 
 # --- Fixed ALADIN/SHMÚ 4.5 km grid (Phase-2a spike, issue #2) ----------------
 
@@ -75,8 +75,8 @@ _OROGRAPHY: _FieldKey = (0, 3, 5, 1, 0.0)
 # The same hour-files carry temperature, humidity, wind and geopotential on
 # five pressure levels; we read only temperature and geopotential, which is
 # what a vertical temperature profile needs. Humidity and upper winds are
-# decoded too (``iter_fields`` decodes every message) but deliberately not
-# surfaced — see AGENTS.md.
+# parsed and validated too (``iter_messages`` checks every message) but never
+# unpacked or surfaced — see AGENTS.md.
 _T_PRESSURE = (0, 0, 0, 100)  # temperature on a pressure level (K)
 _Z_PRESSURE = (0, 3, 4, 100)  # geopotential on a pressure level (m²/s²)
 #: The published levels, bottom-up (Pa).
@@ -181,7 +181,7 @@ def grid_index(latitude: float, longitude: float) -> tuple[int, int]:
 
 
 def nearest_unmasked_index(
-    field: Grib2Field, latitude: float, longitude: float
+    field: Grib2Field | Grib2Message, latitude: float, longitude: float
 ) -> tuple[int, int]:
     """Grid cell nearest the point that actually carries a value.
 
@@ -365,11 +365,14 @@ def parse_forecast(
     terrain: float | None = None
 
     for forecast_hour, payload in hourly_files:
-        fields: dict[_FieldKey, Grib2Field] = {}
+        # Messages, not fields: only the one grid point below is ever read, so
+        # each value is unpacked on demand rather than all ~2 500 of every
+        # message (which was nearly the whole cost of a run).
+        fields: dict[_FieldKey, Grib2Message] = {}
         reference_time: datetime | None = None
-        for field in iter_fields(payload):
-            reference_time = field.reference_time
-            fields.setdefault((*field.param, field.level), field)
+        for message in iter_messages(payload):
+            reference_time = message.reference_time
+            fields.setdefault((*message.param, message.level), message)
         if reference_time is None:
             raise ShmuDataError(f"No fields in forecast hour {forecast_hour}")
 
@@ -380,7 +383,7 @@ def parse_forecast(
 
         def value(
             key: _FieldKey,
-            _fields: dict[_FieldKey, Grib2Field] = fields,
+            _fields: dict[_FieldKey, Grib2Message] = fields,
             _i: int = i,
             _j: int = j,
         ) -> float | None:
