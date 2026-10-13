@@ -342,8 +342,10 @@ class ShmuClient:
 
         Walks day folders newest-first and returns the first that actually
         contains a matching snapshot. SHMÚ creates the new ``YYYYMMDD/`` folder
-        around 00:00 UTC slightly before the day's first 5-minute file lands;
-        without this fallback that gap would raise ``ShmuDataError`` once a day.
+        at local midnight (Slovak wall time, so 22:00 or 23:00 UTC; the file
+        names are local time too) slightly before the day's first 5-minute
+        file lands; without this fallback that gap would raise
+        ``ShmuDataError`` once a day.
 
         Shared by the observation and rain-gauge feeds, which have the same
         ``YYYYMMDD/`` layout and 5-minute cadence.
@@ -530,6 +532,11 @@ class ShmuClient:
           leading run also means a run still being published is usable as soon
           as it is deep enough, and is re-read when it reaches further (hence
           the hours in the cache identity).
+
+        The decode runs in a worker thread: it is pure-Python work over every
+        message of every hour-file, seconds per run even on a desktop, and on
+        the event loop it would stall Home Assistant at every startup and every
+        new model run.
         """
         wanted = sorted(set(forecast_hours))
         if not wanted:
@@ -586,6 +593,9 @@ class ShmuClient:
                 run_dt = datetime.strptime(f"{day_dir}{run_dir}", "%Y%m%d%H%M").replace(
                     tzinfo=UTC
                 )
+                steps = await asyncio.get_running_loop().run_in_executor(
+                    None, parse_forecast, pairs, latitude, longitude
+                )
                 _LOGGER.debug(
                     "Decoded %d forecast hours (through %03d) from %s",
                     len(pairs),
@@ -593,7 +603,7 @@ class ShmuClient:
                     run_path,
                 )
                 return ForecastSnapshot(
-                    steps=parse_forecast(pairs, latitude, longitude),
+                    steps=steps,
                     run=run_dt,
                     source=run_path,
                     forecast_hours=hours,

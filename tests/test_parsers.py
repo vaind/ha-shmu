@@ -44,11 +44,6 @@ def test_parse_observations_keeps_latest_minute_per_station(fixture) -> None:
     assert obs[11930].snow_depth == 12.0
 
 
-def test_parse_observations_rejects_malformed() -> None:
-    with pytest.raises(ShmuDataError):
-        parse_observations(b"not json")
-
-
 def test_parse_gauge_observations_keeps_latest_minute_per_gauge(fixture) -> None:
     gauges = parse_gauge_observations(fixture("gauge_observations.json"))
 
@@ -96,11 +91,41 @@ def test_parse_gauge_observations_skips_unusable_records() -> None:
     assert gauges[24295].precipitation is None
 
 
-def test_parse_gauge_observations_rejects_malformed() -> None:
-    with pytest.raises(ShmuDataError):
-        parse_gauge_observations(b"not json")
-    with pytest.raises(ShmuDataError):
-        parse_observations(b'{"no_data_key": true}')
+# Every shape below used to escape as a raw AttributeError/TypeError/
+# UnicodeDecodeError, which the coordinator reports as an "unexpected error"
+# with a traceback on every poll instead of a clean update failure.
+_MALFORMED_SNAPSHOTS = {
+    "not json": (b"not json", "not valid JSON"),
+    "invalid utf-8": (b'{"data": ["\xff"]}', "not valid JSON"),
+    "no data key": (b'{"no_data_key": true}', "'data' list"),
+    "top level not an object": (b"[1, 2]", "'data' list"),
+    "data not a list": (b'{"data": {"ind_kli": 1}}', "'data' list"),
+    "data null": (b'{"data": null}', "'data' list"),
+    "record not an object": (b'{"data": ["oops"]}', "record 0 is str"),
+    "minuta not a string": (
+        b'{"data": [{"ind_kli": 11858, "ind_zra": 17720, "minuta": 202605170652}]}',
+        "'minuta' is int",
+    ),
+}
+
+
+@pytest.mark.parametrize(
+    "parser", [parse_observations, parse_gauge_observations], ids=["aws", "aps"]
+)
+@pytest.mark.parametrize(
+    ("payload", "message"),
+    list(_MALFORMED_SNAPSHOTS.values()),
+    ids=list(_MALFORMED_SNAPSHOTS),
+)
+def test_snapshot_parsers_reject_malformed(parser, payload, message) -> None:
+    with pytest.raises(ShmuDataError, match=message):
+        parser(payload)
+
+
+def test_snapshot_parsers_accept_an_empty_snapshot() -> None:
+    """An empty ``data`` list is a real upstream state (seen live), not malformed."""
+    assert parse_observations(b'{"data": []}') == {}
+    assert parse_gauge_observations(b'{"data": []}') == {}
 
 
 def test_parse_cap_alert_prefers_slovak_and_extracts_polygon(fixture) -> None:
