@@ -1,12 +1,7 @@
-"""Live-test setup: load the client library on its own, without Home Assistant.
+"""Live-test setup.
 
-The live tests exercise only the vendored client. Importing it as
-``custom_components.shmu.shmu_opendata`` would first run the integration's
-``__init__.py`` and load Home Assistant with it, so its parent directory goes
-on ``sys.path`` and the tests import it as the top-level ``shmu_opendata`` —
-the same way mypy analyses it.
-
-This module also refuses to run with the Home Assistant socket guard loaded.
+The client library is imported standalone, as ``shmu_opendata`` (like mypy
+does): importing it via ``custom_components.shmu`` would load Home Assistant.
 """
 
 from __future__ import annotations

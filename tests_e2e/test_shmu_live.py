@@ -51,8 +51,7 @@ _PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
 
 def test_library_loads_without_home_assistant() -> None:
-    # The library is vendored to stay swappable, so it must not pull in Home
-    # Assistant; conftest.py imports it standalone, which makes this checkable.
+    # The vendored library must stay HA-free (see conftest.py).
     assert "homeassistant" not in sys.modules
 
 
