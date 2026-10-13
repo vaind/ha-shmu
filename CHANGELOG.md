@@ -8,6 +8,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- **Breaking: the Precipitation and Rain gauge precipitation sensors now report intensity in mm/h instead of an amount in mm.** SHMÚ publishes the rain that fell in a single minute, once every five minutes, so the old value was neither a total (four minutes in five never reached it) nor a rate, and anything summing it undercounted roughly five times over. Each sensor now shows the hourly rate that minute implies — the 1-minute sum × 60, so 0.2 mm in that minute reads 12 mm/h. The entities and their history are kept, but Home Assistant cannot convert mm to mm/h, so it stops compiling long-term statistics for them and raises a *The unit of … has changed* repair. Fix it under *Developer tools → Statistics* by deleting the old statistics; don't keep them under the new unit, as they would read sixty times too low. Automations comparing either sensor against a threshold need the threshold multiplied by 60.
+- **Wind bearing is now a wind direction**, and its long-term statistics take the circular mean, so a wind swinging between 350° and 10° averages to north rather than to 180°. Home Assistant treats the change of averaging as a different statistic: it stops compiling long-term statistics for the sensor and raises a *The mean type of … has changed* repair until you delete the old statistics under *Developer tools → Statistics* — which, for northerly winds, were wrong anyway.
+- **Snow depth is now a distance**, so you can display it in another unit (inches, say) from the entity settings. Nothing changes for existing history.
 - **Requires Home Assistant 2026.3 or newer** (was 2025.1). Home Assistant supports one Python version at a time, and 2026.3 is the first release on Python 3.14, which the integration is now developed and tested on. Older Home Assistant versions keep the release they have; HACS will not offer them this update.
 
 ### Fixed

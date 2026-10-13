@@ -36,6 +36,10 @@ Where a verified fact is cheap to assert, pin it in `tests_e2e/` too, so the dai
 ### Observations and rain gauges
 
 - **Observations** (`climate/now/data/.../aws1min - ....json`): new file every 5 min, ~95 stations, several 1-minute records each. Keyed by `ind_kli`.
+- **`zra_uhrn` is a 1-minute sum, so the precipitation sensors are an intensity, not an amount.**
+  Both feeds' metadata say so ("precipitation amount - minute sum", re-checked live 2026-10-13), at 0.01 mm resolution, and we keep only the newest minute of each 5-minute file — four minutes in five never reach us.
+  The library keeps the raw minute sum (`Observation.precipitation`, `GaugeObservation.precipitation`; the condition ladder's dry-veto reads it); the `precipitation` and `rain_gauge_precipitation` sensors surface it ×60 as mm/h (`sensor.precipitation_rate`).
+  Don't turn either back into a `PRECIPITATION`/`TOTAL` amount: summing one sampled minute per five undercounts by roughly five times.
 - **The rain gauges are a second, disjoint station network** (`precipitation/now/data/.../aps1min - ....json`, new upstream on 2026-07-06): same envelope and 5-minute cadence as `aws1min`, ~32 days kept, but keyed by `ind_zra` and carrying only `zra_uhrn` (mm, 1-minute sum) and `t` (°C at 2 m, 1-minute average). ~70 KB per file, against ~390 KB for `aws1min`.
   **Verified live 2026-08-26**: ~1000 records from ~190 stations in one file, and the id set is *completely disjoint* from the 95 `ind_kli` AWS stations — a complementary network, not a re-cut of the observations we already fetch. It is roughly three times denser (~16 km spacing vs ~40 km), which is the whole point of using it: the nearest rain gauge is usually much closer than the nearest synoptic station.
   It is **used** for the `rain_gauge_precipitation` sensor (`gauges.py`, issue #43). The station's own `precipitation` sensor still reads `aws1min` — the two networks are deliberately kept as separate entities rather than one silently standing in for the other.
