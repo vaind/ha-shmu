@@ -65,6 +65,7 @@ A release is a version bump PR followed by a tag; `.github/workflows/release.yml
 3. Merge, then tag the merge commit `vx.y.z` and push the tag.
 
 The workflow refuses a tag that disagrees with the manifest version (HACS resolves releases by tag) or that has no matching changelog section, and publishes that section verbatim as the release notes.
+A released section is final: the first change after a release opens a new `## [Unreleased]` above it, rather than adding to the version that has already shipped.
 
 ## Data & attribution
 
