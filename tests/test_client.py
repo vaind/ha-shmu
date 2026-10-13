@@ -158,6 +158,17 @@ async def test_get_warnings(session, fixture) -> None:
         assert snap.source == f"{WARN}/20260517/0353"
 
 
+async def test_empty_warnings_tree_means_no_warnings(session) -> None:
+    # Live 2026-10-13: with nothing in force, SHMÚ prunes old day folders and
+    # publishes no empty issuance, so the CAP root lists nothing at all.
+    with aioresponses() as m:
+        m.get(f"{BASE}{WARN}/", body=_listing())
+
+        snap = await ShmuClient(session).async_get_warnings()
+        assert snap.warnings == []
+        assert snap.source == WARN
+
+
 async def test_get_web_conditions(session, fixture) -> None:
     with aioresponses() as m:
         m.get(WEB, body=fixture("apocasie.html"))
