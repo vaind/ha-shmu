@@ -13,6 +13,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Fixed
 
 - No more `SHMÚ warnings unavailable, keeping previous: No entries matching '^\\d{8}/$' …` warning every five minutes during calm weather. When nothing is in force, SHMÚ empties its CAP warnings folder completely rather than publishing an empty issuance. The integration took that as a failed fetch, so it logged every poll and kept the last snapshot it had; it now reads it as "no warnings".
+- Malformed data from SHMÚ now shows up as an ordinary failed update instead of an "unexpected error" traceback in the log, and a change to the SHMÚ website's layout is treated like any other website outage (the last known conditions are kept) instead of logging a layout warning every five minutes.
 
 ## [0.10.0] - 2026-09-02
 
