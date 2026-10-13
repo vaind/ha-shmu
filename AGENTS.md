@@ -5,8 +5,6 @@ Guidance for AI coding agents working in this repo. Read this before changing da
 Setup, the pre-push quality gate, and the general contributor ground rules (the vendored-library boundary, offline-deterministic tests, TLS handling, scraper isolation) are in [CONTRIBUTING.md](CONTRIBUTING.md) and are **not repeated here** — read it before your first change.
 The one agents break most often: **don't hard-wrap Markdown prose**; write one sentence per line.
 
-`CLAUDE.md` is a symlink to this file for tool compatibility.
-
 ## The rule specific to this data source
 
 **Verify upstream assumptions against the live server** before encoding them, and document what you verified (see the dated notes under *Non-obvious data-source facts*). Don't add speculative workarounds for failure modes that don't occur.
