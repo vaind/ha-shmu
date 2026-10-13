@@ -37,6 +37,7 @@ from .const import (
     POLL_OFFSET_MAX_SECONDS,
     POLL_OFFSET_MIN_SECONDS,
     POLL_OFFSET_PAD_SECONDS,
+    WEB_CONDITIONS_STALE_AFTER,
 )
 from .shmu_opendata import (
     ConditionResolution,
@@ -262,9 +263,10 @@ class ShmuData:
         whole :class:`ConditionResolution` so a diagnostics dump can show why a
         condition won, not just the result.
         """
+        now = dt_util.utcnow()
         web = (
             self.web_conditions.conditions.get(station.ind_kli)
-            if self.web_conditions is not None
+            if self.web_conditions is not None and not self.web_conditions_ignored(now)
             else None
         )
         return explain_condition(
@@ -273,7 +275,21 @@ class ShmuData:
             precipitation=(
                 observation.precipitation if observation is not None else None
             ),
-            forecast_step=self.current_forecast_step(dt_util.utcnow()),
+            forecast_step=self.current_forecast_step(now),
+        )
+
+    def web_conditions_ignored(self, now: datetime) -> bool:
+        """Whether a held website scrape is too old to enter the ladder.
+
+        A failed scrape keeps the previous snapshot, so ``fetched_at`` is the
+        last time the page was actually read. Past
+        :data:`WEB_CONDITIONS_STALE_AFTER` the scrape is left out and the
+        ladder falls through to the open-data and model sources, as it does
+        for a station the page does not list.
+        """
+        return (
+            self.web_conditions is not None
+            and now - self.web_conditions.fetched_at > WEB_CONDITIONS_STALE_AFTER
         )
 
     def current_forecast_step(self, now: datetime) -> ForecastStep | None:
