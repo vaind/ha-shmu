@@ -22,10 +22,10 @@ from homeassistant.const import (
     PERCENTAGE,
     UnitOfIrradiance,
     UnitOfLength,
-    UnitOfPrecipitationDepth,
     UnitOfPressure,
     UnitOfSpeed,
     UnitOfTemperature,
+    UnitOfVolumetricFlux,
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import EntityCategory
@@ -40,6 +40,21 @@ from .shmu_opendata import ForecastStep, Observation, sea_level_pressure
 #: All entities read a single shared coordinator snapshot; there is no
 #: per-entity device I/O to rate-limit, so updates need not be serialised.
 PARALLEL_UPDATES = 0
+
+
+def precipitation_rate(minute_sum: float | None) -> float | None:
+    """The hourly rate implied by SHMÚ's 1-minute precipitation sum.
+
+    ``zra_uhrn`` is the rain that fell in *one* minute, and each 5-minute file
+    contributes only its newest minute, so four minutes in five never reach us.
+    As an amount it would undercount any total built from it; as the rate that
+    minute implies, it is an honest single-sample intensity. The feed's 0.01 mm
+    resolution makes every rate a multiple of 0.6 mm/h, so rounding only drops
+    binary noise (``0.2 * 60`` is ``12.000000000000002``).
+    """
+    if minute_sum is None:
+        return None
+    return round(minute_sum * 60, 2)
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -120,21 +135,24 @@ SENSORS: tuple[ShmuSensorDescription, ...] = (
     ShmuSensorDescription(
         key="wind_bearing",
         translation_key="wind_bearing",
+        device_class=SensorDeviceClass.WIND_DIRECTION,
         native_unit_of_measurement=DEGREE,
-        state_class=SensorStateClass.MEASUREMENT,
+        # A plain arithmetic mean would average 350° and 10° to 180°.
+        state_class=SensorStateClass.MEASUREMENT_ANGLE,
         value_fn=lambda o: o.wind_bearing,
     ),
     ShmuSensorDescription(
         key="precipitation",
         translation_key="precipitation",
-        device_class=SensorDeviceClass.PRECIPITATION,
-        native_unit_of_measurement=UnitOfPrecipitationDepth.MILLIMETERS,
+        device_class=SensorDeviceClass.PRECIPITATION_INTENSITY,
+        native_unit_of_measurement=UnitOfVolumetricFlux.MILLIMETERS_PER_HOUR,
         state_class=SensorStateClass.MEASUREMENT,
-        value_fn=lambda o: o.precipitation,
+        value_fn=lambda o: precipitation_rate(o.precipitation),
     ),
     ShmuSensorDescription(
         key="snow_depth",
         translation_key="snow_depth",
+        device_class=SensorDeviceClass.DISTANCE,
         native_unit_of_measurement=UnitOfLength.CENTIMETERS,
         state_class=SensorStateClass.MEASUREMENT,
         value_fn=lambda o: o.snow_depth,
@@ -329,7 +347,7 @@ class ShmuSeaLevelPressureSensor(ShmuStationEntity, SensorEntity):
 
 
 class ShmuRainGaugePrecipitationSensor(ShmuStationEntity, SensorEntity):
-    """Precipitation from the rain gauge nearest the measurement location.
+    """Precipitation intensity at the rain gauge nearest the measurement location.
 
     SHMÚ runs a second, ~3x denser observation network beside the synoptic
     stations (see :mod:`shmu_opendata.gauges`), so this usually measures rain
@@ -354,8 +372,8 @@ class ShmuRainGaugePrecipitationSensor(ShmuStationEntity, SensorEntity):
     """
 
     _attr_translation_key = "rain_gauge_precipitation"
-    _attr_device_class = SensorDeviceClass.PRECIPITATION
-    _attr_native_unit_of_measurement = UnitOfPrecipitationDepth.MILLIMETERS
+    _attr_device_class = SensorDeviceClass.PRECIPITATION_INTENSITY
+    _attr_native_unit_of_measurement = UnitOfVolumetricFlux.MILLIMETERS_PER_HOUR
     _attr_state_class = SensorStateClass.MEASUREMENT
 
     def __init__(self, coordinator, station) -> None:
@@ -386,11 +404,11 @@ class ShmuRainGaugePrecipitationSensor(ShmuStationEntity, SensorEntity):
 
     @property
     def native_value(self) -> StateType:
-        """The gauge's 1-minute precipitation sum, or ``None``."""
+        """The hourly rate implied by the gauge's 1-minute sum, or ``None``."""
         obs = self.coordinator.gauge_observation
         if obs is None:
             return None
-        return obs.precipitation
+        return precipitation_rate(obs.precipitation)
 
 
 class ShmuForecastSensor(ShmuStationEntity, SensorEntity):

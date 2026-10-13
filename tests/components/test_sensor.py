@@ -1,9 +1,11 @@
-"""Tests for the ALADIN upper-air sensors (issue #44).
+"""Tests for the sensor platform's entity semantics.
 
-The two are model-derived rather than measured, which shapes both their
-availability (they follow the coordinator's recent success, not a station
-reading) and their default state (opt-in, so a household that will never look
-at an 850 hPa temperature never sees one).
+Covers the measured quantities whose device and state classes decide how Home
+Assistant converts, graphs and aggregates them, and the ALADIN upper-air
+sensors (issue #44). The latter are model-derived rather than measured, which
+shapes both their availability (they follow the coordinator's recent success,
+not a station reading) and their default state (opt-in, so a household that
+will never look at an 850 hPa temperature never sees one).
 """
 
 from __future__ import annotations
@@ -11,7 +13,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
-from unittest.mock import patch
+from unittest.mock import PropertyMock, patch
 
 import pytest
 from homeassistant.core import HomeAssistant
@@ -19,12 +21,15 @@ from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.shmu.const import CONF_IND_KLI, DOMAIN
+from custom_components.shmu.coordinator import ShmuDataUpdateCoordinator
 from custom_components.shmu.shmu_opendata import ForecastStep
 
 from .test_init import _FakeClient
 
 _FREEZING_LEVEL = "sensor.hurbanovo_freezing_level"
 _T850 = "sensor.hurbanovo_temperature_at_850_hpa"
+_PRECIPITATION = "sensor.hurbanovo_precipitation"
+_GAUGE_PRECIPITATION = "sensor.hurbanovo_rain_gauge_precipitation"
 
 
 @pytest.fixture
@@ -59,6 +64,112 @@ def _step(
         span_hours=1.0,
         run=when,
     )
+
+
+async def _setup(
+    hass: HomeAssistant, entry: MockConfigEntry, load: Callable[[str], bytes]
+) -> None:
+    with patch("custom_components.shmu.ShmuClient", return_value=_FakeClient(load)):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+
+@pytest.mark.parametrize(
+    ("entity_id", "minute_sum"),
+    [
+        # Station 11858's newest record, and the Kolárovo gauge (17720) nearest it.
+        (_PRECIPITATION, 0.2),
+        (_GAUGE_PRECIPITATION, 0.4),
+    ],
+)
+async def test_precipitation_is_reported_as_an_hourly_rate(
+    hass: HomeAssistant,
+    entry: MockConfigEntry,
+    load: Callable[[str], bytes],
+    entity_id: str,
+    minute_sum: float,
+) -> None:
+    """SHMÚ's ``zra_uhrn`` is a 1-minute sum, sampled once per 5-minute file.
+
+    Surfaced as an amount, four minutes in five would be silently missing from
+    any total, so it is the *rate* that minute implies: an intensity, which a
+    single sample honestly is.
+    """
+    await _setup(hass, entry, load)
+
+    state = hass.states.get(entity_id)
+    assert state is not None
+    assert float(state.state) == pytest.approx(minute_sum * 60)
+    assert state.attributes["unit_of_measurement"] == "mm/h"
+    assert state.attributes["device_class"] == "precipitation_intensity"
+    assert state.attributes["state_class"] == "measurement"
+
+
+async def test_precipitation_rate_drops_float_noise(
+    hass: HomeAssistant, entry: MockConfigEntry, load: Callable[[str], bytes]
+) -> None:
+    """``0.2 * 60`` is ``12.000000000000002`` in binary; the state must not say so."""
+    await _setup(hass, entry, load)
+
+    assert hass.states.get(_PRECIPITATION).state == "12.0"
+
+
+async def test_missing_precipitation_stays_unknown(
+    hass: HomeAssistant, entry: MockConfigEntry, load: Callable[[str], bytes]
+) -> None:
+    """A reading without ``zra_uhrn`` is unknown, not a rate of zero."""
+    await _setup(hass, entry, load)
+    coordinator = entry.runtime_data
+    station = replace(coordinator.observation, precipitation=None)
+    gauge = replace(coordinator.gauge_observation, precipitation=None)
+
+    with (
+        patch.object(
+            ShmuDataUpdateCoordinator,
+            "observation",
+            new_callable=PropertyMock,
+            return_value=station,
+        ),
+        patch.object(
+            ShmuDataUpdateCoordinator,
+            "gauge_observation",
+            new_callable=PropertyMock,
+            return_value=gauge,
+        ),
+    ):
+        coordinator.async_update_listeners()
+        await hass.async_block_till_done()
+
+        assert hass.states.get(_PRECIPITATION).state == "unknown"
+        assert hass.states.get(_GAUGE_PRECIPITATION).state == "unknown"
+
+
+async def test_wind_bearing_is_averaged_as_an_angle(
+    hass: HomeAssistant, entry: MockConfigEntry, load: Callable[[str], bytes]
+) -> None:
+    """A plain ``measurement`` would average 350° and 10° to 180°, due south.
+
+    ``measurement_angle`` makes long-term statistics take the circular mean.
+    """
+    await _setup(hass, entry, load)
+
+    state = hass.states.get("sensor.hurbanovo_wind_bearing")
+    assert state is not None
+    assert state.attributes["device_class"] == "wind_direction"
+    assert state.attributes["state_class"] == "measurement_angle"
+    assert state.attributes["unit_of_measurement"] == "°"
+
+
+async def test_snow_depth_is_a_distance(
+    hass: HomeAssistant, entry: MockConfigEntry, load: Callable[[str], bytes]
+) -> None:
+    """The device class is what lets a user display it in inches."""
+    await _setup(hass, entry, load)
+
+    state = hass.states.get("sensor.hurbanovo_snow_depth")
+    assert state is not None
+    assert state.attributes["device_class"] == "distance"
+    assert state.attributes["unit_of_measurement"] == "cm"
 
 
 async def _setup_with_upper_air(
