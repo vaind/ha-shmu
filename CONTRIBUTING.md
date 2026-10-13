@@ -14,11 +14,21 @@ uv pip install --python .venv pytest pytest-asyncio aioresponses ruff \
 ## Before you push
 
 ```bash
-.venv/bin/ruff check custom_components/ tests/
-.venv/bin/ruff format custom_components/ tests/
+.venv/bin/ruff check custom_components/ tests/ tests_e2e/
+.venv/bin/ruff format custom_components/ tests/ tests_e2e/
 .venv/bin/python -m mypy
 .venv/bin/python -m pytest tests/      # must stay green and offline
 ```
+
+`tests_e2e/` is the one deliberate exception to "offline": it runs the real client against SHMÚ and checks the upstream facts recorded in [AGENTS.md](AGENTS.md) (freshness, coverage, forecast horizon, radar loop).
+The `E2E (live SHMÚ)` workflow (`.github/workflows/e2e.yml`) runs it daily.
+Run it yourself after touching a fetch path or when SHMÚ seems to have changed something:
+
+```bash
+.venv/bin/python -m pytest tests_e2e/ -p no:homeassistant
+```
+
+When it fails, re-verify against the live server before changing code, then record what you found in AGENTS.md.
 
 ## Ground rules
 
@@ -27,7 +37,8 @@ uv pip install --python .venv pytest pytest-asyncio aioresponses ruff \
   Assistant (it stays swappable / extractable). The HA glue is the rest of
   `custom_components/shmu/`.
 - **Tests are deterministic and offline.** HTTP is mocked (`aioresponses`); HA
-  tests use fixture-derived snapshots. Don't add tests that hit the network.
+  tests use fixture-derived snapshots. Don't add tests that hit the network
+  outside `tests_e2e/`.
   Add or update a fixture under `tests/fixtures/` instead.
 - **Never disable TLS verification** to "fix" an opendata.shmu.sk handshake.
   The server omits an intermediate; refresh the bundled cert instead (see
