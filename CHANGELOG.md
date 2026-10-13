@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Changed
 
 - **Requires Home Assistant 2026.3 or newer** (was 2025.1). Home Assistant supports one Python version at a time, and 2026.3 is the first release on Python 3.14, which the integration is now developed and tested on. Older Home Assistant versions keep the release they have; HACS will not offer them this update.
+- **Reading a new forecast run is about 500 times faster**: 12 ms instead of 6.2 s for a full 67-file run on an Apple-silicon Mac, with peak memory during the read down from 7.1 MB to 0.4 MB. This happens four times a day and at every start, and matters most on a Raspberry Pi, which is several times slower. The integration used to unpack every value of every forecast map only to keep the one grid point at your location; it now reads just that point, so forecast values are unchanged.
 
 ### Fixed
 
