@@ -18,19 +18,19 @@ was unusual.
 
 from __future__ import annotations
 
+import sys
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 
 import aiohttp
 import pytest
-
-from custom_components.shmu.shmu_opendata import (
+from shmu_opendata import (
     GAUGES,
     STATIONS,
     ShmuClient,
     create_ssl_context,
 )
-from custom_components.shmu.shmu_opendata.const import (
+from shmu_opendata.const import (
     MIN_FORECAST_HOURS,
     RADAR_LOOP_FRAMES,
     WARNINGS_PATH,
@@ -48,6 +48,11 @@ FRESH_WITHIN = timedelta(minutes=30)
 FUTURE_SLACK = timedelta(minutes=5)
 
 _PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+
+
+def test_library_loads_without_home_assistant() -> None:
+    # The vendored library must stay HA-free (see conftest.py).
+    assert "homeassistant" not in sys.modules
 
 
 @pytest.fixture

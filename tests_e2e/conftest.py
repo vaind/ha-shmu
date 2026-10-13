@@ -1,8 +1,17 @@
-"""Live-test setup: refuse to run with the Home Assistant socket guard loaded."""
+"""Live-test setup.
+
+The client library is imported standalone, as ``shmu_opendata`` (like mypy
+does): importing it via ``custom_components.shmu`` would load Home Assistant.
+"""
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
 import pytest
+
+sys.path.insert(0, str(Path(__file__).parents[1] / "custom_components" / "shmu"))
 
 
 def pytest_configure(config: pytest.Config) -> None:
