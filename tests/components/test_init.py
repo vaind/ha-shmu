@@ -370,8 +370,12 @@ async def _setup_entry(
 async def test_device_name_from_config(
     hass: HomeAssistant, load: Callable[[str], bytes]
 ) -> None:
-    await _setup_entry(hass, load, data={CONF_IND_KLI: 11858, CONF_NAME: "Cottage"})
-    device = dr.async_get(hass).async_get_device(identifiers={(DOMAIN, "11858")})
+    entry, _ = await _setup_entry(
+        hass, load, data={CONF_IND_KLI: 11858, CONF_NAME: "Cottage"}
+    )
+    device = dr.async_get(hass).async_get_device_by_identifier(
+        (DOMAIN, "11858"), entry.entry_id
+    )
     assert device is not None
     assert device.name == "Cottage"
 
@@ -380,8 +384,10 @@ async def test_device_name_falls_back_to_station(
     hass: HomeAssistant, load: Callable[[str], bytes]
 ) -> None:
     # A legacy entry created before the Name field existed has no CONF_NAME.
-    await _setup_entry(hass, load, data={CONF_IND_KLI: 11858})
-    device = dr.async_get(hass).async_get_device(identifiers={(DOMAIN, "11858")})
+    entry, _ = await _setup_entry(hass, load, data={CONF_IND_KLI: 11858})
+    device = dr.async_get(hass).async_get_device_by_identifier(
+        (DOMAIN, "11858"), entry.entry_id
+    )
     assert device is not None
     assert device.name == "Hurbanovo"
 

@@ -5,10 +5,11 @@ Thanks for helping improve **SHMÚ Weather**. This is an unofficial community pr
 ## Setup
 
 ```bash
-uv venv --python 3.13 .venv
+uv venv .venv
 uv pip install --group dev
 ```
 
+uv takes the Python version from `.python-version`, which tracks the one Python minor the newest Home Assistant runs on; the daily e2e run fails when Home Assistant moves to a newer one.
 The dev tools are listed once, in the `dev` dependency group in `pyproject.toml`, which CI installs the same way.
 Add a new tool there rather than to a command line.
 They are loose lower bounds with no lockfile, so Dependabot does not track them (it only bumps the GitHub Actions pins).
@@ -35,7 +36,7 @@ When it fails, re-verify against the live server before changing code, then reco
 ## Ground rules
 
 - **Two layers, one boundary.** The SHMÚ client is vendored at `custom_components/shmu/shmu_opendata/` and must **not** import Home Assistant (it stays swappable / extractable). The HA glue is the rest of `custom_components/shmu/`.
-- **Tests are deterministic and offline.** HTTP is mocked (`aioresponses`); HA tests use fixture-derived snapshots. Don't add tests that hit the network outside `tests_e2e/`.
+- **Tests are deterministic and offline.** HTTP is mocked (HA's `AiohttpClientMocker`); HA tests use fixture-derived snapshots. Don't add tests that hit the network outside `tests_e2e/`.
   Add or update a fixture under `tests/fixtures/` instead.
 - **Never disable TLS verification** to "fix" an opendata.shmu.sk handshake.
   The server omits an intermediate; refresh the bundled cert instead (see [AGENTS.md](AGENTS.md)).

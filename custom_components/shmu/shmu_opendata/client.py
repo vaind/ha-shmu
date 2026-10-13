@@ -215,7 +215,7 @@ def _frame_label(valid_at: datetime, tz: str | None) -> str:
     if tz:
         try:
             zone = ZoneInfo(tz)
-        except (ZoneInfoNotFoundError, ValueError):
+        except ZoneInfoNotFoundError, ValueError:
             zone = None
     return valid_at.astimezone(zone or UTC).strftime(_LABEL_FMT)
 
@@ -309,7 +309,7 @@ class ShmuClient:
         if last_modified:
             try:
                 published_at = parsedate_to_datetime(last_modified).astimezone(UTC)
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 published_at = None
         return body, published_at
 

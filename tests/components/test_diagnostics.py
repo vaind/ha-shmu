@@ -136,7 +136,9 @@ async def test_device_diagnostics_matches_config_entry(
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
 
-    device = dr.async_get(hass).async_get_device(identifiers={(DOMAIN, "11858")})
+    device = dr.async_get(hass).async_get_device_by_identifier(
+        (DOMAIN, "11858"), entry.entry_id
+    )
     assert device is not None
 
     device_diag = await async_get_device_diagnostics(hass, entry, device)
