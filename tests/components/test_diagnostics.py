@@ -62,6 +62,9 @@ async def test_config_entry_diagnostics(
         c["tier"] == "website cloud" and not c["won"] for c in derived["candidates"]
     )
     assert diag["observations"]["station_present"] is True
+    # The weather entity no longer carries the upstream file path, so this is
+    # where observation provenance lives.
+    assert diag["observations"]["source"]
     # The full original SHMÚ row is included for debugging.
     assert diag["observations"]["raw_record"]["stav_poc"] == 61
     assert diag["web_conditions"]["station"]["weather_text"] == "Dážď"

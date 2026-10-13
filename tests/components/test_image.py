@@ -53,6 +53,9 @@ async def test_radar_image_entity_created(
     attrs = state.attributes
     assert attrs["product"] == "zmax"
     assert attrs["max_dbz"] is not None
+    # The upstream file path changes every frame and is debugging detail;
+    # diagnostics keeps it.
+    assert "source" not in attrs
     # Cropped to the configured station (Hurbanovo, 47.87 N / 18.19 E);
     # the crop box must be centred on and contain it.
     assert attrs["center_latitude"] == 47.8733
@@ -124,6 +127,7 @@ async def test_radar_map_entity_covers_the_whole_grid(
     assert state.state not in ("unavailable", "unknown")
     attrs = state.attributes
     assert attrs["product"] == "zmax"
+    assert "source" not in attrs
     assert attrs["bbox_south"] == pytest.approx(_GRID_SOUTH, abs=0.01)
     assert attrs["bbox_north"] == pytest.approx(_GRID_NORTH, abs=0.01)
     assert attrs["bbox_west"] == pytest.approx(_GRID_WEST, abs=0.01)
@@ -193,6 +197,8 @@ async def test_radar_in_diagnostics(
     radar = diag["radar"]
     assert radar is not None
     assert radar["product"] == "zmax"
+    # The upstream path lives here rather than on the image entities.
+    assert radar["source"]
     assert radar["loop_frames"] == 3
     assert radar["loop_start"] == "2026-05-17T20:10:00+00:00"
     assert radar["loop_end"] == "2026-05-17T20:20:00+00:00"

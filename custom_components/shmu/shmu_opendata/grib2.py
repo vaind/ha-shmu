@@ -15,6 +15,12 @@ if SHMÚ ever changes the encoding we want a clear failure, not corrupt
 forecasts. The fixed grid geometry is intentionally **not** interpreted here;
 it lives in :mod:`shmu_opendata.forecast` because it never changes.
 
+There are two ways in, over one shared parse. :func:`iter_messages` parses and
+validates every message but leaves its values packed, so a caller reading a
+single grid point unpacks only that point (:meth:`Grib2Message.value_at`);
+:func:`iter_fields` unpacks whole grids. All validation lives in the shared
+parse, so a format change fails just as loudly whichever way a file is read.
+
 Reference: WMO-No. 306 Vol. I.2, FM 92 GRIB Edition 2.
 """
 
@@ -22,7 +28,7 @@ from __future__ import annotations
 
 import struct
 from collections.abc import Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
 from .exceptions import ShmuDataError
@@ -106,6 +112,83 @@ class Grib2Field:
         return self.values[j * self.nx + i]
 
 
+@dataclass(frozen=True, slots=True)
+class Grib2Message:
+    """One parsed, validated GRIB2 message whose values are still packed.
+
+    Same identity and geometry as :class:`Grib2Field`, plus the raw sections
+    needed to unpack it — either one grid point (:meth:`value_at`) or the
+    whole grid (:meth:`decode`). The forecast reads a single location, so
+    unpacking all ~2 500 values of every message only to keep one was nearly
+    all of its cost.
+
+    Deferring the unpack loses no loudness: :func:`iter_messages` has already
+    checked the template, the bitmap and that Section 7 is long enough for
+    every value, and past that point every bit pattern is a valid packed value.
+    """
+
+    reference_time: datetime
+    param: tuple[int, int, int, int]
+    level: float | None
+    nx: int
+    ny: int
+    scan_mode: int
+    data_template: int = field(repr=False)
+    section5: bytes = field(repr=False)
+    #: ``None`` when every grid point carries a value (indicator 255).
+    bitmap: bytes | None = field(repr=False)
+    section7: bytes = field(repr=False)
+
+    def value_at(self, i: int, j: int) -> float | None:
+        """Value at column ``i`` row ``j``, or ``None`` if masked.
+
+        Indexed exactly like :meth:`Grib2Field.value_at` and bit-identical to
+        it, but unpacks only this one point.
+        """
+        if not (0 <= i < self.nx and 0 <= j < self.ny):
+            raise IndexError(f"Grid point ({i}, {j}) is outside {self.nx}x{self.ny}")
+        k = j * self.nx + i
+        index = k
+        bitmap = self.bitmap
+        if bitmap is not None:
+            byte, bit = k >> 3, k & 7
+            if not (bitmap[byte] >> (7 - bit)) & 1:
+                return None
+            # Section 7 holds only the unmasked points, in scan order, so a
+            # point's slot there is the number of set bitmap bits before it.
+            index = (
+                int.from_bytes(bitmap[:byte]).bit_count()
+                + (bitmap[byte] >> (8 - bit)).bit_count()
+            )
+        if self.data_template == _SIMPLE_PACKING:
+            return _simple_packing_at(self.section5, self.section7, index)
+        return _ieee_at(self.section5, self.section7, index)
+
+    def decode(self) -> Grib2Field:
+        """Unpack every grid point into a :class:`Grib2Field`."""
+        npts = self.nx * self.ny
+        bitmap = self.bitmap
+        present = (
+            None
+            if bitmap is None
+            else [bool((bitmap[k >> 3] >> (7 - (k & 7))) & 1) for k in range(npts)]
+        )
+        n_values = npts if present is None else sum(present)
+        if self.data_template == _SIMPLE_PACKING:
+            unpacked = _decode_simple_packing(self.section5, self.section7, n_values)
+        else:  # _IEEE_PACKING — the only other member of _SUPPORTED_TEMPLATES
+            unpacked = _decode_ieee(self.section5, self.section7, n_values)
+        return Grib2Field(
+            reference_time=self.reference_time,
+            param=self.param,
+            level=self.level,
+            nx=self.nx,
+            ny=self.ny,
+            scan_mode=self.scan_mode,
+            values=_scatter(unpacked, present),
+        )
+
+
 def _scatter(
     unpacked: list[float], bitmap: list[bool] | None
 ) -> tuple[float | None, ...]:
@@ -120,21 +203,28 @@ def _scatter(
     return tuple(next(it) if present else None for present in bitmap)
 
 
-def _decode_simple_packing(
-    section5: bytes, section7: bytes, n_values: int
-) -> list[float]:
-    """Unpack DRT 5.0: ``value = (R + X·2**E) / 10**D``.
+def _simple_packing_params(section5: bytes) -> tuple[float, float, int]:
+    """``(base, scale, nbits)`` of DRT 5.0, so that ``value = base + X·scale``.
 
-    ``X`` is an ``nbits``-wide unsigned integer from the big-endian bit stream.
+    Unpacks ``value = (R + X·2**E) / 10**D`` with the division folded into two
+    constants. Shared by the whole-grid and the single-point unpack so the two
+    perform the same float operations and cannot round differently.
     """
     reference = struct.unpack(">f", section5[11:15])[0]
     binary_scale = _grib_int(section5, 15, 2)
     decimal_scale = _grib_int(section5, 17, 2)
-    nbits = section5[19]
-
     factor = 10.0**-decimal_scale
-    scale = (2.0**binary_scale) * factor
-    base = reference * factor
+    return reference * factor, (2.0**binary_scale) * factor, section5[19]
+
+
+def _decode_simple_packing(
+    section5: bytes, section7: bytes, n_values: int
+) -> list[float]:
+    """Unpack every DRT 5.0 value.
+
+    ``X`` is an ``nbits``-wide unsigned integer from the big-endian bit stream.
+    """
+    base, scale, nbits = _simple_packing_params(section5)
 
     if nbits == 0:
         # Constant field: every (unmasked) point equals the reference value.
@@ -155,40 +245,68 @@ def _decode_simple_packing(
     return unpacked
 
 
-def _decode_ieee(section5: bytes, section7: bytes, n_values: int) -> list[float]:
-    """Unpack DRT 5.4: raw big-endian IEEE 754 floats.
+def _simple_packing_at(section5: bytes, section7: bytes, index: int) -> float:
+    """Unpack only the ``index``-th DRT 5.0 value.
 
-    Precision octet: 1 = 32-bit, 2 = 64-bit. SHMÚ uses this only for a
-    constant orography field, but decoding it keeps the "fail loud only on a
-    *truly* unsupported template" contract intact (no field is silently
-    dropped).
+    Simple packing has no per-value framing — every value is exactly ``nbits``
+    wide — so value ``index`` starts at bit ``index·nbits`` of the payload.
+    Reading just the bytes that span it as one big-endian integer and shifting
+    the value out is O(1), where walking the stream to it is O(index).
+    """
+    base, scale, nbits = _simple_packing_params(section5)
+    if nbits == 0:
+        return base
+    start = index * nbits
+    first = start >> 3
+    end = (start + nbits + 7) >> 3
+    span = int.from_bytes(section7[5 + first : 5 + end])
+    x = (span >> (8 * end - start - nbits)) & ((1 << nbits) - 1)
+    return base + x * scale
+
+
+def _ieee_format(section5: bytes) -> tuple[str, int]:
+    """``struct`` format and byte width of a DRT 5.4 value.
+
+    Precision octet: 1 = 32-bit, 2 = 64-bit; 3 (128-bit) has no ``struct``
+    format and SHMÚ does not use it, so it raises rather than mis-reading.
     """
     precision = section5[11]
-    fmt = ">f" if precision == 1 else ">d"
-    width = 4 if precision == 1 else 8
+    if precision == 1:
+        return ">f", 4
+    if precision == 2:
+        return ">d", 8
+    raise ShmuDataError(f"Unsupported IEEE float precision {precision} in DRT 5.4")
+
+
+def _decode_ieee(section5: bytes, section7: bytes, n_values: int) -> list[float]:
+    """Unpack every DRT 5.4 value: raw big-endian IEEE 754 floats.
+
+    SHMÚ uses this only for a constant orography field, but decoding it keeps
+    the "fail loud only on a *truly* unsupported template" contract intact (no
+    field is silently dropped).
+    """
+    fmt, width = _ieee_format(section5)
     payload = section7[5:]
     return [struct.unpack_from(fmt, payload, k * width)[0] for k in range(n_values)]
 
 
-def _decode_values(
-    template: int,
-    section5: bytes,
-    section7: bytes,
-    bitmap: list[bool] | None,
-    npts: int,
-) -> tuple[float | None, ...]:
-    """Decode Section 7 for a supported data-representation template."""
-    n_values = sum(bitmap) if bitmap is not None else npts
+def _ieee_at(section5: bytes, section7: bytes, index: int) -> float:
+    """Unpack only the ``index``-th DRT 5.4 value (fixed width, so O(1))."""
+    fmt, width = _ieee_format(section5)
+    return float(struct.unpack_from(fmt, section7, 5 + index * width)[0])
+
+
+def _payload_bytes_needed(template: int, section5: bytes, n_values: int) -> int:
+    """Section 7 payload length (after its 5-byte header) ``n_values`` need."""
     if template == _SIMPLE_PACKING:
-        unpacked = _decode_simple_packing(section5, section7, n_values)
-    else:  # _IEEE_PACKING — the only other member of _SUPPORTED_TEMPLATES
-        unpacked = _decode_ieee(section5, section7, n_values)
-    return _scatter(unpacked, bitmap)
+        return (n_values * section5[19] + 7) // 8
+    return n_values * _ieee_format(section5)[1]
 
 
-def iter_fields(data: bytes) -> Iterator[Grib2Field]:
-    """Yield every decoded field in a GRIB2 file (each ``GRIB…7777`` message).
+def iter_messages(data: bytes) -> Iterator[Grib2Message]:
+    """Yield every message in a GRIB2 file (each ``GRIB…7777``), still packed.
 
+    Every message is fully validated here, whether or not anyone unpacks it.
     Raises :class:`ShmuDataError` on a non-edition-2 message, an unsupported
     packing template, or a structurally invalid message — never silently
     skipped, so an upstream format change surfaces immediately.
@@ -215,7 +333,7 @@ def iter_fields(data: bytes) -> Iterator[Grib2Field]:
         level: float | None = None
         npts = nx = ny = scan_mode = 0
         data_template = -1
-        bitmap: list[bool] | None = None
+        bitmap: bytes | None = None
         section5: bytes | None = None
         section7: bytes | None = None
 
@@ -263,10 +381,7 @@ def iter_fields(data: bytes) -> Iterator[Grib2Field]:
             elif sec_num == 6:
                 indicator = sec[5]
                 if indicator == 0:
-                    bits = sec[6:]
-                    bitmap = [
-                        bool((bits[k >> 3] >> (7 - (k & 7))) & 1) for k in range(npts)
-                    ]
+                    bitmap = sec[6:]
                 elif indicator == 255:
                     bitmap = None
                 else:
@@ -286,13 +401,45 @@ def iter_fields(data: bytes) -> Iterator[Grib2Field]:
         ):
             raise ShmuDataError("Incomplete GRIB2 message (missing a section)")
 
-        yield Grib2Field(
+        n_values = npts
+        if bitmap is not None:
+            bitmap_bytes = (npts + 7) // 8
+            if len(bitmap) < bitmap_bytes:
+                raise ShmuDataError(
+                    f"Bitmap covers {len(bitmap) * 8} points, grid has {npts}"
+                )
+            # The bitmap is padded to a whole octet; only its first npts bits
+            # are grid points.
+            n_values = (
+                int.from_bytes(bitmap[:bitmap_bytes]) >> (8 * bitmap_bytes - npts)
+            ).bit_count()
+        needed = _payload_bytes_needed(data_template, section5, n_values)
+        if len(section7) - 5 < needed:
+            raise ShmuDataError(
+                f"Section 7 holds {len(section7) - 5} bytes; {n_values} values "
+                f"need {needed}"
+            )
+
+        yield Grib2Message(
             reference_time=reference_time,
             param=param,
             level=level,
             nx=nx,
             ny=ny,
             scan_mode=scan_mode,
-            values=_decode_values(data_template, section5, section7, bitmap, npts),
+            data_template=data_template,
+            section5=section5,
+            bitmap=bitmap,
+            section7=section7,
         )
         pos = end
+
+
+def iter_fields(data: bytes) -> Iterator[Grib2Field]:
+    """Yield every message of a GRIB2 file with its whole grid unpacked.
+
+    Raises exactly as :func:`iter_messages` does. A caller that reads only a
+    few grid points should use that instead and unpack per point.
+    """
+    for message in iter_messages(data):
+        yield message.decode()

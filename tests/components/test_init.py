@@ -55,6 +55,12 @@ from custom_components.shmu.shmu_opendata.website import parse_current_condition
 #: Forecast hours backed by the trimmed real GRIB2 fixtures.
 _FCAST_FIXTURE_HOURS = (0, 1, 2, 24)
 
+#: The precipitation sensors' states in the fixtures. Both report the hourly
+#: rate implied by SHMÚ's 1-minute sum, so each is that minute's mm times 60.
+_STATION_RATE = "12.0"  # station 11858's newest minute: 0.2 mm
+_KOLAROVO_RATE = "24.0"  # gauge 17720 (nearest Hurbanovo): 0.4 mm
+_KOLIBA_RATE = "72.0"  # gauge 17140 (nearest Bratislava): 1.2 mm
+
 
 class _FakeClient:
     """Stand-in for ShmuClient returning canned, fixture-derived snapshots."""
@@ -558,14 +564,14 @@ async def test_rain_gauge_sensor_reads_the_nearest_gauge(
         await hass.async_block_till_done()
 
     state = hass.states.get("sensor.hurbanovo_rain_gauge_precipitation")
-    assert state.state == "0.4"  # newest minute for gauge 17720
+    assert state.state == _KOLAROVO_RATE
     assert state.attributes["gauge_ind_zra"] == 17720
     assert state.attributes["gauge_name"] == "Kolárovo"
     assert state.attributes["gauge_distance_km"] == pytest.approx(19.4, abs=0.5)
 
     # The station's own precipitation sensor is a different network and is
     # deliberately left reading the station.
-    assert hass.states.get("sensor.hurbanovo_precipitation").state == "0.2"
+    assert hass.states.get("sensor.hurbanovo_precipitation").state == _STATION_RATE
 
 
 async def test_rain_gauge_follows_the_measurement_location(
@@ -587,7 +593,7 @@ async def test_rain_gauge_follows_the_measurement_location(
 
     assert entry.runtime_data.gauge.ind_zra == 17140
     state = hass.states.get("sensor.hurbanovo_rain_gauge_precipitation")
-    assert state.state == "1.2"
+    assert state.state == _KOLIBA_RATE
     assert state.attributes["gauge_name"] == "Bratislava - Koliba"
 
 
@@ -606,7 +612,8 @@ async def test_rain_gauge_is_independent_of_the_station(
         await hass.async_block_till_done()
 
         assert (
-            hass.states.get("sensor.hurbanovo_rain_gauge_precipitation").state == "0.4"
+            hass.states.get("sensor.hurbanovo_rain_gauge_precipitation").state
+            == _KOLAROVO_RATE
         )
 
 
@@ -624,7 +631,8 @@ async def test_rain_gauge_survives_a_one_cycle_dropout(
         await hass.async_block_till_done()
 
         assert (
-            hass.states.get("sensor.hurbanovo_rain_gauge_precipitation").state == "0.4"
+            hass.states.get("sensor.hurbanovo_rain_gauge_precipitation").state
+            == _KOLAROVO_RATE
         )
 
 
@@ -652,7 +660,8 @@ async def test_rain_gauge_goes_unavailable_during_a_feed_outage(
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
         assert (
-            hass.states.get("sensor.hurbanovo_rain_gauge_precipitation").state == "0.4"
+            hass.states.get("sensor.hurbanovo_rain_gauge_precipitation").state
+            == _KOLAROVO_RATE
         )
 
         # Only the gauge feed fails; observations keep succeeding, so the
@@ -665,7 +674,8 @@ async def test_rain_gauge_goes_unavailable_during_a_feed_outage(
         assert entry.runtime_data.last_update_success is True
         # Within the window the last reading is still served.
         assert (
-            hass.states.get("sensor.hurbanovo_rain_gauge_precipitation").state == "0.4"
+            hass.states.get("sensor.hurbanovo_rain_gauge_precipitation").state
+            == _KOLAROVO_RATE
         )
         # ...while the station is unaffected.
         assert hass.states.get("sensor.hurbanovo_temperature").state == "12.1"
@@ -707,7 +717,8 @@ async def test_rain_gauge_backfill_does_not_keep_a_stale_reading_alive(
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
         assert (
-            hass.states.get("sensor.hurbanovo_rain_gauge_precipitation").state == "0.4"
+            hass.states.get("sensor.hurbanovo_rain_gauge_precipitation").state
+            == _KOLAROVO_RATE
         )
 
         # The gauge goes offline and the network runs on ~29 h ahead of it.
@@ -757,7 +768,8 @@ async def test_rain_gauge_stays_available_while_its_readings_advance(
             await hass.async_block_till_done()
 
         assert (
-            hass.states.get("sensor.hurbanovo_rain_gauge_precipitation").state == "0.4"
+            hass.states.get("sensor.hurbanovo_rain_gauge_precipitation").state
+            == _KOLAROVO_RATE
         )
 
 
@@ -784,7 +796,8 @@ async def test_rain_gauge_cache_hits_do_not_keep_a_frozen_reading_alive(
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
         assert (
-            hass.states.get("sensor.hurbanovo_rain_gauge_precipitation").state == "0.4"
+            hass.states.get("sensor.hurbanovo_rain_gauge_precipitation").state
+            == _KOLAROVO_RATE
         )
 
         # Upstream stops publishing: the newest file never changes, so every
@@ -861,7 +874,7 @@ async def test_setup_succeeds_when_the_gauge_feed_fails_from_the_start(
 
     # The station's own entities are untouched by the gauge feed being down.
     assert hass.states.get("sensor.hurbanovo_temperature").state == "12.1"
-    assert hass.states.get("sensor.hurbanovo_precipitation").state == "0.2"
+    assert hass.states.get("sensor.hurbanovo_precipitation").state == _STATION_RATE
     assert hass.states.get("weather.hurbanovo").state == "rainy"
 
     # The gauge sensor exists but has never had a reading.
@@ -936,7 +949,10 @@ async def test_gauge_feed_recovers_without_a_reload(
         await entry.runtime_data.async_refresh()
         await hass.async_block_till_done()
 
-    assert hass.states.get("sensor.hurbanovo_rain_gauge_precipitation").state == "0.4"
+    assert (
+        hass.states.get("sensor.hurbanovo_rain_gauge_precipitation").state
+        == _KOLAROVO_RATE
+    )
 
 
 async def test_map_overlay_plugin_is_served(

@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from custom_components.shmu.shmu_opendata.exceptions import ShmuDataError
-from custom_components.shmu.shmu_opendata.grib2 import iter_fields
+from custom_components.shmu.shmu_opendata.grib2 import iter_fields, iter_messages
 
 # Surface params we rely on, by (discipline, category, number, level type).
 _T2M = (0, 0, 0, 103)
@@ -51,16 +51,100 @@ def test_value_at_matches_flat_index(fixture) -> None:
     assert field.value_at(5, 3) == field.values[3 * field.nx + 5]
 
 
-def test_unsupported_template_raises_loudly(fixture) -> None:
+def _section_offset(data: bytes | bytearray, number: int) -> int:
+    """Offset of the first message's first section ``number``."""
+    pos = 16
+    while data[pos + 4] != number:
+        pos += int.from_bytes(data[pos : pos + 4], "big")
+    return pos
+
+
+# Both readers share one parse, so every format check must fire for each —
+# including iter_messages, where an unsupported message is never unpacked.
+_READERS = pytest.mark.parametrize("reader", [iter_fields, iter_messages])
+
+
+@_READERS
+def test_unsupported_template_raises_loudly(fixture, reader) -> None:
     """A non-5.0/5.4 packing template must fail, never silently mislead."""
     data = bytearray(fixture("aladin_002.grb"))
-    # Find the first Section 5 and rewrite its template number to 40 (JPEG2000).
-    pos = 16
-    while data[pos + 4] != 5:
-        pos += int.from_bytes(data[pos : pos + 4], "big")
+    # Rewrite the first Section 5's template number to 40 (JPEG2000).
+    pos = _section_offset(data, 5)
     data[pos + 9 : pos + 11] = (40).to_bytes(2, "big")
     with pytest.raises(ShmuDataError, match=r"5\.40"):
-        list(iter_fields(bytes(data)))
+        list(reader(bytes(data)))
+
+
+@_READERS
+def test_unsupported_bitmap_indicator_raises(fixture, reader) -> None:
+    data = bytearray(fixture("aladin_002.grb"))
+    data[_section_offset(data, 6) + 5] = 254  # "reuse the previous bitmap"
+    with pytest.raises(ShmuDataError, match="bitmap indicator 254"):
+        list(reader(bytes(data)))
+
+
+@_READERS
+def test_short_section7_raises(fixture, reader) -> None:
+    """Too few packed bytes for the bitmap's points must not read past them.
+
+    Point access would otherwise index into the next section's bytes (or
+    past the end) and hand back a plausible-looking wrong number.
+    """
+    data = bytearray(fixture("aladin_002.grb"))
+    pos = _section_offset(data, 5)
+    data[pos + 19] = 32  # claim 32-bit values: more than Section 7 holds
+    with pytest.raises(ShmuDataError, match="Section 7"):
+        list(reader(bytes(data)))
+
+
+@_READERS
+def test_unsupported_ieee_precision_raises(fixture, reader) -> None:
+    """DRT 5.4 precision 3 (128-bit) has no struct format; never guess one."""
+    data = bytearray(fixture("aladin_000.grb"))
+    pos = 0
+    while True:  # the orography message is the only DRT 5.4 one
+        sec5 = pos + _section_offset(data[pos:], 5)
+        if int.from_bytes(data[sec5 + 9 : sec5 + 11], "big") == 4:
+            break
+        pos += int.from_bytes(data[pos + 8 : pos + 16], "big")
+    data[sec5 + 11] = 3
+    with pytest.raises(ShmuDataError, match="precision 3"):
+        list(reader(bytes(data)))
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "aladin_000.grb",
+        "aladin_001.grb",
+        "aladin_002.grb",
+        "aladin_024.grb",
+        "aladin_upper_000.grb",
+    ],
+)
+def test_point_decode_matches_full_decode(fixture, name) -> None:
+    """Unpacking one point must be bit-identical to unpacking the whole grid.
+
+    The forecast reads only through the point path, while the fixtures' pinned
+    values were established through the full one — so this ties every message
+    (both packing templates, every bit width, masked and unmasked points) of
+    the point path back to them.
+    """
+    messages = list(iter_messages(fixture(name)))
+    assert messages
+    for message in messages:
+        full = message.decode()
+        assert full.values == tuple(
+            message.value_at(i, j) for j in range(message.ny) for i in range(message.nx)
+        ), (message.param, message.level)
+
+
+def test_point_decode_rejects_off_grid_points(fixture) -> None:
+    """Off-grid indices must not wrap around (Python negative indexing)."""
+    message = next(iter_messages(fixture("aladin_002.grb")))
+    for i, j in [(-1, 0), (0, -1), (message.nx, 0), (0, message.ny)]:
+        with pytest.raises(IndexError):
+            message.value_at(i, j)
 
 
 def test_truncated_message_raises(fixture) -> None:

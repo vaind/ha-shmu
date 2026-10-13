@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+import logging
+
+import pytest
+
+from custom_components.shmu.shmu_opendata.exceptions import ShmuDataError
 from custom_components.shmu.shmu_opendata.website import parse_current_conditions
 
 
@@ -35,3 +40,25 @@ def test_post_storm_is_not_treated_as_active_storm() -> None:
     )
     result = parse_current_conditions(html)
     assert result[11816].condition == "cloudy"
+
+
+def test_changed_layout_raises_instead_of_returning_nothing(caplog) -> None:
+    """A real-sized page with no recognisable rows means the markup changed.
+
+    Raising lets the coordinator keep the last good conditions and report the
+    outage itself; an empty success would wipe them, and logging from here
+    would repeat on every poll for as long as the layout stayed changed.
+    """
+    html = "<html><body><table><tbody>" + "<tr><td>x</td></tr>" * 100
+    html += "</tbody></table></body></html>"
+
+    with (
+        caplog.at_level(logging.DEBUG),
+        pytest.raises(ShmuDataError, match="zero stations"),
+    ):
+        parse_current_conditions(html)
+    assert not caplog.records
+
+
+def test_trivially_small_page_is_not_a_layout_change() -> None:
+    assert parse_current_conditions("<tbody></tbody>") == {}
