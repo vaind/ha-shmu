@@ -342,8 +342,10 @@ class ShmuClient:
 
         Walks day folders newest-first and returns the first that actually
         contains a matching snapshot. SHMÚ creates the new ``YYYYMMDD/`` folder
-        around 00:00 UTC slightly before the day's first 5-minute file lands;
-        without this fallback that gap would raise ``ShmuDataError`` once a day.
+        at local midnight (Slovak wall time, so 22:00 or 23:00 UTC; the file
+        names are local time too) slightly before the day's first 5-minute
+        file lands; without this fallback that gap would raise
+        ``ShmuDataError`` once a day.
 
         Shared by the observation and rain-gauge feeds, which have the same
         ``YYYYMMDD/`` layout and 5-minute cadence.
