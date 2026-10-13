@@ -164,18 +164,20 @@ class ShmuWeather(ShmuStationEntity, WeatherEntity):
 
     @property
     def extra_state_attributes(self) -> dict[str, str | None]:
-        """Provenance, so unexpected readings are debuggable from the UI."""
+        """Which station, which source decided the condition, and when.
+
+        The upstream file path and the full condition resolution are left to
+        diagnostics: they are debugging detail, not something a dashboard
+        reads, and the attributes are a stable surface.
+        """
         obs = self.observation
-        condition, source = self.coordinator.data.resolve_condition(self._station, obs)
-        snapshot = self.coordinator.data.observations
+        _, source = self.coordinator.data.resolve_condition(self._station, obs)
         return {
             "station_id": str(self._station.ind_kli),
             "condition_source": source,
-            "raw_condition": condition,
             "observation_time": (
                 obs.measured_at.isoformat() if obs is not None else None
             ),
-            "data_source": snapshot.source,
         }
 
     @property

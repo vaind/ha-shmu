@@ -62,7 +62,7 @@ Both are intentional trade-offs for a self-contained HACS release. The scraping 
 A release is a version bump PR followed by a tag; `.github/workflows/release.yml` does the rest.
 
 1. In `CHANGELOG.md`, rename `## [Unreleased]` to `## [x.y.z] - YYYY-MM-DD` and add the `[x.y.z]: …/releases/tag/vx.y.z` link at the bottom.
-2. Set the same `version` in `custom_components/shmu/manifest.json`.
+2. Set the same `version` in `custom_components/shmu/manifest.json` and as `__version__` in `custom_components/shmu/shmu_opendata/__init__.py` (the vendored library ships with the integration, so it carries the same number; `tests/test_version.py` fails if they differ).
 3. Merge, then tag the merge commit `vx.y.z` and push the tag.
 
 The workflow refuses a tag that disagrees with the manifest version (HACS resolves releases by tag) or that has no matching changelog section, and publishes that section verbatim as the release notes.

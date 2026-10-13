@@ -96,6 +96,26 @@ async def test_weather_supports_forecast_features(
     assert feats & WeatherEntityFeature.FORECAST_DAILY
 
 
+async def test_weather_attributes_are_the_stable_provenance_set(
+    hass: HomeAssistant, setup_entry: MockConfigEntry
+) -> None:
+    """Only provenance a user can act on is an attribute; file paths are not.
+
+    ``data_source`` (an upstream path that changes every poll) and
+    ``raw_condition`` (the entity's own ``condition`` minus the night-time
+    sunny→clear-night mapping) were debugging aids. Diagnostics carries the
+    observation path and the full condition resolution instead.
+    """
+    state = hass.states.get("weather.hurbanovo")
+    assert state is not None
+    attrs = state.attributes
+    assert attrs["station_id"] == "11858"
+    assert attrs["condition_source"] is not None
+    assert "observation_time" in attrs
+    assert "data_source" not in attrs
+    assert "raw_condition" not in attrs
+
+
 async def test_current_pressure_is_reduced_to_sea_level(
     hass: HomeAssistant, setup_entry: MockConfigEntry
 ) -> None:

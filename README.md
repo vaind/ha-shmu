@@ -91,6 +91,9 @@ Entities (grouped under the station device; `<device>` is the device name you ch
 | `image.<device>_radar_map_loop` | The same ~1-hour loop, for a map card. It carries no timestamp and no step markers: a map overlay is drawn in ground coordinates, so anything baked into a corner of the picture would sit in the terrain and stretch with the zoom. The entity's state is the newest frame's time. |
 | `image.<device>_radar_map_frame` | The scrubbed frame, for a map card — driven by the same slider as `radar_frame`. |
 
+The scrubber and the two frames it drives (`radar_frame_selector`, `radar_frame`, `radar_map_frame`) are **provisional**: they are likely to be replaced by frame-by-frame playback in the map plugin itself ([#52](https://github.com/vaind/ha-shmu/issues/52)).
+The other radar entities are not affected.
+
 ### Example dashboard card
 
 A plain Lovelace card — no custom frontend resources — pairing the scrubbable frame with its slider:
@@ -140,6 +143,7 @@ To pin the view somewhere other than home, use `x` and `y` instead: `x` is the *
 
 Plugin options: `entity` (required) is any of the three map entities, `opacity` defaults to `0.6`, and `attribution` overrides the SHMÚ credit shown in the map's corner.
 Point `entity` at `image.<device>_radar_map_frame` and add the scrubber card to the same view to step through the last hour on the map.
+That pairing is provisional, like the scrubber itself — see the note under the radar entities.
 
 On a wall dashboard, mind the bandwidth: the animated map loop is ~330 KB and the browser re-fetches it every 5 minutes while the card is open, so prefer the still `image.<device>_radar_map` (~30 KB) where that matters.
 
