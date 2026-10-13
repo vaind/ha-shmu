@@ -158,15 +158,26 @@ async def test_get_warnings(session, fixture) -> None:
         assert snap.source == f"{WARN}/20260517/0353"
 
 
-async def test_empty_warnings_tree_means_no_warnings(session) -> None:
+async def test_empty_warnings_tree_means_no_warnings(session, fixture) -> None:
     # Live 2026-10-13: with nothing in force, SHMÚ prunes old day folders and
-    # publishes no empty issuance, so the CAP root lists nothing at all.
+    # publishes no empty issuance, so the CAP root lists nothing at all. The
+    # fixture is that real Apache page, sort and parent links included.
     with aioresponses() as m:
-        m.get(f"{BASE}{WARN}/", body=_listing())
+        m.get(f"{BASE}{WARN}/", body=fixture("cap_empty_listing.html"))
 
         snap = await ShmuClient(session).async_get_warnings()
         assert snap.warnings == []
         assert snap.source == WARN
+
+
+async def test_warnings_root_without_day_folders_is_an_error(session) -> None:
+    # Entries that are not day folders mean the layout changed, not that the
+    # weather is calm; reporting "no warnings" would hide active ones.
+    with aioresponses() as m:
+        m.get(f"{BASE}{WARN}/", body=_listing("2026-10-13/", "latest.xml"))
+
+        with pytest.raises(ShmuDataError):
+            await ShmuClient(session).async_get_warnings()
 
 
 async def test_get_web_conditions(session, fixture) -> None:

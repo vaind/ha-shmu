@@ -185,7 +185,7 @@ don't occur.
   # and ~all of yesterday's still-valid alerts. Compare identifier sets across
   # the last two issuance folders (expect them ~equal, not disjoint).
   ```
-  **An empty `cap/` root is a valid state, not an outage.** Verified live 2026-10-13: the folder listed no day folders at all (its `Last-Modified` was 2026-10-11 02:00) while SHMÚ's warnings page showed level 0 in every region. So once the last alert expires, old day folders get pruned and no empty issuance replaces them. `async_get_warnings` returns an empty snapshot in that case. It used to raise instead, and the coordinator logged "warnings unavailable" every poll for as long as the calm lasted.
+  **An empty `cap/` root is a valid state, not an outage.** Verified live 2026-10-13: the folder listed no day folders at all (its `Last-Modified` was 2026-10-11 02:00) while SHMÚ's warnings page showed level 0 in every region. So once the last alert expires, old day folders get pruned and no empty issuance replaces them. `async_get_warnings` returns an empty snapshot only for a listing with no entries at all; entries that are not `YYYYMMDD/` folders still raise, since they mean the layout changed rather than that the weather is calm. It used to raise instead, and the coordinator logged "warnings unavailable" every poll for as long as the calm lasted.
 - **Radar** (`weather/radar/composite/skcomp/<product>/YYYYMMDD/`): national
   composite, **ODIM_H5 2.1** (HDF5), a new file every 5 min, ~32 days kept.
   **Verified live 2026-05-17** across all four products (issue #6). Products:

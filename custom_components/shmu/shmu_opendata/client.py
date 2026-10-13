@@ -445,13 +445,20 @@ class ShmuClient:
         **An empty CAP root means "nothing in force"** (verified 2026-10-13,
         when SHMÚ's warnings page showed level 0 in every region): once the
         last alert expires, old day folders are pruned and no empty issuance
-        replaces them. That is a valid answer, not a fetch failure.
+        replaces them. That is a valid answer, not a fetch failure. Only a
+        listing with no entries at all qualifies: entries that are not day
+        folders mean the layout changed, and still raise.
         """
-        days = [e for e in await self._list(WARNINGS_PATH) if _DAY_DIR_RE.match(e)]
-        if not days:
-            _LOGGER.debug("No CAP day folders in %s; no warnings", WARNINGS_PATH)
+        entries = await self._list(WARNINGS_PATH)
+        if not entries:
+            _LOGGER.debug("CAP root %s is empty; no warnings", WARNINGS_PATH)
             return WarningsSnapshot(
                 warnings=[], source=WARNINGS_PATH, fetched_at=datetime.now(UTC)
+            )
+        days = [e for e in entries if _DAY_DIR_RE.match(e)]
+        if not days:
+            raise ShmuDataError(
+                f"No day folders among {len(entries)} entries in {WARNINGS_PATH}"
             )
         day = max(days)
         day_path = f"{WARNINGS_PATH}/{day.rstrip('/')}"
