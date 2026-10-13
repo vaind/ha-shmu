@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Changed
 
 - **Requires Home Assistant 2026.3 or newer** (was 2025.1). Home Assistant supports one Python version at a time, and 2026.3 is the first release on Python 3.14, which the integration is now developed and tested on. Older Home Assistant versions keep the release they have; HACS will not offer them this update.
+- **Removed three debugging attributes** ahead of 1.0, when the attribute surface becomes a commitment: `data_source` and `raw_condition` from the weather entity, and `source` from the `radar` and `radar_map` image entities. The two `source` values were SHMÚ file paths that change every poll, and `raw_condition` repeated the entity's own condition. The same provenance — the observation and radar file paths, and the full condition resolution — is still in the integration's diagnostics download. A template that read `raw_condition` can use the entity's state instead; it differs only in showing *clear-night* rather than *sunny* after sunset.
 
 ### Fixed
 

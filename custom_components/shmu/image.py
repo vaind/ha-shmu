@@ -129,14 +129,17 @@ class ShmuRadarImage(_ShmuRadarImageBase):
 
     @property
     def extra_state_attributes(self) -> dict[str, str | float | None]:
-        """Provenance and the frame's geographic extent for map overlays."""
+        """The product and the frame's geographic extent for map overlays.
+
+        The upstream file path is in diagnostics, not here: it changes every
+        frame and nothing on a dashboard consumes it.
+        """
         radar = self.coordinator.data.radar
         if radar is None:
             return {}
         img = self._still(radar)
         return {
             "product": radar.product,
-            "source": radar.source,
             "max_dbz": img.max_dbz,
             **_geo_extent(img),
         }
