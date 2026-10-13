@@ -386,6 +386,10 @@ class ShmuDataUpdateCoordinator(DataUpdateCoordinator[ShmuData]):
         #: reading's upstream timestamp.
         self._last_observation: Observation | None = None
         self._last_observation_at: datetime | None = None
+        #: Source path of the newest observation snapshot we have actually
+        #: seen; tells a new snapshot from a cache hit, exactly as
+        #: ``_last_gauge_source`` does for the rain gauges.
+        self._last_observation_source: str | None = None
         #: Same carry-forward for the rain gauge. Updated only from a genuine
         #: gauge fetch (see ``_fetch``), never from a kept-previous snapshot —
         #: otherwise a total gauge-feed outage would refresh the acquisition
@@ -654,12 +658,24 @@ class ShmuDataUpdateCoordinator(DataUpdateCoordinator[ShmuData]):
 
         self._last_success_at = dt_util.utcnow()
         self._failures_since_success = 0
-        self._record_publish_lag(data.observations)
-        obs = data.observations.observations.get(self.station.ind_kli)
-        if obs is not None:
-            self._last_observation = obs
-            self._last_observation_at = self._last_success_at
-        self._log_station_presence(data)
+        # Only a *new* snapshot carries a new reading. When the newest file is
+        # unchanged the client hands back the previous object, and counting
+        # that as an acquisition would renew the station's last reading on
+        # every poll — so a feed that stopped publishing while its directory
+        # listing kept answering would never go unavailable. Same rule as the
+        # rain gauges (see ``_last_gauge_source``).
+        if data.observations.source != self._last_observation_source:
+            self._last_observation_source = data.observations.source
+            # A cache hit's Last-Modified is the lag already sampled when the
+            # file was new; re-feeding it every poll of a stall would flush the
+            # deque down to that one value and could shrink the offset below a
+            # genuinely observed worse lag.
+            self._record_publish_lag(data.observations)
+            obs = data.observations.observations.get(self.station.ind_kli)
+            if obs is not None:
+                self._last_observation = obs
+                self._last_observation_at = self._last_success_at
+            self._log_station_presence(data)
         return data
 
     async def _async_refresh(self, *args: object, **kwargs: object) -> None:
