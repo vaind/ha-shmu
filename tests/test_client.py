@@ -11,6 +11,7 @@ between polls is re-registered after ``clear_requests()``.
 from __future__ import annotations
 
 import asyncio
+import threading
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 
@@ -26,6 +27,7 @@ from custom_components.shmu.shmu_opendata import (
     ShmuConnectionError,
     ShmuDataError,
 )
+from custom_components.shmu.shmu_opendata import client as client_module
 from custom_components.shmu.shmu_opendata.client import _frame_label
 
 BASE = "https://opendata.shmu.sk"
@@ -233,6 +235,32 @@ async def test_get_forecast_discovers_and_decodes(http, session, fixture) -> Non
     assert len(snap.steps) == 3
     assert snap.steps[0].time.isoformat() == "2026-05-17T12:00:00+00:00"
     assert snap.steps[1].condition == "rainy"
+
+
+async def test_get_forecast_decodes_off_the_event_loop(
+    http, session, fixture, monkeypatch
+) -> None:
+    """The GRIB2 decode is pure-Python CPU work over a whole run (~67 files of
+    36 messages live); run inline it would freeze Home Assistant for seconds
+    on every new model run and at every startup."""
+    decode_threads: list[threading.Thread] = []
+    real_parse = client_module.parse_forecast
+
+    def recording_parse(*args, **kwargs):
+        decode_threads.append(threading.current_thread())
+        return real_parse(*args, **kwargs)
+
+    monkeypatch.setattr(client_module, "parse_forecast", recording_parse)
+    http.get(f"{BASE}{FCAST}/", text=_listing("20260517/"))
+    http.get(f"{BASE}{FCAST}/20260517/", text=_listing("1200/"))
+    _register_run(http, fixture, "20260517", "1200", [0, 1, 2])
+
+    client = ShmuClient(session)
+    snap = await client.async_get_forecast(48.1717, 17.2, forecast_hours=(0, 1, 2))
+
+    assert len(snap.steps) == 3
+    assert decode_threads, "parse_forecast was not called"
+    assert threading.current_thread() not in decode_threads
 
 
 async def test_get_forecast_skips_incomplete_newest_run(http, session, fixture) -> None:

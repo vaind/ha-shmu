@@ -17,13 +17,12 @@ module only provides the qualitative sky/weather condition.
 
 from __future__ import annotations
 
-import logging
 import re
 import unicodedata
 from dataclasses import dataclass
 from html import unescape
 
-_LOGGER = logging.getLogger(__name__)
+from .exceptions import ShmuDataError
 
 # Home Assistant weather condition strings.
 SUNNY = "sunny"
@@ -49,6 +48,10 @@ _WEATHER_CELL_RE = re.compile(
     r'headers="h_pocasie"[^>]*>(.*?)</td>', re.IGNORECASE | re.DOTALL
 )
 _TAG_RE = re.compile(r"<[^>]+>")
+
+#: Below this size an empty parse is plausibly an empty page, not a markup
+#: change; the live page is ~90 KB.
+_MIN_NONTRIVIAL_PAGE_CHARS = 1000
 
 
 @dataclass(frozen=True, slots=True)
@@ -139,6 +142,9 @@ def parse_current_conditions(html: str) -> dict[int, WebCondition]:
 
     Present weather takes precedence over cloud amount; if neither yields an
     active condition the station's ``condition`` is ``None`` (unknown).
+
+    Raises :class:`ShmuDataError` when a non-trivial page yields no stations,
+    since that means the markup changed rather than that SHMÚ has no data.
     """
     body = html.split("<tbody>", 1)
     rows_html = body[1].split("</tbody>", 1)[0] if len(body) > 1 else html
@@ -161,12 +167,12 @@ def parse_current_conditions(html: str) -> dict[int, WebCondition]:
             condition=weather_condition or cloud_condition,
         )
     # The <tbody> split and cell regexes are inherently markup-coupled. If a
-    # non-trivial page yields nothing, SHMÚ likely changed the layout — surface
-    # it instead of silently returning an empty mapping.
-    if not result and len(html) > 1000:
-        _LOGGER.warning(
-            "SHMÚ current-weather page parsed to zero stations (%d bytes); "
-            "the page layout may have changed",
-            len(html),
+    # non-trivial page yields nothing, SHMÚ likely changed the layout. Raise
+    # rather than return an empty success, which would erase the caller's last
+    # good conditions; reporting the outage is the caller's job, not a library's.
+    if not result and len(html) > _MIN_NONTRIVIAL_PAGE_CHARS:
+        raise ShmuDataError(
+            f"SHMÚ current-weather page parsed to zero stations ({len(html)} "
+            "characters); the page layout may have changed"
         )
     return result
