@@ -306,7 +306,11 @@ def _radar_data(valid_at: datetime, echo: LocalEcho | None) -> ShmuData:
     station = get_station(11858)
     assert station is not None
     image, map_image, _ = _render_frame(
-        payload, station.latitude, station.longitude, "label"
+        payload,
+        station.latitude,
+        station.longitude,
+        "label",
+        (station.latitude, station.longitude),
     )
     frame = RadarFrame(
         image=image, map_image=map_image, source="t", valid_at=valid_at, echo=echo

@@ -103,6 +103,7 @@ class _FakeClient:
         #: tests can assert the measurement location reaches the client.
         self.forecast_coords: tuple[float, float] | None = None
         self.radar_coords: tuple[float, float] | None = None
+        self.radar_echo_at: tuple[float, float] | None = None
         #: ``(valid_at, echo)`` for the newest radar frame, overriding the
         #: fixture's 2026-05-17 frame, so a test can present a current echo.
         self.radar_newest: tuple[datetime, LocalEcho | None] | None = None
@@ -204,9 +205,17 @@ class _FakeClient:
         )
 
     async def async_get_radar(
-        self, latitude, longitude, *, product="zmax", previous=None, tz=None
+        self,
+        latitude,
+        longitude,
+        *,
+        product="zmax",
+        previous=None,
+        tz=None,
+        echo_at=None,
     ) -> RadarSnapshot:
         self.radar_coords = (latitude, longitude)
+        self.radar_echo_at = echo_at
         frames = []
         for m in ("10", "15", "20"):
             valid_at = datetime(2026, 5, 17, 20, int(m), tzinfo=UTC)
@@ -217,6 +226,7 @@ class _FakeClient:
                 latitude,
                 longitude,
                 _frame_label(valid_at, tz),
+                echo_at or (latitude, longitude),
             )
             frames.append(
                 RadarFrame(
@@ -683,6 +693,11 @@ async def test_location_mode_home(
         18.92,
     )
     assert client.forecast_coords == (49.05, 18.92)
+    # The radar crop follows the location, but the condition's echo is taken
+    # at the station, where its present weather and temperature are measured.
+    assert client.radar_coords == (49.05, 18.92)
+    station = get_station(11858)
+    assert client.radar_echo_at == (station.latitude, station.longitude)
 
 
 async def test_location_mode_custom(

@@ -92,7 +92,7 @@ Where a verified fact is cheap to assert, pin it in `tests_e2e/` too, so the dai
   Some of it may be drizzle the radar cannot see, but the gauges are dry too, and much of it comes at moderate humidity.
   Their code **0 is sound**: an echo ≥ 20 dBZ was present at under 2 % of their code-0 snapshots, the same as elsewhere, so it still vetoes the model's rain.
   So `explain_condition(trust_precipitation_codes=False)` drops a code that maps to precipitation as if none had been reported, and the station's own gauge and ALADIN decide; the raw code is still published by the `weather_code` sensor, and diagnostics show the dropped code as `derived_condition.ignored_weather_code`.
-  A radar-dry veto would be the more general fix, but the radar is not in the ladder yet and would rank below `stav_poc` anyway.
+  With their precipitation codes dropped, the radar rung decides whether it precipitates there, with the station's own gauge.
   Re-measure before adding or removing a station; `tests_e2e` fails only if a flagged station stops reporting `stav_poc` at all, since over-reporting cannot be seen in one snapshot.
 
 ### Condition and stations
@@ -106,7 +106,10 @@ Where a verified fact is cheap to assert, pin it in `tests_e2e/` too, so the dai
   For a station without its own code, a radar rung plus a radar-dry veto of the model takes the ladder from HSS 0.35 to 0.58 (CSI 0.23 → 0.43, false-alarm ratio 0.65 → 0.39); when the model says rain over a radar-dry pixel the station is precipitating 5–7 % of the time, against 30 % without the check.
   So the radar rung (`_P_RADAR`, 75) sits below the station's own `stav_poc` (78) and above the website cloud (60): the station observes the *type* at its own point, the radar only reflectivity overhead, so a quiet station also drops an echo.
   An echo is typed rain/sleet/snow by temperature (`forecast.precipitation_kind`) and never as heavy rain or thunder: no `stav_poc` 90–99 occurred in the month, so thunder could not be scored.
-  The echo is sampled at the measurement location (the radar's crop centre, where the forecast step is read too) by `radar.local_echo`, and enters only while its frame is within `RADAR_ECHO_STALE_AFTER` (15 min); a frame reaches the listing ~6 min after its nominal time, and `tests_e2e` pins both coverage and that lag.
+  The echo is sampled **at the station** (`echo_at` in `async_get_radar`), not at the measurement location the radar picture is centred on: the study validated it at station pixels, and the ladder pairs it with the station's own present weather and temperature.
+  A "quiet" station, which drops an echo as it vetoes the model, means `stav_poc` 0–3 with a gauge reading of zero; reserved codes, 20–29 (the preceding hour) and a code 0 without a gauge reading say nothing about now.
+  When the echo confirms a model forecast of *pouring* or *lightning-rainy* and the temperature says rain, the model's severity is kept rather than downgraded to *rainy*.
+  **Publication lag measured 2026-10-15** over the whole archive (9 079 frames): a frame reaches the listing 5–8 min after its nominal time (median 6, listing has 1-min resolution), so the newest frame is at most ~14 min old when read; `RADAR_ECHO_STALE_AFTER` (20 min) adds one poll so a single failed radar fetch does not flap the condition, and `tests_e2e` pins coverage and a newest frame ≤ 15 min old.
   No station pixel was ever `nodata` in the month, but `local_echo` still returns `None` for no coverage, which means neither rain nor a veto.
   **Re-check in winter**: snow reflects less, so 20 dBZ may miss light snow (the study suggests 15 dBZ at T ≤ 1 °C); score thunder against codes 90–99 next summer.
 - **Neighbours' radiation, visibility and present weather are not borrowed** (same study, `BORROW_RULES` keeps sea-level pressure only).
@@ -114,8 +117,6 @@ Where a verified fact is cheap to assert, pin it in `tests_e2e/` too, so the dai
   A neighbour 10–20 km away reports fog in 5 % of the target's fog hours, and 95 % of its fog is not fog at the target.
   A neighbour's `stav_poc` beats ALADIN only within 20 km (HSS 0.36 vs 0.25), adds next to nothing on top of the station's own gauge, and its "no significant weather" is no veto (16 % of such hours still precipitating); the radar subsumes it.
   Snow depth awaits a winter measurement.
-- **Five present-weather sensors over-report precipitation** (11898 Banská Bystrica, 11949 Spišské Vlachy, 11893 Žabokreky, 11857 Turzovka, 11878 Liptovský Mikuláš; measured 2026-10-15): codes 40/51/52 in 28–47 % of hours every day, with a radar echo in 5–10 %, against 1–9 % reported elsewhere.
-  Their own `stav_poc` (78) outranks the radar rung, so this change does not correct them; that is a separate decision.
 - **The website table is an hourly product, and a held scrape expires after one hour.**
   **Verified live 2026-10-13** by polling `WEBSITE_URL` every 2 minutes from 08:40 to 09:40 UTC: the table's `<caption>` reads `Aktuálny stav počasia - DD.MM.YYYY - HH:00 LSEČ` (*LSEČ* = local summer time, so `10:00 LSEČ` is 08:00 UTC), it stayed on `10:00 LSEČ` until 09:00:31 UTC and showed `11:00 LSEČ` from 09:02:31 UTC on.
   So one report per hour, published about two minutes past it, and at any moment the page is up to ~1 h behind; the HTTP `Last-Modified` is just the CDN render time (`cache-control: max-age=60`), not the report time.

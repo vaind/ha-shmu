@@ -165,10 +165,10 @@ class RadarFrame:
     frame's nominal UTC time parsed from the filename; frames are ordered by
     it (oldest→newest).
 
-    ``echo`` is the strongest echo within ~1 km of the point the frame was
-    centred on (see :func:`~shmu_opendata.radar.local_echo`), taken from the
-    same decode — the "is it precipitating here" observation the condition
-    ladder uses. ``None`` when the radar does not cover that point.
+    ``echo`` is the strongest echo within ~1 km of the ``echo_at`` point the
+    frame was fetched for (see :func:`~shmu_opendata.radar.local_echo`), taken
+    from the same decode — the "is it precipitating there" observation the
+    condition ladder uses. ``None`` when the radar does not cover that point.
     """
 
     image: RadarImage
@@ -230,9 +230,16 @@ def _frame_label(valid_at: datetime, tz: str | None) -> str:
 
 
 def _render_frame(
-    payload: bytes, latitude: float, longitude: float, label: str
+    payload: bytes,
+    latitude: float,
+    longitude: float,
+    label: str,
+    echo_at: tuple[float, float],
 ) -> tuple[RadarImage, RadarImage, LocalEcho | None]:
     """Decode one composite once: render both pictures, sample the local echo.
+
+    The pictures are centred on ``(latitude, longitude)``; the echo is taken
+    at ``echo_at`` (latitude, longitude), which may be a different point.
 
     Pure CPU and the heaviest step of a radar poll (the native-resolution map
     render dominates), so :meth:`ShmuClient.async_get_radar` runs it in a
@@ -244,7 +251,7 @@ def _render_frame(
             composite, latitude, longitude, style=STATION_VIEW, label=label
         ),
         render_composite(composite, latitude, longitude, style=MAP_OVERLAY),
-        local_echo(composite, latitude, longitude),
+        local_echo(composite, *echo_at),
     )
 
 
@@ -697,6 +704,7 @@ class ShmuClient:
         product: str = DEFAULT_RADAR_PRODUCT,
         previous: RadarSnapshot | None = None,
         tz: str | None = None,
+        echo_at: tuple[float, float] | None = None,
     ) -> RadarSnapshot:
         """Fetch the recent ODIM composites as a short loop.
 
@@ -722,7 +730,14 @@ class ShmuClient:
         baked in at render time and the frame is then immutable, so changing
         ``tz`` only affects frames rendered afterwards — the buffer rolls
         over within :data:`RADAR_LOOP_FRAMES` polls anyway.
+
+        ``echo_at`` is the (latitude, longitude) whose local echo each frame
+        records (:attr:`RadarFrame.echo`), defaulting to the crop centre. Like
+        the crop, it is fixed for one config entry, so a reused frame's echo
+        is still the one wanted.
         """
+        if echo_at is None:
+            echo_at = (latitude, longitude)
         wanted = await self._recent_radar_files(product, RADAR_LOOP_FRAMES)
         cached = {f.source: f for f in previous.frames} if previous else {}
 
@@ -742,6 +757,7 @@ class ShmuClient:
                 latitude,
                 longitude,
                 _frame_label(valid_at, tz),
+                echo_at,
             )
             frames.append(
                 RadarFrame(

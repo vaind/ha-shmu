@@ -374,17 +374,80 @@ def test_an_echo_falls_back_to_the_model_temperature() -> None:
     assert condition == "snowy"
 
 
-def test_a_strong_echo_is_never_heavy_rain_or_thunder() -> None:
-    """The radar alone does not support severity (no thunder in the data)."""
+def test_the_radar_alone_never_makes_heavy_rain_or_thunder() -> None:
+    """dBZ is not mapped to severity: there was no thunder to validate it on."""
+    condition, _ = resolve_condition(
+        web=None,
+        weather_code=None,
+        precipitation=None,
+        forecast_step=_step("cloudy", cloud=90.0),
+        radar_echo=LocalEcho(max_dbz=55.0),
+        temperature=20.0,
+    )
+    assert condition == "rainy"
+
+
+@pytest.mark.parametrize("severe", ["lightning-rainy", "pouring"])
+def test_a_confirming_echo_keeps_the_model_s_severity(severe) -> None:
+    """The echo backs the model's storm rather than downgrading it to rain."""
+    res = explain_condition(
+        web=None,
+        weather_code=None,
+        precipitation=None,
+        forecast_step=_step(severe, cloud=95.0),
+        radar_echo=_WET,
+        temperature=18.0,
+    )
+    assert (res.condition, res.source) == (severe, "radar")
+    assert res.candidates[0].tier == "radar echo (model severity)"
+
+
+def test_a_cold_echo_is_snow_even_under_a_modelled_storm() -> None:
     condition, _ = resolve_condition(
         web=None,
         weather_code=None,
         precipitation=None,
         forecast_step=_step("lightning-rainy"),
-        radar_echo=LocalEcho(max_dbz=55.0),
-        temperature=20.0,
+        radar_echo=_WET,
+        temperature=-2.0,
     )
-    assert condition == "rainy"
+    assert condition == "snowy"
+
+
+@pytest.mark.parametrize(
+    ("weather_code", "precipitation"),
+    [
+        (0, None),  # "no significant weather", but no gauge reading to confirm dry
+        (25, 0.0),  # wawa 20-29: weather of the *preceding* hour, not now
+        (7, 0.0),  # reserved code
+    ],
+)
+def test_only_a_confirmed_quiet_station_drops_an_echo(
+    weather_code, precipitation
+) -> None:
+    res = explain_condition(
+        web=None,
+        weather_code=weather_code,
+        precipitation=precipitation,
+        forecast_step=_step("rainy", cloud=90.0),
+        radar_echo=_WET,
+        temperature=9.0,
+    )
+    assert (res.condition, res.source) == ("rainy", "radar")
+    assert res.suppressed_by is None
+
+
+def test_an_echo_outranks_squalls() -> None:
+    """Squalls (wawa 18) rank below the radar: precipitation is the news."""
+    condition, source = resolve_condition(
+        web=None,
+        weather_code=18,
+        precipitation=0.0,
+        forecast_step=None,
+        radar_echo=_WET,
+        temperature=9.0,
+    )
+    assert (condition, source) == ("rainy", "radar")
 
 
 def test_untrusted_precipitation_code_leaves_the_condition_to_the_model() -> None:

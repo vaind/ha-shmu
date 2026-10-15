@@ -304,10 +304,9 @@ class ShmuData:
         )
 
     def current_radar_echo(self, now: datetime) -> LocalEcho | None:
-        """The echo near the location in a current radar frame, or ``None``.
+        """The echo near the station in a current radar frame, or ``None``.
 
-        Taken at the point the radar is centred on — the measurement location,
-        where the forecast step is read too — from the newest frame, and only
+        Taken at the station (see ``_fetch``), from the newest frame, and only
         while that frame is within :data:`RADAR_ECHO_STALE_AFTER` of ``now``:
         a held frame from a radar that stopped updating must not veto or
         assert precipitation. ``None`` also when the frame does not cover the
@@ -862,6 +861,10 @@ class ShmuDataUpdateCoordinator(DataUpdateCoordinator[ShmuData]):
             self.location_longitude,
             previous=previous.radar if previous else None,
             tz=self.hass.config.time_zone,
+            # The ladder pairs the echo with the station's own present
+            # weather and temperature, and it was validated at station
+            # pixels, so it is sampled there, not at the measurement location.
+            echo_at=(self.station.latitude, self.station.longitude),
         )
         # A second, ~3x denser observation network (~70 KB vs the 392 KB
         # observation snapshot), on the same 5-minute grid and with the same

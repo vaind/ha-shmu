@@ -46,9 +46,10 @@ The design choices encoded here:
   (90 > 88, 80 > 78).
 * **An observation of "nothing happening" vetoes a modeled storm.** When a
   station reports a present-weather code that means no significant weather
-  (``stav_poc`` 0, and dry), the model's *active* (rain/thunder) candidate is
-  dropped in favour of its cloud-only *sky* state — the model alone must not
-  paint a convective cell as rain/thunder over a station observing itself dry.
+  (``stav_poc`` 0-3, and a gauge reading of zero), the model's *active*
+  (rain/thunder) candidate is dropped in favour of its cloud-only *sky* state
+  — the model alone must not paint a convective cell as rain/thunder over a
+  station observing itself dry.
 * **A sensor known to invent precipitation is not believed about it.** For a
   station whose present-weather sensor reports precipitation far more often
   than it falls (``Station.untrusted_precipitation_codes``), the caller passes
@@ -59,11 +60,12 @@ The design choices encoded here:
   The same quiet station also drops a radar echo: it observes the type of
   weather at its own point, the radar only reflectivity overhead.
 * **The radar says *that* it precipitates, not *what*.** An echo of at least
-  :data:`RADAR_PRECIPITATION_DBZ` within ~1 km of the location ranks just
+  :data:`RADAR_PRECIPITATION_DBZ` within ~1 km of the station ranks just
   below the station's own code, typed rain/sleet/snow by temperature
-  (:func:`~shmu_opendata.forecast.precipitation_kind`) and never as heavy rain
-  or thunder. A covered pixel without such an echo is a second veto of the
-  model's precipitation. **Measured 2026-10-15** over a month against 29
+  (:func:`~shmu_opendata.forecast.precipitation_kind`). It never makes heavy
+  rain or thunder on its own, but keeps the model's when it confirms one. A
+  covered pixel without such an echo is a second veto of the model's
+  precipitation. **Measured 2026-10-15** over a month against 29
   stations' own codes: the echo rung lifts the ladder's skill for a station
   without a code from HSS 0.35 to 0.58, and when the model says rain over a
   radar-dry pixel the station is precipitating 5-7% of the time, against 30%
@@ -80,7 +82,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .conditions import condition_from_weather_code
-from .forecast import ForecastStep, precipitation_kind, sky_from_cloud
+from .forecast import RAINY, ForecastStep, precipitation_kind, sky_from_cloud
 from .radar import LocalEcho
 from .website import WebCondition
 
@@ -91,6 +93,8 @@ _MODEL_ACTIVE = frozenset(
     {"rainy", "pouring", "snowy", "snowy-rainy", "lightning-rainy"}
 )
 _CLEAR = "sunny"
+#: Model conditions whose severity a confirming radar echo keeps.
+_MODEL_SEVERE_RAIN = frozenset({"pouring", "lightning-rainy"})
 #: What a precipitation ``stav_poc`` code maps to; an untrusted sensor's code
 #: is dropped when it lands here (see :func:`explain_condition`).
 _PRECIPITATION = _MODEL_ACTIVE | {"hail"}
@@ -99,6 +103,7 @@ _PRECIPITATION = _MODEL_ACTIVE | {"hail"}
 #: than by the condition string: 12 is *distant* lightning (a last-resort hint,
 #: not local weather) and 18 is squalls (wind), both of which map to condition
 #: strings that would otherwise be banded as severe/active.
+_WAWA_NOTHING_SIGNIFICANT = range(4)
 _WAWA_DISTANT_LIGHTNING = 12
 _WAWA_SQUALLS = 18
 
@@ -140,6 +145,7 @@ _TIER_AWS_ACTIVE = "stav_poc"
 _TIER_AWS_WINDY = "stav_poc (squalls)"
 _TIER_AWS_DISTANT = "stav_poc (distant lightning)"
 _TIER_RADAR = "radar echo"
+_TIER_RADAR_MODEL_SEVERITY = "radar echo (model severity)"
 _TIER_MODEL_ACTIVE = "model precipitation"
 _TIER_MODEL_SKY = "model cloud"
 _TIER_MODEL_CLEAR = "model cloud (clear)"
@@ -301,10 +307,19 @@ def explain_condition(
     aws = _stav_poc_candidate(weather_code, precipitation)
     if aws is not None:
         candidates.append(aws)
-    # A station that reported a present-weather code yielding no active weather
-    # (``stav_poc`` 0 "no significant weather", and dry) is affirmatively quiet
-    # now — trust that over a model forecast of precipitation/storm.
-    station_quiet = weather_code is not None and aws is None
+    # A station reporting "no significant weather" (``stav_poc`` 0-3) with a
+    # gauge that measured nothing is affirmatively quiet now — trust that over
+    # a model forecast of precipitation/storm, and over an echo overhead. Not
+    # any code that merely maps to no condition: reserved codes and 20-29
+    # (weather of the *preceding* hour) say nothing about now, and neither
+    # does a code 0 whose precipitation reading is missing.
+    station_quiet = (
+        aws is None
+        and weather_code is not None
+        and weather_code in _WAWA_NOTHING_SIGNIFICANT
+        and precipitation is not None
+        and precipitation <= 0
+    )
     radar_wet = (
         radar_echo is not None
         and radar_echo.max_dbz is not None
@@ -314,11 +329,20 @@ def explain_condition(
     if radar_wet and not station_quiet:
         if temperature is None and forecast_step is not None:
             temperature = forecast_step.temperature
-        candidates.append(
-            ConditionCandidate(
-                _P_RADAR, precipitation_kind(temperature), SOURCE_RADAR, _TIER_RADAR
-            )
-        )
+        kind = precipitation_kind(temperature)
+        tier = _TIER_RADAR
+        # The radar cannot tell a downpour or a thunderstorm from rain, but
+        # when the model forecasts one and the echo confirms precipitation,
+        # the observation backs the model rather than overruling it: keep
+        # the model's severity (the type still comes from the temperature).
+        if (
+            kind == RAINY
+            and forecast_step is not None
+            and forecast_step.condition in _MODEL_SEVERE_RAIN
+        ):
+            kind = forecast_step.condition
+            tier = _TIER_RADAR_MODEL_SEVERITY
+        candidates.append(ConditionCandidate(_P_RADAR, kind, SOURCE_RADAR, tier))
     veto = SOURCE_STAV_POC if station_quiet else SOURCE_RADAR if radar_dry else None
     model = _model_candidate(forecast_step, suppress_active=veto is not None)
     if model is not None:

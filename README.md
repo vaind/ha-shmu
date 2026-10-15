@@ -86,7 +86,8 @@ A sensor for a quantity the chosen station does not measure is *unavailable*, wh
   The sensor's `source_name` and `source_distance_km` attributes name the station the value came from (0 km for the chosen station's own); with no such station in range it is *unavailable*.
   The raw **Pressure** sensor always reports only the chosen station's own reading.
 - **The weather condition** at a station that reports no present weather comes from the radar and the ALADIN model.
-  A radar echo of 20 dBZ or more within about 1 km of your measurement location means it is precipitating, as rain, sleet or snow depending on the temperature; no echo there overrules the model when it forecasts rain.
+  A radar echo of 20 dBZ or more within about 1 km of the station means it is precipitating, as rain, sleet or snow depending on the temperature; no echo there overrules the model when it forecasts rain.
+  The radar alone never reports a downpour or a thunderstorm, but it keeps one the model forecasts when it confirms precipitation.
   The sky state (clear, partly cloudy, cloudy) comes from the model's current-hour cloud cover, since the SHMÚ website's cloud observations rarely cover these stations either.
   A station's own present-weather report, where it has one, always takes precedence.
   The weather entity's `condition_source` attribute shows which source won (`website`, `stav_poc`, `radar` or `aladin`).
