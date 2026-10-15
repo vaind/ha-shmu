@@ -114,10 +114,10 @@ async def test_precipitation_rate_drops_float_noise(
     assert hass.states.get(_PRECIPITATION).state == "12.0"
 
 
-async def test_missing_precipitation_stays_unknown(
+async def test_missing_precipitation_is_unavailable(
     hass: HomeAssistant, entry: MockConfigEntry, load: Callable[[str], bytes]
 ) -> None:
-    """A reading without ``zra_uhrn`` is unknown, not a rate of zero."""
+    """A reading without ``zra_uhrn`` is unavailable, not a rate of zero."""
     await _setup(hass, entry, load)
     coordinator = entry.runtime_data
     station = replace(coordinator.observation, precipitation=None)
@@ -140,8 +140,45 @@ async def test_missing_precipitation_stays_unknown(
         coordinator.async_update_listeners()
         await hass.async_block_till_done()
 
-        assert hass.states.get(_PRECIPITATION).state == "unknown"
-        assert hass.states.get(_GAUGE_PRECIPITATION).state == "unknown"
+        assert hass.states.get(_PRECIPITATION).state == "unavailable"
+        assert hass.states.get(_GAUGE_PRECIPITATION).state == "unavailable"
+        # The station's other readings are unaffected.
+        assert hass.states.get("sensor.hurbanovo_temperature").state == "12.1"
+
+
+async def test_quantity_the_station_does_not_report_is_unavailable(
+    hass: HomeAssistant, entry: MockConfigEntry, load: Callable[[str], bytes]
+) -> None:
+    """Hurbanovo's fresh reading carries no ``sneh_pokr``: that one sensor is
+    unavailable, not unknown, while the station's other readings update."""
+    await _setup(hass, entry, load)
+
+    assert hass.states.get("sensor.hurbanovo_snow_depth").state == "unavailable"
+    assert hass.states.get("sensor.hurbanovo_visibility").state == "24000.0"
+
+
+async def test_sea_level_pressure_unavailable_without_temperature(
+    hass: HomeAssistant, entry: MockConfigEntry, load: Callable[[str], bytes]
+) -> None:
+    """The reduction needs a real temperature; without one there is no value."""
+    await _setup(hass, entry, load)
+    coordinator = entry.runtime_data
+    station = replace(coordinator.observation, temperature=None)
+
+    with patch.object(
+        ShmuDataUpdateCoordinator,
+        "observation",
+        new_callable=PropertyMock,
+        return_value=station,
+    ):
+        coordinator.async_update_listeners()
+        await hass.async_block_till_done()
+
+        assert (
+            hass.states.get("sensor.hurbanovo_sea_level_pressure").state
+            == "unavailable"
+        )
+        assert hass.states.get("sensor.hurbanovo_pressure").state == "1001.2"
 
 
 async def test_wind_bearing_is_averaged_as_an_angle(
@@ -239,7 +276,7 @@ async def test_upper_air_sensors_report_the_current_step(
     assert t850.attributes["unit_of_measurement"] == "°C"
 
 
-async def test_upper_air_sensors_unknown_without_the_fields(
+async def test_upper_air_sensors_unavailable_without_the_fields(
     hass: HomeAssistant, entry: MockConfigEntry, load: Callable[[str], bytes]
 ) -> None:
     """A run whose files carry no pressure levels must not invent a value."""
@@ -247,25 +284,24 @@ async def test_upper_air_sensors_unknown_without_the_fields(
         hass, entry, load, freezing_level=None, temperature_850hpa=None
     )
 
-    # Unknown, but still *available*: the run is held, the quantity is not in it.
-    assert hass.states.get(_FREEZING_LEVEL).state == "unknown"
-    assert hass.states.get(_T850).state == "unknown"
+    # The run is held, but the quantity is not in it.
+    assert hass.states.get(_FREEZING_LEVEL).state == "unavailable"
+    assert hass.states.get(_T850).state == "unavailable"
 
 
-async def test_upper_air_sensors_unknown_when_no_step_covers_now(
+async def test_upper_air_sensors_unavailable_when_no_step_covers_now(
     hass: HomeAssistant, entry: MockConfigEntry, load: Callable[[str], bytes]
 ) -> None:
     """A held run too stale to reach the present contributes nothing.
 
     Observations can keep succeeding while the forecast fetch fails, so the
-    coordinator is healthy (the entities stay available) but its newest step is
-    hours away from now — the same case in which the condition ladder stops
-    consulting the model.
+    coordinator is healthy but its newest step is hours away from now — the
+    same case in which the condition ladder stops consulting the model.
     """
     await _setup_with_upper_air(hass, entry, load, offset=timedelta(days=2))
 
-    assert hass.states.get(_FREEZING_LEVEL).state == "unknown"
-    assert hass.states.get(_T850).state == "unknown"
+    assert hass.states.get(_FREEZING_LEVEL).state == "unavailable"
+    assert hass.states.get(_T850).state == "unavailable"
 
 
 def test_forecast_step_states_its_upper_air_fields() -> None:
