@@ -48,14 +48,17 @@ def test_nearest_gauge() -> None:
 
 
 def test_gauges_are_near_every_station() -> None:
-    """The point of adopting this feed: precipitation from closer by.
+    """No station is far from a gauge, so the gauge sensor always has one.
 
     Checked at the weather stations themselves — the worst case for the
     gauges, since a station sits exactly on top of its own network.
     """
-    closer = 0
-    for station in STATIONS:
-        gauge = nearest_gauge(station.latitude, station.longitude)
-        if gauge.distance_km(station.latitude, station.longitude) < 25.0:
-            closer += 1
-    assert closer == len(STATIONS)
+    far = [
+        station.name
+        for station in STATIONS
+        if nearest_gauge(station.latitude, station.longitude).distance_km(
+            station.latitude, station.longitude
+        )
+        >= 25.0
+    ]
+    assert far == []

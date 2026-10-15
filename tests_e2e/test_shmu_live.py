@@ -98,10 +98,12 @@ async def test_observations(client: ShmuClient) -> None:
     )
 
     # AGENTS.md: the catalogue holds every feed station with known coordinates,
-    # and only Oravice and Jakubovany lacked them. More unknown ids means SHMÚ
-    # added stations and stations.py needs regenerating.
+    # and only Oravice (11919) and Jakubovany (11963) lacked them. Any other id
+    # means SHMÚ added a station and stations.py needs regenerating.
     unknown = set(snap.observations) - {s.ind_kli for s in STATIONS}
-    assert len(unknown) <= 3, f"feed ids missing from stations.py: {sorted(unknown)}"
+    assert unknown <= {11919, 11963}, (
+        f"feed ids missing from stations.py: {sorted(unknown - {11919, 11963})}"
+    )
 
     # A station marked in_feed=False is hidden from new entries; if SHMÚ
     # publishes it again, flip the flag so it can be chosen once more.

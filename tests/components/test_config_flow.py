@@ -162,6 +162,10 @@ async def test_user_flow_lists_every_station_marking_synoptic(
     assert "11903" not in labels
     assert labels["11858"] == f"Hurbanovo {SYNOPTIC_MARK}"
     assert labels["11898"] == "Banská Bystrica"
+    # Accented names sort among their base letters, not after Z.
+    order = list(labels)
+    assert order.index("11866") < order.index("11841")  # Čadca < Dolný Hričov
+    assert order.index("11820") > order.index("11872")  # Žihárec > Štiavnička
 
 
 async def test_station_missing_from_the_feed_cannot_be_chosen(
@@ -170,10 +174,12 @@ async def test_station_missing_from_the_feed_cannot_be_chosen(
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": SOURCE_USER}
     )
-    with pytest.raises(InvalidData):
+    with pytest.raises(InvalidData) as err:
         await hass.config_entries.flow.async_configure(
             result["flow_id"], {CONF_IND_KLI: "11903"}
         )
+    # Rejected as a station choice, not for some other field.
+    assert err.value.path == [CONF_IND_KLI]
 
 
 async def test_automatic_station_creates_entry(hass: HomeAssistant) -> None:
