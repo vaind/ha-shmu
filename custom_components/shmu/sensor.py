@@ -27,7 +27,7 @@ from homeassistant.const import (
     UnitOfTemperature,
     UnitOfVolumetricFlux,
 )
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.typing import StateType
@@ -35,7 +35,7 @@ from homeassistant.util import dt as dt_util
 
 from .coordinator import ShmuConfigEntry, ShmuData
 from .entity import ShmuStationEntity
-from .shmu_opendata import ForecastStep, Observation, sea_level_pressure
+from .shmu_opendata import ForecastStep, Observation, SourcedReading
 
 #: All entities read a single shared coordinator snapshot; there is no
 #: per-entity device I/O to rate-limit, so updates need not be serialised.
@@ -287,10 +287,7 @@ async def async_setup_entry(
         ShmuTimestampSensor(coordinator, station, description)
         for description in TIMESTAMPS
     )
-    # Without a known elevation the reduction has nothing to work from, so the
-    # sensor would never hold a value (see ``shmu_opendata.stations``).
-    if station.elevation is not None:
-        entities.append(ShmuSeaLevelPressureSensor(coordinator, station))
+    entities.append(ShmuSeaLevelPressureSensor(coordinator, station))
     entities.append(ShmuRainGaugePrecipitationSensor(coordinator, station))
     entities.append(ShmuWarningLevelSensor(coordinator, station))
     async_add_entities(entities)
@@ -338,6 +335,13 @@ class ShmuSeaLevelPressureSensor(ShmuStationEntity, SensorEntity):
     reads far below 1013 hPa). This entity reduces it to sea level using the
     station elevation and its current temperature, matching the datum of the
     forecast pressure and of most other weather sources.
+
+    A station that cannot produce it — no barometer, or no known elevation —
+    shows a nearby station's value instead (see
+    :data:`shmu_opendata.BORROW_RULES`); reduced to sea level, pressure varies
+    little over that distance. The attributes name the station in use **now**:
+    like the rain-gauge sensor, a history can mix the station's own readings
+    with borrowed ones where its own barometer comes and goes.
     """
 
     _attr_translation_key = "pressure_sea_level"
@@ -349,26 +353,47 @@ class ShmuSeaLevelPressureSensor(ShmuStationEntity, SensorEntity):
         """Initialise the sea-level pressure sensor."""
         super().__init__(coordinator, station)
         self._attr_unique_id = f"{station.ind_kli}_pressure_sea_level"
+        #: The sourced value, resolved once per state write. The coordinator
+        #: property is time-dependent (freshness windows), so reading it
+        #: separately for availability, value and attributes could straddle a
+        #: window's edge and write an available sensor with no value.
+        self._reading: SourcedReading | None = coordinator.sea_level_pressure
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """Resolve the sourced value once, then write the state from it."""
+        self._reading = self.coordinator.sea_level_pressure
+        super()._handle_coordinator_update()
 
     @property
     def available(self) -> bool:
-        """Available only while pressure and temperature can be reduced.
+        """Available exactly while a value exists, the station's own or borrowed.
 
-        Same per-reading rule as :class:`ShmuSensor`.
+        The per-reading rule of :class:`ShmuSensor`, applied to the sourced
+        value: the station dropping out of a snapshot need not blank a value
+        borrowed from a neighbour, and a fresh station reading with no source
+        for this value is unavailable rather than unknown. Freshness is
+        already in :attr:`ShmuDataUpdateCoordinator.sea_level_pressure`, which
+        uses only a carried-forward own reading and a current snapshot.
         """
-        return super().available and self.native_value is not None
+        return self._reading is not None
 
     @property
     def native_value(self) -> StateType:
-        """Sea-level pressure, or ``None`` if pressure or temperature is absent."""
-        obs = self.observation
-        # Only created for stations with a known elevation.
-        assert self._station.elevation is not None
-        if obs is None:
+        """Sea-level pressure, or ``None`` when no admissible source has one."""
+        return self._reading.value if self._reading is not None else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, int | str | float] | None:
+        """Which station the value came from; 0 km for the station's own."""
+        reading = self._reading
+        if reading is None:
             return None
-        return sea_level_pressure(
-            obs.pressure, self._station.elevation, obs.temperature
-        )
+        return {
+            "source_ind_kli": reading.source.ind_kli,
+            "source_name": reading.source.name,
+            "source_distance_km": round(reading.distance_km, 1),
+        }
 
 
 class ShmuRainGaugePrecipitationSensor(ShmuStationEntity, SensorEntity):

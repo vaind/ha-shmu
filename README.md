@@ -80,8 +80,11 @@ The 27 **synoptic** stations (★ in the station list) report the fullest set.
 The other ~70 all report temperature, humidity, wind and precipitation; roughly a third also report pressure, and fewer still present weather, visibility or global radiation.
 A sensor for a quantity the chosen station does not measure is *unavailable*, while the station's other sensors keep updating.
 
-- **Sea-level pressure** needs the station's elevation, which is known for about 70 of the stations.
-  Where it is not (mostly SHMÚ's eastern regional stations), the sea-level pressure sensor is not created and the weather entity shows no pressure; the raw **Pressure** sensor still reports the station's own reading if it measures one.
+- **Sea-level pressure** needs a barometer and the station's elevation, and about 50 stations lack one or the other.
+  For those, the sea-level pressure sensor and the weather entity show the value of the nearest station within 40 km that has it, leaving out mountain stations (1000 m and above), whose reduction to sea level is the least reliable.
+  Reduced to sea level, pressure barely changes over that distance: measured across SHMÚ's stations, two of them typically differ by under 1 hPa.
+  The sensor's `source_name` and `source_distance_km` attributes name the station the value came from (0 km for the chosen station's own); with no such station in range it is *unavailable*.
+  The raw **Pressure** sensor always reports only the chosen station's own reading.
 - **The weather condition** at a station that reports no present weather comes mostly from the ALADIN model's current-hour cloud cover and precipitation, since the SHMÚ website's cloud observations rarely cover these stations either.
   The weather entity's `condition_source` attribute shows which source won.
 

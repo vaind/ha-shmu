@@ -6,6 +6,7 @@ Data © SHMÚ, https://opendata.shmu.sk/, licensed CC BY 4.0.
 from __future__ import annotations
 
 from ._ssl import create_ssl_context
+from .borrowing import BORROW_RULES, BorrowRule, SourcedReading, borrow
 from .client import (
     ForecastSnapshot,
     GaugeSnapshot,
@@ -48,8 +49,10 @@ from .website import WebCondition
 __version__ = "0.11.1"
 
 __all__ = [
+    "BORROW_RULES",
     "GAUGES",
     "STATIONS",
+    "BorrowRule",
     "ConditionCandidate",
     "ConditionResolution",
     "ForecastSnapshot",
@@ -66,12 +69,14 @@ __all__ = [
     "ShmuConnectionError",
     "ShmuDataError",
     "ShmuError",
+    "SourcedReading",
     "Station",
     "Warning",
     "WarningsSnapshot",
     "WebCondition",
     "WebConditionsSnapshot",
     "__version__",
+    "borrow",
     "condition_from_weather_code",
     "create_ssl_context",
     "explain_condition",

@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
-from unittest.mock import patch
+from unittest.mock import PropertyMock, patch
 
 import pytest
 from homeassistant.config_entries import ConfigEntryState
@@ -28,6 +28,7 @@ from custom_components.shmu.const import (
     LOCATION_MODE_STATION,
     OBSERVATION_STALE_AFTER,
 )
+from custom_components.shmu.coordinator import ShmuDataUpdateCoordinator
 from custom_components.shmu.shmu_opendata import (
     ForecastSnapshot,
     GaugeSnapshot,
@@ -50,6 +51,7 @@ from custom_components.shmu.shmu_opendata.parsers import (
     parse_gauge_observations,
     parse_observations,
 )
+from custom_components.shmu.shmu_opendata.pressure import sea_level_pressure
 from custom_components.shmu.shmu_opendata.website import parse_current_conditions
 
 #: Forecast hours backed by the trimmed real GRIB2 fixtures.
@@ -90,9 +92,12 @@ class _FakeClient:
         #: Same, for the observation feed: the newest ``aws1min`` file never
         #: changes, so the client keeps handing back the previous snapshot.
         self.observation_source_frozen: bool = False
-        #: ``(source, alias)``: also serve station ``source``'s reading under
-        #: ``alias``, so a station absent from the fixture can be set up.
-        self.station_alias: tuple[int, int] | None = None
+        #: ``{alias: source}``: also serve station ``source``'s reading under
+        #: each ``alias``, so a station absent from the fixture can be set up.
+        self.station_aliases: dict[int, int] = {}
+        #: ``(ind_kli, minutes)`` holding one station that far behind the rest
+        #: of the snapshot, as ``gauge_lag`` does for the rain gauges.
+        self.station_lag: tuple[int, int] | None = None
         #: Coordinates the forecast/radar fetchers were last called with, so
         #: tests can assert the measurement location reaches the client.
         self.forecast_coords: tuple[float, float] | None = None
@@ -108,9 +113,14 @@ class _FakeClient:
         observations = parse_observations(self._load("observations.json"))
         if self.drop_station is not None:
             observations.pop(self.drop_station, None)
-        if self.station_alias is not None:
-            source, alias = self.station_alias
+        for alias, source in self.station_aliases.items():
             observations[alias] = replace(observations[source], ind_kli=alias)
+        if self.station_lag is not None:
+            ind_kli, minutes = self.station_lag
+            behind = observations[ind_kli]
+            observations[ind_kli] = replace(
+                behind, measured_at=behind.measured_at - timedelta(minutes=minutes)
+            )
         self._serial += 1
         return ObservationSnapshot(
             observations=observations,
@@ -252,6 +262,9 @@ async def test_setup_creates_entities(
     sea_level = hass.states.get("sensor.hurbanovo_sea_level_pressure")
     assert sea_level is not None
     assert float(sea_level.state) == pytest.approx(1015.06, abs=0.2)
+    # A station that can reduce its own pressure is its own source.
+    assert sea_level.attributes["source_ind_kli"] == 11858
+    assert sea_level.attributes["source_distance_km"] == 0.0
 
     # The only warning's polygon is around Bratislava; Hurbanovo is outside it.
     assert hass.states.get("binary_sensor.hurbanovo_weather_warning").state == "off"
@@ -368,7 +381,8 @@ async def _setup_entry(
     *,
     data: dict,
     options: dict | None = None,
-    station_alias: tuple[int, int] | None = None,
+    station_aliases: dict[int, int] | None = None,
+    station_lag: tuple[int, int] | None = None,
 ) -> tuple[MockConfigEntry, _FakeClient]:
     """Set up an entry with the fake client and return both."""
     entry = MockConfigEntry(
@@ -380,7 +394,8 @@ async def _setup_entry(
     )
     entry.add_to_hass(hass)
     client = _FakeClient(load)
-    client.station_alias = station_alias
+    client.station_aliases = station_aliases or {}
+    client.station_lag = station_lag
     with patch("custom_components.shmu.ShmuClient", return_value=client):
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
@@ -433,6 +448,11 @@ async def test_existing_entry_on_a_station_missing_from_the_feed_still_loads(
 _BARDEJOV = 11962
 
 
+#: Stropkov - Tisinec, a synoptic station ~28 km from Bardejov at 216 m: an
+#: admissible lender under ``BORROW_RULES["sea_level_pressure"]``.
+_TISINEC = 11976
+
+
 async def test_automatic_station_without_elevation(
     hass: HomeAssistant, load: Callable[[str], bytes]
 ) -> None:
@@ -440,12 +460,12 @@ async def test_automatic_station_without_elevation(
     assert station is not None
     assert not station.synoptic
     assert station.elevation is None
-    # Hurbanovo's reading (1001.2 hPa among it) stands in for Bardejov's.
+    # Hurbanovo's reading (1001.2 hPa, 12.1 °C) stands in for both stations.
     entry, _ = await _setup_entry(
         hass,
         load,
         data={CONF_IND_KLI: _BARDEJOV, CONF_NAME: "Bardejov"},
-        station_alias=(11858, _BARDEJOV),
+        station_aliases={_BARDEJOV: 11858, _TISINEC: 11858},
     )
     assert entry.state is ConfigEntryState.LOADED
 
@@ -456,14 +476,170 @@ async def test_automatic_station_without_elevation(
     assert device.model == "Automatic weather station"
 
     assert hass.states.get("sensor.bardejov_temperature").state == "12.1"
-    # The raw reading is still served; only the reduction needs the elevation,
-    # so that sensor is not created and the weather card shows no pressure
-    # rather than a station-level value on a different datum.
+    # The raw reading is the station's own, on its own (unknown) datum.
     assert hass.states.get("sensor.bardejov_pressure").state == "1001.2"
-    assert hass.states.get("sensor.bardejov_sea_level_pressure") is None
+
+    # Bardejov cannot reduce it without an elevation, so Tisinec's reduced
+    # value is shown instead, and says so.
+    tisinec = get_station(_TISINEC)
+    expected = sea_level_pressure(1001.2, tisinec.elevation, 12.1)
+    sea_level = hass.states.get("sensor.bardejov_sea_level_pressure")
+    assert float(sea_level.state) == pytest.approx(expected, abs=0.01)
+    assert sea_level.attributes["source_ind_kli"] == _TISINEC
+    assert sea_level.attributes["source_name"] == tisinec.name
+    distance = tisinec.distance_km(station.latitude, station.longitude)
+    assert 20.0 < distance < 40.0
+    assert sea_level.attributes["source_distance_km"] == round(distance, 1)
+    # The weather card shows the same borrowed value.
     weather = hass.states.get("weather.bardejov")
     assert weather.attributes["temperature"] == 12.1
-    assert weather.attributes.get("pressure") is None
+    assert weather.attributes["pressure"] == pytest.approx(expected, abs=0.1)
+
+
+async def test_no_lender_in_range_leaves_sea_level_pressure_unavailable(
+    hass: HomeAssistant, load: Callable[[str], bytes]
+) -> None:
+    # The fixture's own stations are all over 40 km from Bardejov, or above
+    # 1000 m (Lomnický Štít), so nothing may stand in.
+    await _setup_entry(
+        hass,
+        load,
+        data={CONF_IND_KLI: _BARDEJOV, CONF_NAME: "Bardejov"},
+        station_aliases={_BARDEJOV: 11858},
+    )
+    sea_level = hass.states.get("sensor.bardejov_sea_level_pressure")
+    # The station itself reports, but no value exists: unavailable, not
+    # unknown, by the same per-reading rule as every other station sensor.
+    assert sea_level.state == "unavailable"
+    assert "source_ind_kli" not in sea_level.attributes
+    assert hass.states.get("weather.bardejov").attributes.get("pressure") is None
+
+
+async def test_a_lagging_neighbour_is_not_borrowed_from(
+    hass: HomeAssistant, load: Callable[[str], bytes]
+) -> None:
+    # Tisinec is in range but its newest record trails the snapshot by more
+    # than OBSERVATION_STALE_AFTER — a backfill, not a current reading.
+    await _setup_entry(
+        hass,
+        load,
+        data={CONF_IND_KLI: _BARDEJOV, CONF_NAME: "Bardejov"},
+        station_aliases={_BARDEJOV: 11858, _TISINEC: 11858},
+        station_lag=(_TISINEC, 45),
+    )
+    state = hass.states.get("sensor.bardejov_sea_level_pressure")
+    assert state.state == "unavailable"
+
+
+async def test_sea_level_sensor_resolves_its_source_once_per_write(
+    hass: HomeAssistant, load: Callable[[str], bytes]
+) -> None:
+    """Availability, value and attributes come from one resolution.
+
+    The coordinator property is time-dependent; read separately, the three
+    could straddle a freshness window's edge and write an available sensor
+    with no value. Once written, the entity must not consult it again.
+    """
+    await _setup_entry(
+        hass,
+        load,
+        data={CONF_IND_KLI: _BARDEJOV, CONF_NAME: "Bardejov"},
+        station_aliases={_BARDEJOV: 11858, _TISINEC: 11858},
+    )
+    entity = hass.data["entity_components"]["sensor"].get_entity(
+        "sensor.bardejov_sea_level_pressure"
+    )
+    with patch.object(
+        ShmuDataUpdateCoordinator,
+        "sea_level_pressure",
+        new_callable=PropertyMock,
+        side_effect=AssertionError("read outside a coordinator update"),
+    ):
+        assert entity.available
+        assert entity.native_value is not None
+        assert entity.extra_state_attributes["source_ind_kli"] == _TISINEC
+
+
+async def test_a_borrowed_value_outlives_the_station_dropping_out(
+    hass: HomeAssistant, load: Callable[[str], bytes]
+) -> None:
+    """The lender's reading does not depend on the station's own.
+
+    Bardejov leaves the feed for longer than the freshness window while
+    snapshots keep coming: its own sensors go unavailable, but the value
+    borrowed from Tisinec stays, because each sensor follows its own reading.
+    """
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id=str(_BARDEJOV),
+        title="Bardejov",
+        data={CONF_IND_KLI: _BARDEJOV, CONF_NAME: "Bardejov"},
+    )
+    entry.add_to_hass(hass)
+    client = _FakeClient(load)
+    client.station_aliases = {_BARDEJOV: 11858, _TISINEC: 11858}
+    now = datetime(2026, 5, 17, 12, 0, tzinfo=UTC)
+
+    def _now() -> datetime:
+        return now
+
+    with (
+        patch("custom_components.shmu.coordinator.dt_util.utcnow", _now),
+        patch("custom_components.shmu.ShmuClient", return_value=client),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        del client.station_aliases[_BARDEJOV]
+        for _ in range(4):
+            now += timedelta(minutes=12)
+            await entry.runtime_data.async_refresh()
+            await hass.async_block_till_done()
+
+        assert hass.states.get("sensor.bardejov_temperature").state == "unavailable"
+        sea_level = hass.states.get("sensor.bardejov_sea_level_pressure")
+        assert sea_level.state != "unavailable"
+        assert sea_level.attributes["source_ind_kli"] == _TISINEC
+
+
+async def test_a_frozen_feed_stops_lending(
+    hass: HomeAssistant, load: Callable[[str], bytes]
+) -> None:
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id=str(_BARDEJOV),
+        title="Bardejov",
+        data={CONF_IND_KLI: _BARDEJOV, CONF_NAME: "Bardejov"},
+    )
+    entry.add_to_hass(hass)
+    client = _FakeClient(load)
+    client.station_aliases = {_BARDEJOV: 11858, _TISINEC: 11858}
+    now = datetime(2026, 5, 17, 12, 0, tzinfo=UTC)
+
+    def _now() -> datetime:
+        return now
+
+    with (
+        patch("custom_components.shmu.coordinator.dt_util.utcnow", _now),
+        patch("custom_components.shmu.ShmuClient", return_value=client),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+        sea_level = hass.states.get("sensor.bardejov_sea_level_pressure")
+        assert sea_level.attributes["source_ind_kli"] == _TISINEC
+
+        # The newest file stops changing: every poll is a cache hit, so the
+        # lender's reading is never renewed and ages out with the station's.
+        client.observation_source_frozen = True
+        for _ in range(4):
+            now += timedelta(minutes=12)
+            await entry.runtime_data.async_refresh()
+            await hass.async_block_till_done()
+
+        assert entry.runtime_data.neighbour_observations() == {}
+        assert entry.runtime_data.sea_level_pressure is None
+        state = hass.states.get("sensor.bardejov_sea_level_pressure")
+        assert state.state == "unavailable"
 
 
 async def test_location_defaults_to_station(
