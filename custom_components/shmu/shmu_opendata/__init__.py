@@ -28,7 +28,7 @@ from .gauges import (
 )
 from .models import GaugeObservation, Observation, Warning
 from .pressure import sea_level_pressure
-from .radar import RadarImage
+from .radar import LocalEcho, RadarImage
 from .resolution import (
     ConditionCandidate,
     ConditionResolution,
@@ -60,6 +60,7 @@ __all__ = [
     "Gauge",
     "GaugeObservation",
     "GaugeSnapshot",
+    "LocalEcho",
     "Observation",
     "ObservationSnapshot",
     "RadarFrame",

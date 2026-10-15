@@ -53,8 +53,10 @@ from .parsers import (
 from .radar import (
     MAP_OVERLAY,
     STATION_VIEW,
+    LocalEcho,
     RadarImage,
     encode_apng,
+    local_echo,
     render_composite,
 )
 from .website import WEBSITE_URL, WebCondition, parse_current_conditions
@@ -162,12 +164,18 @@ class RadarFrame:
     of re-fetching and re-rendering the ~0.3 MB HDF5. ``valid_at`` is the
     frame's nominal UTC time parsed from the filename; frames are ordered by
     it (oldest→newest).
+
+    ``echo`` is the strongest echo within ~1 km of the point the frame was
+    centred on (see :func:`~shmu_opendata.radar.local_echo`), taken from the
+    same decode — the "is it precipitating here" observation the condition
+    ladder uses. ``None`` when the radar does not cover that point.
     """
 
     image: RadarImage
     map_image: RadarImage
     source: str
     valid_at: datetime
+    echo: LocalEcho | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -223,8 +231,8 @@ def _frame_label(valid_at: datetime, tz: str | None) -> str:
 
 def _render_frame(
     payload: bytes, latitude: float, longitude: float, label: str
-) -> tuple[RadarImage, RadarImage]:
-    """Decode one composite once and render both of its pictures.
+) -> tuple[RadarImage, RadarImage, LocalEcho | None]:
+    """Decode one composite once: render both pictures, sample the local echo.
 
     Pure CPU and the heaviest step of a radar poll (the native-resolution map
     render dominates), so :meth:`ShmuClient.async_get_radar` runs it in a
@@ -236,6 +244,7 @@ def _render_frame(
             composite, latitude, longitude, style=STATION_VIEW, label=label
         ),
         render_composite(composite, latitude, longitude, style=MAP_OVERLAY),
+        local_echo(composite, latitude, longitude),
     )
 
 
@@ -726,7 +735,7 @@ class ShmuClient:
                 frames.append(reused)
                 continue
             payload = await self._get(f"{day_path}/{quote(filename)}")
-            image, map_image = await asyncio.get_running_loop().run_in_executor(
+            image, map_image, echo = await asyncio.get_running_loop().run_in_executor(
                 None,
                 _render_frame,
                 payload,
@@ -740,6 +749,7 @@ class ShmuClient:
                     map_image=map_image,
                     source=source,
                     valid_at=valid_at,
+                    echo=echo,
                 )
             )
             fetched += 1

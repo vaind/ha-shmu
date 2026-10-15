@@ -70,6 +70,13 @@ OBSERVATION_STALE_AFTER: Final = timedelta(minutes=30)
 #: (2 h) old. Measured from ``fetched_at``, i.e. the last successful scrape.
 WEB_CONDITIONS_STALE_AFTER: Final = timedelta(hours=1)
 
+#: How old the newest radar frame may be for its echo to enter the condition
+#: ladder. A composite is published every 5 minutes and reaches the listing
+#: about 6 minutes after its nominal time, so a current frame is 6-11 minutes
+#: old when read; past this, the radar has stopped updating and says nothing
+#: about now. Measured from the frame's own ``valid_at``.
+RADAR_ECHO_STALE_AFTER: Final = timedelta(minutes=15)
+
 #: How far an ALADIN forecast step may be from "now" to still count as the
 #: current conditions when filling the condition gap. The model is hourly near
 #: term, so a step is normally within ~30 min; this bounds how stale a run may

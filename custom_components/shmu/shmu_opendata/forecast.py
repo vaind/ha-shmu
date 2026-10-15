@@ -290,13 +290,27 @@ def derive_condition(
     if wet:
         if cape is not None and cape >= _THUNDER_CAPE:
             return LIGHTNING_RAINY
-        if temperature is not None and temperature <= 0.5:
-            return SNOWY
-        if temperature is not None and temperature <= 2.0:
-            return SNOWY_RAINY
+        kind = precipitation_kind(temperature)
+        if kind != RAINY:
+            return kind
         assert rate is not None
         return POURING if rate >= _HEAVY_RAIN_MM_PER_H else RAINY
     return sky_from_cloud(cloud_coverage)
+
+
+def precipitation_kind(temperature: float | None) -> str:
+    """Rain, sleet or snow for precipitation falling at ``temperature`` (°C).
+
+    The plain 2 m-temperature split the model condition uses: snow at or
+    below 0.5 °C, mixed up to 2 °C, rain above — and rain when the
+    temperature is unknown. Shared with the condition ladder, which learns
+    *that* it precipitates from the radar but not *what*.
+    """
+    if temperature is not None and temperature <= 0.5:
+        return SNOWY
+    if temperature is not None and temperature <= 2.0:
+        return SNOWY_RAINY
+    return RAINY
 
 
 def _vertical_profile(
