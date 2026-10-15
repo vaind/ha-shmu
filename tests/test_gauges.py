@@ -24,7 +24,7 @@ def test_table_integrity() -> None:
         assert g.name.strip() == g.name and g.name
 
 
-def test_id_space_is_disjoint_from_the_synoptic_network() -> None:
+def test_id_space_is_disjoint_from_the_station_network() -> None:
     """The two networks are complementary, never the same station twice.
 
     If SHMÚ ever reused an id across the feeds, keying by the wrong one would
@@ -47,10 +47,10 @@ def test_nearest_gauge() -> None:
     assert nearest_gauge(48.7164, 21.2611).distance_km(48.7164, 21.2611) < 15.0
 
 
-def test_network_is_denser_than_the_synoptic_one() -> None:
+def test_gauges_are_near_every_station() -> None:
     """The point of adopting this feed: precipitation from closer by.
 
-    Checked at the synoptic stations themselves — the worst case for the
+    Checked at the weather stations themselves — the worst case for the
     gauges, since a station sits exactly on top of its own network.
     """
     closer = 0

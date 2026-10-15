@@ -1,11 +1,11 @@
 """Static catalogue of SHMÚ automatic rain-gauge stations.
 
 The ``aps1min`` precipitation feed keys its records by ``ind_zra``, an id
-space **completely disjoint** from the ``ind_kli`` of the synoptic stations in
+space **completely disjoint** from the ``ind_kli`` of the weather stations in
 :mod:`shmu_opendata.stations` — this is a second, complementary network of
-~190 gauges, roughly three times as dense as the 27 synoptic stations.
+~190 gauges, roughly twice as dense as the ~95 weather stations.
 
-As with the synoptic catalogue, SHMÚ publishes no machine-readable station
+As with the station catalogue, SHMÚ publishes no machine-readable station
 list, so this table is curated and hard-coded. Two routes were checked and are
 dead ends (verified 2026-08-26, so nobody repeats the search):
 
@@ -32,8 +32,8 @@ inline JS array; ``uid`` carries the network prefix and the id::
     # it too, e.g. "Rakúske lúky - horáreň Fľak") and strip (one has a
     # trailing space). AWS2/AHS entries are other networks — keep only APS2.
 
-The same array carries the synoptic stations as ``AWS2<ind_kli>``, which is
-how these coordinates were validated: over the 24 stations also present in
+The same array carries the weather stations as ``AWS2<ind_kli>``, which is
+how these coordinates were validated: over the 24 synoptic stations of
 :mod:`shmu_opendata.stations` (curated from a different SHMÚ page) the two
 sources agree to a median of 272 m, worst case 1.2 km — far below the ~16 km
 spacing of this network.
@@ -44,7 +44,7 @@ by the map page. Callers must therefore tolerate an id in the feed that is
 absent here.
 
 Latitude/longitude are WGS84 degrees. SHMÚ publishes no elevation for these
-gauges — unlike synoptic stations they report no pressure, so none is needed.
+gauges — unlike weather stations they report no pressure, so none is needed.
 """
 
 from __future__ import annotations

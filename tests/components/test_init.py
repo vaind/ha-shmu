@@ -90,6 +90,9 @@ class _FakeClient:
         #: Same, for the observation feed: the newest ``aws1min`` file never
         #: changes, so the client keeps handing back the previous snapshot.
         self.observation_source_frozen: bool = False
+        #: ``(source, alias)``: also serve station ``source``'s reading under
+        #: ``alias``, so a station absent from the fixture can be set up.
+        self.station_alias: tuple[int, int] | None = None
         #: Coordinates the forecast/radar fetchers were last called with, so
         #: tests can assert the measurement location reaches the client.
         self.forecast_coords: tuple[float, float] | None = None
@@ -105,6 +108,9 @@ class _FakeClient:
         observations = parse_observations(self._load("observations.json"))
         if self.drop_station is not None:
             observations.pop(self.drop_station, None)
+        if self.station_alias is not None:
+            source, alias = self.station_alias
+            observations[alias] = replace(observations[source], ind_kli=alias)
         self._serial += 1
         return ObservationSnapshot(
             observations=observations,
@@ -362,6 +368,7 @@ async def _setup_entry(
     *,
     data: dict,
     options: dict | None = None,
+    station_alias: tuple[int, int] | None = None,
 ) -> tuple[MockConfigEntry, _FakeClient]:
     """Set up an entry with the fake client and return both."""
     entry = MockConfigEntry(
@@ -373,6 +380,7 @@ async def _setup_entry(
     )
     entry.add_to_hass(hass)
     client = _FakeClient(load)
+    client.station_alias = station_alias
     with patch("custom_components.shmu.ShmuClient", return_value=client):
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
@@ -402,6 +410,45 @@ async def test_device_name_falls_back_to_station(
     )
     assert device is not None
     assert device.name == "Hurbanovo"
+    assert device.model == "Synoptic station"
+
+
+#: A non-synoptic station whose elevation no source publishes (OSCAR does not
+#: register it), but which does report station pressure.
+_BARDEJOV = 11962
+
+
+async def test_automatic_station_without_elevation(
+    hass: HomeAssistant, load: Callable[[str], bytes]
+) -> None:
+    station = get_station(_BARDEJOV)
+    assert station is not None
+    assert not station.synoptic
+    assert station.elevation is None
+    # Hurbanovo's reading (1001.2 hPa among it) stands in for Bardejov's.
+    entry, _ = await _setup_entry(
+        hass,
+        load,
+        data={CONF_IND_KLI: _BARDEJOV, CONF_NAME: "Bardejov"},
+        station_alias=(11858, _BARDEJOV),
+    )
+    assert entry.state is ConfigEntryState.LOADED
+
+    device = dr.async_get(hass).async_get_device_by_identifier(
+        (DOMAIN, str(_BARDEJOV)), entry.entry_id
+    )
+    assert device is not None
+    assert device.model == "Automatic weather station"
+
+    assert hass.states.get("sensor.bardejov_temperature").state == "12.1"
+    # The raw reading is still served; only the reduction needs the elevation,
+    # so that sensor is not created and the weather card shows no pressure
+    # rather than a station-level value on a different datum.
+    assert hass.states.get("sensor.bardejov_pressure").state == "1001.2"
+    assert hass.states.get("sensor.bardejov_sea_level_pressure") is None
+    weather = hass.states.get("weather.bardejov")
+    assert weather.attributes["temperature"] == 12.1
+    assert weather.attributes.get("pressure") is None
 
 
 async def test_location_defaults_to_station(

@@ -4,6 +4,12 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Every SHMÚ automatic weather station can now be picked, not only the 27 synoptic ones** — 95 stations in all, roughly halving the typical distance to the nearest station. Synoptic stations are marked ★ in the station list, because they report the most: the others all measure temperature, humidity, wind and precipitation, but only some measure pressure, present weather or visibility, and sensors for what a station does not measure stay unknown. The **Sea-level pressure** sensor is created only for stations with a known elevation (about 70); SHMÚ publishes none for the rest, and estimating it from the forecast model's terrain would put the pressure off by tens of hPa. Existing installations are unchanged; a new installation preselects the nearest station of the larger list.
+
 ## [0.11.1] - 2026-10-15
 
 ### Fixed

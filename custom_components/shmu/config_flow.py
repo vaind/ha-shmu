@@ -39,8 +39,16 @@ from .const import (
 )
 from .shmu_opendata import STATIONS, get_station, nearest_station
 
+#: Marks the synoptic stations, which report far more than the rest (station
+#: pressure, present weather, visibility). A symbol rather than a word, because
+#: option labels are not translated; the field description explains it.
+SYNOPTIC_MARK = "★"
+
 _STATION_OPTIONS = [
-    SelectOptionDict(value=str(station.ind_kli), label=station.name)
+    SelectOptionDict(
+        value=str(station.ind_kli),
+        label=f"{station.name} {SYNOPTIC_MARK}" if station.synoptic else station.name,
+    )
     for station in sorted(STATIONS, key=lambda s: s.name)
 ]
 

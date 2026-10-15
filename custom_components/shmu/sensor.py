@@ -287,7 +287,10 @@ async def async_setup_entry(
         ShmuTimestampSensor(coordinator, station, description)
         for description in TIMESTAMPS
     )
-    entities.append(ShmuSeaLevelPressureSensor(coordinator, station))
+    # Without a known elevation the reduction has nothing to work from, so the
+    # sensor would never hold a value (see ``shmu_opendata.stations``).
+    if station.elevation is not None:
+        entities.append(ShmuSeaLevelPressureSensor(coordinator, station))
     entities.append(ShmuRainGaugePrecipitationSensor(coordinator, station))
     entities.append(ShmuWarningLevelSensor(coordinator, station))
     async_add_entities(entities)
@@ -339,6 +342,8 @@ class ShmuSeaLevelPressureSensor(ShmuStationEntity, SensorEntity):
     def native_value(self) -> StateType:
         """Sea-level pressure, or ``None`` if pressure or temperature is absent."""
         obs = self.observation
+        # Only created for stations with a known elevation.
+        assert self._station.elevation is not None
         if obs is None:
             return None
         return sea_level_pressure(
@@ -349,7 +354,7 @@ class ShmuSeaLevelPressureSensor(ShmuStationEntity, SensorEntity):
 class ShmuRainGaugePrecipitationSensor(ShmuStationEntity, SensorEntity):
     """Precipitation intensity at the rain gauge nearest the measurement location.
 
-    SHMÚ runs a second, ~3x denser observation network beside the synoptic
+    SHMÚ runs a second, ~2x denser observation network beside the weather
     stations (see :mod:`shmu_opendata.gauges`), so this usually measures rain
     much closer to the user than the station's own ``precipitation`` sensor —
     which is left untouched, because silently swapping one network's reading

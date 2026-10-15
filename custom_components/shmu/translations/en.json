@@ -3,14 +3,14 @@
     "step": {
       "user": {
         "title": "SHMÚ Weather",
-        "description": "Unofficial integration — not affiliated with or endorsed by SHMÚ; use at your own risk. Choose a SHMÚ synoptic station; the nearest one to your Home Assistant location is preselected.",
+        "description": "Unofficial integration — not affiliated with or endorsed by SHMÚ; use at your own risk. Choose a SHMÚ weather station; the nearest one to your Home Assistant location is preselected.",
         "data": {
           "ind_kli": "Station",
           "name": "Name",
           "location_mode": "Measurement location"
         },
         "data_description": {
-          "ind_kli": "The SHMÚ synoptic station to read current observations from. To track another station, add this integration again — each station is its own device.",
+          "ind_kli": "The SHMÚ weather station to read current observations from. Synoptic stations (★) report the most, including pressure and present weather. To track another station, add this integration again — each station is its own device.",
           "name": "Name for this device and its entities (e.g. \"Home\").",
           "location_mode": "The point used for the forecast, radar and warnings — independent of the observation station."
         }

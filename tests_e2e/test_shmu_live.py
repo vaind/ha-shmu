@@ -89,6 +89,19 @@ async def test_observations(client: ShmuClient) -> None:
     assert len(reporting) >= 0.8 * len(STATIONS), (
         f"only {len(reporting)}/{len(STATIONS)} catalogue stations report"
     )
+    # Checked per network too, so the larger non-synoptic part could not hide
+    # the synoptic stations (the ones reporting pressure) going quiet.
+    synoptic = [s for s in STATIONS if s.synoptic]
+    reporting_synoptic = [s for s in reporting if s.synoptic]
+    assert len(reporting_synoptic) >= 0.8 * len(synoptic), (
+        f"only {len(reporting_synoptic)}/{len(synoptic)} synoptic stations report"
+    )
+
+    # AGENTS.md: the catalogue holds every feed station with known coordinates,
+    # and only Oravice and Jakubovany lacked them. More unknown ids means SHMÚ
+    # added stations and stations.py needs regenerating.
+    unknown = set(snap.observations) - {s.ind_kli for s in STATIONS}
+    assert len(unknown) <= 3, f"feed ids missing from stations.py: {sorted(unknown)}"
 
 
 async def test_observation_file_names_are_local_time(client: ShmuClient) -> None:

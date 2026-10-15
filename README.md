@@ -36,9 +36,9 @@ A Home Assistant integration for Slovak weather data published by the **Slovak H
 
 ## Features
 
-- **Weather entity** — current conditions from a chosen SHMÚ synoptic station, plus the daily and hourly forecast from SHMÚ's ALADIN model.
+- **Weather entity** — current conditions from a chosen SHMÚ weather station, plus the daily and hourly forecast from SHMÚ's ALADIN model.
 - **Sensors** — temperature, ground temperature, humidity, pressure (the raw station reading), sea-level pressure (that reading reduced to mean sea level, comparable between stations), wind speed/gust/bearing, precipitation intensity, snow depth, visibility, global radiation, and a warning-level sensor. The raw WMO weather code and the data's release/fetch times are available as diagnostics.
-- **Rain gauge precipitation** — SHMÚ also runs a second, roughly three times denser network of automatic rain gauges: across the country the nearest gauge is a median 10 km away, against 28 km for the nearest synoptic station.
+- **Rain gauge precipitation** — SHMÚ also runs a second network of ~190 automatic rain gauges, about twice as dense as its ~95 weather stations, so the nearest gauge is usually closer than the nearest station.
   This sensor reports the gauge nearest your [measurement location](#configuration), with its name and distance as attributes.
   It is deliberately separate from the station's own **Precipitation** sensor — the two measure different places and are expected to disagree.
   Both precipitation sensors report **intensity in mm/h**: SHMÚ publishes only the rain that fell in one minute out of every five, so each shows the hourly rate that minute implies (the 1-minute sum × 60) rather than an amount that would leave four minutes in five out of any total.
@@ -65,13 +65,25 @@ It is distributed through HACS rather than Home Assistant core because part of t
 
 | Option | What it does |
 |---|---|
-| **Station** | The SHMÚ synoptic station whose observations drive the current conditions and sensors. The one nearest your Home Assistant location is preselected; any of the 27 can be picked. To follow another station, add the integration again — each station is its own device. |
+| **Station** | The SHMÚ automatic weather station whose observations drive the current conditions and sensors. The one nearest your Home Assistant location is preselected; any of the ~95 can be picked. The 27 *synoptic* stations, marked ★, report the most; the others mostly report temperature, humidity, wind and precipitation, with pressure, present weather and visibility at only some of them (see [Stations](#stations)). To follow another station, add the integration again — each station is its own device. |
 | **Name** | The device name, which also prefixes every entity ID. Defaults to your Home Assistant location name (e.g. *Home* → `weather.home`). |
 | **Measurement location** | The point used for the forecast, radar crop, warning relevance and nearest rain gauge: *Same as the station*, *Home Assistant location*, or *Custom location* picked on a map. |
 
 The measurement location can be changed later under *Settings → Devices & Services → SHMÚ Weather → Configure*. The station cannot — remove and re-add the integration to switch it.
 
 If you change the measurement location and a different rain gauge becomes the nearest, the rain-gauge sensor keeps its history rather than starting a new one: a long-term graph spanning that change mixes both gauges, and the gauge named in the attributes is the one in use now.
+
+## Stations
+
+Every station SHMÚ publishes in its open-data observation feed can be picked, but they do not all measure the same things.
+The 27 **synoptic** stations (★ in the station list) report the fullest set.
+The other ~70 all report temperature, humidity, wind and precipitation; roughly a third also report pressure, and fewer still present weather, visibility or global radiation.
+A sensor for a quantity the chosen station does not measure stays *unknown*.
+
+- **Sea-level pressure** needs the station's elevation, which is known for about 70 of the stations.
+  Where it is not (mostly SHMÚ's eastern regional stations), the sea-level pressure sensor is not created and the weather entity shows no pressure; the raw **Pressure** sensor still reports the station's own reading if it measures one.
+- **The weather condition** at a station that reports no present weather comes mostly from the ALADIN model's current-hour cloud cover and precipitation, since the SHMÚ website's cloud observations rarely cover these stations either.
+  The weather entity's `condition_source` attribute shows which source won.
 
 ## Radar
 

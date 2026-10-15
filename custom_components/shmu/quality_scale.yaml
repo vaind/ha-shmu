@@ -52,7 +52,7 @@ rules:
   test-before-configure:
     status: exempt
     comment: >
-      The config flow only selects from a static, bundled synoptic-station
+      The config flow only selects from a static, bundled weather-station
       catalogue — there is no host, credential or per-user endpoint to
       validate. Upstream reachability is verified at setup time via
       async_config_entry_first_refresh (see test-before-setup).
@@ -94,7 +94,7 @@ rules:
   docs-supported-devices:
     status: exempt
     comment: >
-      Not a device integration; data comes from fixed SHMÚ synoptic stations,
+      Not a device integration; data comes from fixed SHMÚ weather stations,
       enumerated and selectable in the config flow.
   docs-supported-functions: done
   docs-troubleshooting:

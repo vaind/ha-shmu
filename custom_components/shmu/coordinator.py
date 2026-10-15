@@ -376,7 +376,7 @@ class ShmuDataUpdateCoordinator(DataUpdateCoordinator[ShmuData]):
         #: Tracks station-presence so we log only on transitions, not every poll.
         self._station_present = True
         #: Same, for the rain gauge — it drops out of snapshots more readily
-        #: than a synoptic station, so a silent sensor must be diagnosable.
+        #: than a weather station, so a silent sensor must be diagnosable.
         self._gauge_present = True
         #: Labels of the supplementary feeds whose last fetch failed, so an
         #: outage is logged once on the way down and once on recovery (see
@@ -641,7 +641,7 @@ class ShmuDataUpdateCoordinator(DataUpdateCoordinator[ShmuData]):
     def _log_station_presence(self, data: ShmuData) -> None:
         """Log (once per transition) whether the chosen station is reporting.
 
-        A synoptic station can drop out of a 5-minute snapshot; its last
+        A station can drop out of a 5-minute snapshot; its last
         reading is carried forward (see :attr:`observation`) and only a
         dropout outlasting the freshness window makes its entities go
         unavailable. Without this an operator has no idea why.
@@ -674,7 +674,7 @@ class ShmuDataUpdateCoordinator(DataUpdateCoordinator[ShmuData]):
     def _log_gauge_presence(self, snapshot: GaugeSnapshot) -> None:
         """Log rain-gauge presence transitions.
 
-        The gauge network is denser but patchier than the synoptic one, so a
+        The gauge network is denser but patchier than the station one, so a
         gauge dropping out is the likeliest reason for a silent precipitation
         sensor. Called only with a freshly fetched snapshot.
         """

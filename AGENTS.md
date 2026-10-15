@@ -94,7 +94,25 @@ Where a verified fact is cheap to assert, pin it in `tests_e2e/` too, so the dai
   The page also **fills in after the switch**: the first fetch of the new hour had 19 non-empty cloud cells, two minutes later 23 (of 101 rows) — consistent with the mostly-blank cloud column noted above.
   Because a failed scrape keeps the previous snapshot and the website outranks every other source, `ShmuData.explain_condition` leaves out a snapshot whose `fetched_at` is older than `WEB_CONDITIONS_STALE_AFTER` (1 h, one update period: by then a newer report exists that we failed to read), and the ladder falls through to `stav_poc`/ALADIN. Diagnostics flag it as `web_conditions.ignored_as_stale`.
   The age is measured from our last successful scrape, not from the caption, which the scraper does not parse; if the page ever stalls while still answering, a parsed caption time would be the stricter test.
-- **Station catalogue** is hard-coded (`stations.py`); SHMÚ publishes none in machine form. Regenerate from `shmu.sk/sk/?page=318` (coords) + `?id=meteo_apocasie_sk` (names). 27 synoptic stations.
+- **Station catalogue** is hard-coded (`stations.py`); SHMÚ publishes none in machine form.
+  It lists **every `aws1min` station that can be placed on a map** — 94 of the 96 — plus the synoptic Sliač, with `Station.synoptic` marking the 27 synoptic ones; the exact sources and recipe are in the `stations.py` docstring.
+  Until 2026-10-15 it held only the synoptic 27, not by choice: `?page=318` was the only coordinate source known when it was first curated, and the `?page=838` map was found later for the rain gauges.
+  **Verified live 2026-10-15**:
+  - **The id set is stable.** One `aws1min` file per day across the 30-day archive carried the same 96 `ind_kli` every day (a few stations missing from a single day's file).
+    The `?page=838` map listed 93 `AWS2` entries that day (94 on 2026-08-26): it lacks Chopok and Lomnický Štít (synoptic, so `?page=318` covers them), Holíč (11800), Oravice (11919) and Jakubovany (11963), and adds Bratislava - Mlynská Dolina (11810), absent from the feed all 30 days and therefore left out.
+    Oravice and Jakubovany are left out too, because no source gives their coordinates; the website table names them, so the ids are real.
+    **Sliač (11903), synoptic, was absent from the feed all 30 days** while still on the map, in OSCAR and on the website table; it stays in the catalogue because existing config entries refer to it, and the coordinator asserts that an entry's station exists.
+  - **Elevation comes from WMO OSCAR/Surface, because SHMÚ publishes none for non-synoptic stations.**
+    Searched and empty: `climate/now/metadata/` (element descriptions only), `?page=317`/`308`/`310` (network descriptions, no station tables), the per-station `?ii=` page.
+    OSCAR (`oscar.wmo.int/surface/rest/api/search/station?territoryName=SVK`, 78 records) is the WMO registry SHMÚ reports to: its coordinates equal the `?page=838` map's to six decimals, and over the synoptic stations its elevations agree with `?page=318` to a median 1 m (max 27 m, Donovaly).
+    A record is used only on an exact coordinate match; Holíč, which is not on the map, is matched by name and takes OSCAR's coordinates too.
+    OSCAR does not register most of SHMÚ's eastern regional stations, so **26 stations have `elevation=None`**, 9 of which report `tlak`; for them the sea-level pressure sensor is not created and the weather entity's pressure is unknown.
+  - **ALADIN orography is not a substitute** and was measured, not assumed: at the 68 stations with a known elevation, the hour-000 terrain of the nearest grid point misses by a median 46 m, p90 188 m, max 777 m (Lomnický Štít) — about 5.6, 23 and 94 hPa after reduction to sea level.
+  - **What the non-synoptic stations report** (70 in one snapshot): `t`, `vlh_rel` and wind at all 70, `zra_uhrn` 69, `sneh_pokr` 28, `tlak` 24, `zglo` 20, `stav_poc` 19, `dohl` 19.
+    Over the archive, 50 stations reported `tlak` and 35 `stav_poc` at least once.
+  - **The website table has a row for all 96 ids**, but its condition columns barely cover them: `Oblačnosť` was filled for 20/27 synoptic rows and 2/73 others, `Počasie` for 3 and 0.
+    So at a non-synoptic station the condition ladder resolves from `stav_poc` where one is reported and otherwise from ALADIN, with its dry-veto only where `stav_poc` exists.
+  `tests_e2e` pins that the catalogue still reports and that the feed carries no more than a couple of ids the catalogue lacks.
 
 ### ALADIN forecast
 
