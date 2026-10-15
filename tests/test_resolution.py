@@ -222,6 +222,7 @@ def test_explain_lists_all_candidates_winner_first() -> None:
     # Winner is first; tiers are human-readable.
     assert res.candidates[0].tier == "stav_poc"
     assert res.suppressed_model_condition is None
+    assert res.ignored_weather_code is None
 
 
 def test_explain_reports_the_veto_and_suppressed_condition() -> None:
@@ -246,3 +247,68 @@ def test_explain_unknown_has_no_candidates() -> None:
     assert (res.condition, res.source) == (None, "unknown")
     assert res.candidates == ()
     assert res.suppressed_model_condition is None
+
+
+def test_untrusted_precipitation_code_leaves_the_condition_to_the_model() -> None:
+    """An over-reporting sensor's drizzle must not paint the station rainy.
+
+    Five stations report codes 40/5x in 29-48 % of hours while the radar shows
+    an echo in a few (AGENTS.md); without this, ``stav_poc`` (78) outranks the
+    model and the station reads ``rainy`` most of the time.
+    """
+    res = explain_condition(
+        web=None,
+        weather_code=40,
+        precipitation=0.0,
+        forecast_step=_step("cloudy", cloud=90.0),
+        trust_precipitation_codes=False,
+    )
+    assert (res.condition, res.source) == ("cloudy", "aladin")
+    assert res.ignored_weather_code == 40
+    assert [c.source for c in res.candidates] == ["aladin"]
+
+
+def test_ignored_precipitation_code_is_not_a_quiet_observation() -> None:
+    """Dropping the code must not turn it into a veto of the model's rain."""
+    res = explain_condition(
+        web=None,
+        weather_code=52,
+        precipitation=0.0,
+        forecast_step=_step("rainy", cloud=90.0),
+        trust_precipitation_codes=False,
+    )
+    assert (res.condition, res.source) == ("rainy", "aladin")
+    assert res.suppressed_model_condition is None
+
+
+def test_untrusted_sensor_still_vetoes_the_model_when_quiet() -> None:
+    """Only the precipitation half is untrusted: its code 0 stays a veto."""
+    res = explain_condition(
+        web=None,
+        weather_code=0,
+        precipitation=0.0,
+        forecast_step=_step("lightning-rainy", cloud=90.0),
+        trust_precipitation_codes=False,
+    )
+    assert (res.condition, res.source) == ("cloudy", "aladin")
+    assert res.suppressed_model_condition == "lightning-rainy"
+    assert res.ignored_weather_code is None
+
+
+def test_untrusted_sensor_keeps_its_gauge_and_non_precipitation_codes() -> None:
+    # The station's own rain gauge is a separate instrument, still believed.
+    assert resolve_condition(
+        web=None,
+        weather_code=51,
+        precipitation=0.1,
+        forecast_step=None,
+        trust_precipitation_codes=False,
+    ) == ("rainy", "stav_poc")
+    # Fog is not a precipitation code, so it is not dropped.
+    assert resolve_condition(
+        web=None,
+        weather_code=30,
+        precipitation=0.0,
+        forecast_step=_step("cloudy", cloud=90.0),
+        trust_precipitation_codes=False,
+    ) == ("fog", "stav_poc")

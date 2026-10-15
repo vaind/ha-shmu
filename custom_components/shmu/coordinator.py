@@ -296,6 +296,7 @@ class ShmuData:
                 observation.precipitation if observation is not None else None
             ),
             forecast_step=self.current_forecast_step(now),
+            trust_precipitation_codes=not station.untrusted_precipitation_codes,
         )
 
     def web_conditions_ignored(self, now: datetime) -> bool:

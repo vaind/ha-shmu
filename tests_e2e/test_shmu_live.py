@@ -112,6 +112,20 @@ async def test_observations(client: ShmuClient) -> None:
     ]
     assert not back, f"reporting again, set in_feed=True in stations.py: {back}"
 
+    # A sensor flagged for over-reporting precipitation must still report a
+    # present-weather code at all; a station that stopped (sensor removed or
+    # replaced) leaves a dead flag, which should be dropped and re-measured.
+    silent = [
+        s.name
+        for s in STATIONS
+        if s.untrusted_precipitation_codes
+        and (o := snap.observations.get(s.ind_kli)) is not None
+        and o.weather_code is None
+    ]
+    assert not silent, (
+        f"no stav_poc any more, re-check untrusted_precipitation_codes: {silent}"
+    )
+
 
 async def test_observation_file_names_are_local_time(client: ShmuClient) -> None:
     # AGENTS.md: day folders and file names are Slovak wall time (CET/CEST),

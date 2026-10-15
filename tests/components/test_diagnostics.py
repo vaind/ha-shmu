@@ -55,6 +55,7 @@ async def test_config_entry_diagnostics(
     assert derived["condition"] == "rainy"
     assert derived["source"] == "website"
     assert derived["veto"]["active"] is False
+    assert derived["ignored_weather_code"] is None
     # The winning candidate is flagged and matches the resolved condition.
     winner = next(c for c in derived["candidates"] if c["won"])
     assert (winner["source"], winner["condition"]) == ("website", "rainy")

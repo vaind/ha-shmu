@@ -83,6 +83,17 @@ Where a verified fact is cheap to assert, pin it in `tests_e2e/` too, so the dai
   The reduction needs a real temperature, so it returns `None` when either pressure or temperature is missing rather than guessing a headline value.
 - `stav_poc` (present-weather code) is **per-station, not time-sparse**: only ~35/95 stations report it at all (≈16/27 synoptic). It is **WMO code table 4680 (wawa)**; `0` = "no significant weather" is a *real* value, not missing.
   It carries **no cloud cover**, so it cannot yield a trustworthy sky condition on its own.
+- **Five present-weather sensors report precipitation that is not falling, and the ladder ignores their precipitation codes** (`Station.untrusted_precipitation_codes`).
+  The stations are 11898 Banská Bystrica, 11949 Spišské Vlachy, 11893 Žabokreky, 11857 Turzovka and 11878 Liptovský Mikuláš, all non-synoptic and so new in the catalogue since PR #71.
+  **Measured live 2026-10-15** over one `aws1min` snapshot every 3 hours from 2026-09-14 to 2026-10-15 (248 snapshots), each against the `zmax` frame of its newest record, taking the strongest echo within 3 px (~1 km) of the station:
+  they reported a precipitation code (mostly 40, 51, 52) in **29–48 %** of snapshots, against **≤ 9 %** at the 29 other `stav_poc` stations, with nothing in between.
+  The radar showed an echo ≥ 15 dBZ in only 6–17 % of those reports (33–100 % elsewhere), and their own `zra_uhrn` gauge was wet in 1–4 % of them (10–67 % elsewhere).
+  An earlier hourly pass over the same month (751 snapshots) found the same five and the same pattern every day.
+  Some of it may be drizzle the radar cannot see, but the gauges are dry too, and much of it comes at moderate humidity.
+  Their code **0 is sound**: an echo ≥ 20 dBZ was present at under 2 % of their code-0 snapshots, the same as elsewhere, so it still vetoes the model's rain.
+  So `explain_condition(trust_precipitation_codes=False)` drops a code that maps to precipitation as if none had been reported, and the station's own gauge and ALADIN decide; the raw code is still published by the `weather_code` sensor, and diagnostics show the dropped code as `derived_condition.ignored_weather_code`.
+  A radar-dry veto would be the more general fix, but the radar is not in the ladder yet and would rank below `stav_poc` anyway.
+  Re-measure before adding or removing a station; `tests_e2e` fails only if a flagged station stops reporting `stav_poc` at all, since over-reporting cannot be seen in one snapshot.
 
 ### Condition and stations
 
