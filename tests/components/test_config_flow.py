@@ -6,7 +6,7 @@ import pytest
 from homeassistant.config_entries import SOURCE_USER
 from homeassistant.const import CONF_LATITUDE, CONF_LONGITUDE, CONF_NAME
 from homeassistant.core import HomeAssistant
-from homeassistant.data_entry_flow import FlowResultType
+from homeassistant.data_entry_flow import FlowResultType, InvalidData
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.shmu.config_flow import SYNOPTIC_MARK
@@ -157,9 +157,23 @@ async def test_user_flow_lists_every_station_marking_synoptic(
     )
     selector = next(iter(result["data_schema"].schema.values()))
     labels = {o["value"]: o["label"] for o in selector.config["options"]}
-    assert len(labels) == len(STATIONS)
+    assert len(labels) == sum(1 for s in STATIONS if s.in_feed)
+    # Sliač is kept for existing entries but not offered for new ones.
+    assert "11903" not in labels
     assert labels["11858"] == f"Hurbanovo {SYNOPTIC_MARK}"
     assert labels["11898"] == "Banská Bystrica"
+
+
+async def test_station_missing_from_the_feed_cannot_be_chosen(
+    hass: HomeAssistant,
+) -> None:
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": SOURCE_USER}
+    )
+    with pytest.raises(InvalidData):
+        await hass.config_entries.flow.async_configure(
+            result["flow_id"], {CONF_IND_KLI: "11903"}
+        )
 
 
 async def test_automatic_station_creates_entry(hass: HomeAssistant) -> None:

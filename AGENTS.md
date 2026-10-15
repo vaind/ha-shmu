@@ -102,6 +102,7 @@ Where a verified fact is cheap to assert, pin it in `tests_e2e/` too, so the dai
     The `?page=838` map listed 93 `AWS2` entries that day (94 on 2026-08-26): it lacks Chopok and Lomnický Štít (synoptic, so `?page=318` covers them), Holíč (11800), Oravice (11919) and Jakubovany (11963), and adds Bratislava - Mlynská Dolina (11810), absent from the feed all 30 days and therefore left out.
     Oravice and Jakubovany are left out too, because no source gives their coordinates; the website table names them, so the ids are real.
     **Sliač (11903), synoptic, was absent from the feed all 30 days** while still on the map, in OSCAR and on the website table; it stays in the catalogue because existing config entries refer to it, and the coordinator asserts that an entry's station exists.
+    It is marked `in_feed=False`, which keeps it out of the config flow and out of `nearest_station`; `tests_e2e` fails if it reports again, so the flag gets flipped back.
   - **Elevation comes from WMO OSCAR/Surface, because SHMÚ publishes none for non-synoptic stations.**
     Searched and empty: `climate/now/metadata/` (element descriptions only), `?page=317`/`308`/`310` (network descriptions, no station tables), the per-station `?ii=` page.
     OSCAR (`oscar.wmo.int/surface/rest/api/search/station?territoryName=SVK`, 78 records) is the WMO registry SHMÚ reports to: its coordinates equal the `?page=838` map's to six decimals, and over the synoptic stations its elevations agree with `?page=318` to a median 1 m (max 27 m, Donovaly).

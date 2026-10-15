@@ -30,7 +30,10 @@ Provenance — regenerate from these sources if the network changes:
 Only stations present in the feed are listed (``?page=838`` also maps
 Bratislava - Mlynská Dolina, 11810, which has not reported in 30 days), with
 one exception: the synoptic Sliač (11903) has been missing from the feed for as
-long, but stays because config entries refer to it. The list is near-complete,
+long, but stays because config entries refer to it. It is marked
+``in_feed=False``, so it is not offered for new entries or picked as the
+nearest station; existing entries still resolve it, and its entities stay
+unavailable until SHMÚ publishes it again. The list is near-complete,
 not total: Oravice (11919) and Jakubovany (11963) report but no source gives
 their coordinates, so callers must tolerate a feed id that is not here.
 
@@ -56,7 +59,9 @@ class Station:
     ``ind_kli`` is the key used to look the station up in the open-data
     observation feed. ``elevation`` is ``None`` where no authoritative value is
     known (see the module docstring). ``synoptic`` marks the stations of the
-    synoptic network, which report a fuller set of quantities.
+    synoptic network, which report a fuller set of quantities. ``in_feed`` is
+    ``False`` for a station kept only because existing entries refer to it
+    while SHMÚ does not publish its observations.
     """
 
     ind_kli: int
@@ -65,6 +70,7 @@ class Station:
     longitude: float
     elevation: float | None
     synoptic: bool = False
+    in_feed: bool = True
 
     def distance_km(self, latitude: float, longitude: float) -> float:
         """Great-circle distance in km from this station to a point."""
@@ -120,7 +126,8 @@ STATIONS: tuple[Station, ...] = (
     Station(11900, "Žiar nad Hronom", 48.5861, 18.8522, 275.0, synoptic=True),
     Station(11901, "Banská Štiavnica", 48.449061, 18.919689, 570.0),
     Station(11902, "Bzovík", 48.318611, 19.0925, 353.0),
-    Station(11903, "Sliač", 48.6425, 19.1419, 313.0, synoptic=True),
+    # Absent from aws1min since at least 2026-09-14; still on the SHMÚ website.
+    Station(11903, "Sliač", 48.6425, 19.1419, 313.0, synoptic=True, in_feed=False),
     Station(11904, "Vígľaš - Pstruša", 48.543744, 19.320137, 368.0),
     Station(11905, "Dolné Plachtince", 48.203056, 19.311667, 192.0),
     Station(11908, "Liptovská Osada", 48.950556, 19.272222, 618.0),
@@ -179,5 +186,12 @@ def get_station(ind_kli: int) -> Station | None:
 
 
 def nearest_station(latitude: float, longitude: float) -> Station:
-    """Return the station closest to the given coordinates."""
-    return min(STATIONS, key=lambda s: s.distance_km(latitude, longitude))
+    """Return the station closest to the given coordinates.
+
+    Only stations SHMÚ currently publishes are considered: one with
+    ``in_feed=False`` would never yield an observation.
+    """
+    return min(
+        (s for s in STATIONS if s.in_feed),
+        key=lambda s: s.distance_km(latitude, longitude),
+    )

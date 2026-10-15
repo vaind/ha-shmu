@@ -413,6 +413,21 @@ async def test_device_name_falls_back_to_station(
     assert device.model == "Synoptic station"
 
 
+async def test_existing_entry_on_a_station_missing_from_the_feed_still_loads(
+    hass: HomeAssistant, load: Callable[[str], bytes]
+) -> None:
+    # Sliač is no longer offered by the config flow, but entries created
+    # while it was must still set up; with no observation, its station
+    # entities are unavailable rather than the entry failing.
+    entry, _ = await _setup_entry(
+        hass, load, data={CONF_IND_KLI: 11903, CONF_NAME: "Sliac"}
+    )
+    assert entry.state is ConfigEntryState.LOADED
+    assert hass.states.get("sensor.sliac_temperature").state == "unavailable"
+    # The forecast-backed and national entities are unaffected.
+    assert hass.states.get("binary_sensor.sliac_weather_warning").state == "off"
+
+
 #: A non-synoptic station whose elevation no source publishes (OSCAR does not
 #: register it), but which does report station pressure.
 _BARDEJOV = 11962

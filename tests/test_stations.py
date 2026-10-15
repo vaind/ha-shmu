@@ -60,3 +60,13 @@ def test_nearest_station() -> None:
     assert nearest_station(48.7164, 21.2611).name == "Košice - Podhradová"
     # Right on top of a synoptic station -> that station.
     assert nearest_station(47.8733, 18.1944).name == "Hurbanovo"
+
+
+def test_station_missing_from_the_feed_is_kept_but_never_nearest() -> None:
+    # Existing entries for Sliač must keep resolving...
+    sliac = get_station(11903)
+    assert sliac is not None
+    assert not sliac.in_feed
+    # ...but even standing on it, a reporting station is chosen instead.
+    assert nearest_station(sliac.latitude, sliac.longitude).name == "Banská Bystrica"
+    assert [s.ind_kli for s in STATIONS if not s.in_feed] == [11903]

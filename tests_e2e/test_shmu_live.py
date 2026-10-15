@@ -103,6 +103,13 @@ async def test_observations(client: ShmuClient) -> None:
     unknown = set(snap.observations) - {s.ind_kli for s in STATIONS}
     assert len(unknown) <= 3, f"feed ids missing from stations.py: {sorted(unknown)}"
 
+    # A station marked in_feed=False is hidden from new entries; if SHMÚ
+    # publishes it again, flip the flag so it can be chosen once more.
+    back = [
+        s.name for s in STATIONS if not s.in_feed and s.ind_kli in snap.observations
+    ]
+    assert not back, f"reporting again, set in_feed=True in stations.py: {back}"
+
 
 async def test_observation_file_names_are_local_time(client: ShmuClient) -> None:
     # AGENTS.md: day folders and file names are Slovak wall time (CET/CEST),

@@ -50,6 +50,9 @@ _STATION_OPTIONS = [
         label=f"{station.name} {SYNOPTIC_MARK}" if station.synoptic else station.name,
     )
     for station in sorted(STATIONS, key=lambda s: s.name)
+    # A station SHMÚ no longer publishes stays in the catalogue only so that
+    # existing entries keep loading; a new entry on it would never get data.
+    if station.in_feed
 ]
 
 
