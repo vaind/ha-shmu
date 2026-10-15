@@ -45,7 +45,7 @@ from .website import WebCondition
 #: Vendored library version (no PyPI distribution to read it from). It ships
 #: only inside the integration, so it is bumped with ``manifest.json`` rather
 #: than read from it — the library must not depend on its host package.
-__version__ = "0.11.0"
+__version__ = "0.11.1"
 
 __all__ = [
     "GAUGES",
