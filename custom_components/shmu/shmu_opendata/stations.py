@@ -126,7 +126,8 @@ STATIONS: tuple[Station, ...] = (
     Station(11900, "Žiar nad Hronom", 48.5861, 18.8522, 275.0, synoptic=True),
     Station(11901, "Banská Štiavnica", 48.449061, 18.919689, 570.0),
     Station(11902, "Bzovík", 48.318611, 19.0925, 353.0),
-    # Absent from aws1min since at least 2026-09-14; still on the SHMÚ website.
+    # Sliač (11903): absent from aws1min since at least 2026-09-14, the oldest
+    # day the ~32-day archive held on 2026-10-15; still on the shmu.sk table.
     Station(11903, "Sliač", 48.6425, 19.1419, 313.0, synoptic=True, in_feed=False),
     Station(11904, "Vígľaš - Pstruša", 48.543744, 19.320137, 368.0),
     Station(11905, "Dolné Plachtince", 48.203056, 19.311667, 192.0),
