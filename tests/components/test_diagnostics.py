@@ -55,6 +55,13 @@ async def test_config_entry_diagnostics(
     assert derived["condition"] == "rainy"
     assert derived["source"] == "website"
     assert derived["veto"]["active"] is False
+    assert derived["veto"]["by"] is None
+    # The fixture's radar frames date from 2026-05-17: sampled, but far too old
+    # to enter the ladder.
+    local_echo = diag["radar"]["local_echo"]
+    assert local_echo["covered"] is True
+    assert local_echo["in_ladder"] is False
+
     assert derived["ignored_weather_code"] is None
     # The winning candidate is flagged and matches the resolved condition.
     winner = next(c for c in derived["candidates"] if c["won"])

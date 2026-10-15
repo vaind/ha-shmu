@@ -38,6 +38,7 @@ rather than rendering a meaningless picture.
 
 from __future__ import annotations
 
+import math
 import struct
 import zlib
 from collections.abc import Sequence
@@ -198,6 +199,70 @@ class RadarImage:
     product: str
     max_dbz: float | None
     zstream: bytes
+
+
+#: Radius, in source pixels (~0.33 km each), of the disc :func:`local_echo`
+#: takes the strongest echo over: ~1 km. **Measured 2026-10-15** against the
+#: present-weather code of 29 stations over a month (AGENTS.md): 3 px scored
+#: best; wider discs bought fewer extra hits than they cost in false alarms.
+LOCAL_ECHO_RADIUS_PX: Final = 3
+
+
+@dataclass(frozen=True, slots=True)
+class LocalEcho:
+    """The strongest radar echo near one point in one composite.
+
+    ``max_dbz`` is the strongest reflectivity among the covered pixels within
+    :data:`LOCAL_ECHO_RADIUS_PX`, or ``None`` when they are covered but show
+    no echo at all — a positive "dry", distinct from no coverage, which
+    :func:`local_echo` reports by returning ``None`` instead.
+    """
+
+    max_dbz: float | None
+
+
+def local_echo(
+    composite: OdimComposite,
+    latitude: float,
+    longitude: float,
+    radius_px: int = LOCAL_ECHO_RADIUS_PX,
+) -> LocalEcho | None:
+    """The strongest echo within ``radius_px`` of a point, or ``None``.
+
+    ``None`` means the radar says nothing there: the point lies outside the
+    composite or every pixel of the disc is ``nodata`` (never radiated). An
+    ``undetect`` pixel is a covered, echo-free one. Raises
+    :class:`ShmuDataError` for a non-reflectivity product, like
+    :func:`render_composite`.
+    """
+    if composite.quantity != _DBZH or composite.dtype != "u8":
+        raise ShmuDataError(
+            f"Unsupported radar product {composite.product!r} "
+            f"(quantity {composite.quantity!r}); expected a {_DBZH} composite"
+        )
+    col, row = lonlat_to_pixel(composite, longitude, latitude)
+    ccol, crow = math.floor(col), math.floor(row)
+    covered = False
+    peak_raw = -1
+    for r in range(crow - radius_px, crow + radius_px + 1):
+        if not 0 <= r < composite.height:
+            continue
+        for c in range(ccol - radius_px, ccol + radius_px + 1):
+            if not 0 <= c < composite.width:
+                continue
+            if (r - crow) ** 2 + (c - ccol) ** 2 > radius_px**2:
+                continue
+            raw_val = composite.raw[r * composite.width + c]
+            if raw_val == _RAW_NO_DATA:
+                continue
+            covered = True
+            if raw_val != _RAW_NO_ECHO and raw_val > peak_raw:
+                peak_raw = raw_val
+    if not covered:
+        return None
+    if peak_raw < 0:
+        return LocalEcho(max_dbz=None)
+    return LocalEcho(max_dbz=round(composite.offset + composite.gain * peak_raw, 1))
 
 
 def _palette() -> bytes:

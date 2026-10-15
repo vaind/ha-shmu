@@ -119,10 +119,12 @@ async def async_get_config_entry_diagnostics(
                 }
                 for index, c in enumerate(resolution.candidates)
             ],
-            # ``active`` when a station's "no significant weather" observation
-            # vetoed the model's precipitation/storm candidate.
+            # ``active`` when an observation vetoed the model's
+            # precipitation/storm candidate; ``by`` says which: the station's
+            # "no significant weather" (stav_poc) or an echo-free radar pixel.
             "veto": {
                 "active": resolution.suppressed_model_condition is not None,
+                "by": resolution.suppressed_by,
                 "suppressed_model_condition": resolution.suppressed_model_condition,
             },
             # A precipitation code the ladder left out because this station's
@@ -254,6 +256,16 @@ async def async_get_config_entry_diagnostics(
             "png_bytes": [len(radar.image.png), len(radar.map_image.png)],
             "loop_bytes": [len(radar.loop_png), len(radar.map_loop_png)],
             "max_dbz": radar.image.max_dbz,
+            # The newest frame's echo within ~1 km of the location, as the
+            # condition ladder sees it: ``covered`` false when the radar says
+            # nothing there, ``in_ladder`` false once the frame is too old.
+            "local_echo": {
+                "covered": radar.frames[-1].echo is not None,
+                "max_dbz": radar.frames[-1].echo.max_dbz
+                if radar.frames[-1].echo is not None
+                else None,
+                "in_ladder": data.current_radar_echo(dt_util.utcnow()) is not None,
+            },
             # Coarsened: the crop is centred on the measurement location, which
             # may be the user's home (see ``_coarse``).
             "center": [

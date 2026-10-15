@@ -52,6 +52,7 @@ from custom_components.shmu.shmu_opendata.parsers import (
     parse_observations,
 )
 from custom_components.shmu.shmu_opendata.pressure import sea_level_pressure
+from custom_components.shmu.shmu_opendata.radar import LocalEcho
 from custom_components.shmu.shmu_opendata.website import parse_current_conditions
 
 #: Forecast hours backed by the trimmed real GRIB2 fixtures.
@@ -102,6 +103,10 @@ class _FakeClient:
         #: tests can assert the measurement location reaches the client.
         self.forecast_coords: tuple[float, float] | None = None
         self.radar_coords: tuple[float, float] | None = None
+        self.radar_echo_at: tuple[float, float] | None = None
+        #: ``(valid_at, echo)`` for the newest radar frame, overriding the
+        #: fixture's 2026-05-17 frame, so a test can present a current echo.
+        self.radar_newest: tuple[datetime, LocalEcho | None] | None = None
         self._serial = 0
 
     async def async_get_observations(self, previous=None) -> ObservationSnapshot:
@@ -200,19 +205,28 @@ class _FakeClient:
         )
 
     async def async_get_radar(
-        self, latitude, longitude, *, product="zmax", previous=None, tz=None
+        self,
+        latitude,
+        longitude,
+        *,
+        product="zmax",
+        previous=None,
+        tz=None,
+        echo_at=None,
     ) -> RadarSnapshot:
         self.radar_coords = (latitude, longitude)
+        self.radar_echo_at = echo_at
         frames = []
         for m in ("10", "15", "20"):
             valid_at = datetime(2026, 5, 17, 20, int(m), tzinfo=UTC)
             # Render through the client's own helper, so the double cannot
             # drift from the picture/map pair the real client produces.
-            image, map_image = _render_frame(
+            image, map_image, echo = _render_frame(
                 self._load("radar_zmax.hdf"),
                 latitude,
                 longitude,
                 _frame_label(valid_at, tz),
+                echo_at or (latitude, longitude),
             )
             frames.append(
                 RadarFrame(
@@ -220,8 +234,13 @@ class _FakeClient:
                     map_image=map_image,
                     source=f"test-run/20260517/T_PABV22_C_LZIB_2026051720{m}00.hdf",
                     valid_at=valid_at,
+                    echo=echo,
                 )
             )
+        if self.radar_newest is not None:
+            # Stand in for a freshly published frame with a chosen echo.
+            valid_at, echo = self.radar_newest
+            frames[-1] = replace(frames[-1], valid_at=valid_at, echo=echo)
         return _radar_snapshot(frames, product)
 
 
@@ -674,6 +693,11 @@ async def test_location_mode_home(
         18.92,
     )
     assert client.forecast_coords == (49.05, 18.92)
+    # The radar crop follows the location, but the condition's echo is taken
+    # at the station, where its present weather and temperature are measured.
+    assert client.radar_coords == (49.05, 18.92)
+    station = get_station(11858)
+    assert client.radar_echo_at == (station.latitude, station.longitude)
 
 
 async def test_location_mode_custom(

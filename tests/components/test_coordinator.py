@@ -4,10 +4,14 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 from homeassistant.util import dt as dt_util
 
-from custom_components.shmu.const import WEB_CONDITIONS_STALE_AFTER
+from custom_components.shmu.const import (
+    RADAR_ECHO_STALE_AFTER,
+    WEB_CONDITIONS_STALE_AFTER,
+)
 from custom_components.shmu.coordinator import (
     ShmuData,
     _accumulations_tile,
@@ -16,12 +20,15 @@ from custom_components.shmu.coordinator import (
 from custom_components.shmu.shmu_opendata import (
     ForecastSnapshot,
     ForecastStep,
+    LocalEcho,
     Observation,
     ObservationSnapshot,
+    RadarFrame,
     WebCondition,
     WebConditionsSnapshot,
     get_station,
 )
+from custom_components.shmu.shmu_opendata.client import _radar_snapshot, _render_frame
 
 # Europe/Bratislava is UTC+2 in July, so local midnight on the 21st is 22:00 UTC
 # on the 20th. The helper compares instants, so a UTC-aware value is enough.
@@ -291,6 +298,56 @@ def test_stale_website_conditions_do_not_win_the_ladder() -> None:
 
     assert data.resolve_condition(station, None) == (None, "unknown")
     assert data.web_conditions_ignored(dt_util.utcnow())
+
+
+def _radar_data(valid_at: datetime, echo: LocalEcho | None) -> ShmuData:
+    """Coordinator data whose only condition source is a radar frame."""
+    payload = (Path(__file__).parents[1] / "fixtures" / "radar_zmax.hdf").read_bytes()
+    station = get_station(11858)
+    assert station is not None
+    image, map_image, _ = _render_frame(
+        payload,
+        station.latitude,
+        station.longitude,
+        "label",
+        (station.latitude, station.longitude),
+    )
+    frame = RadarFrame(
+        image=image, map_image=map_image, source="t", valid_at=valid_at, echo=echo
+    )
+    return ShmuData(
+        observations=ObservationSnapshot(
+            observations={}, source="t", fetched_at=valid_at, published_at=None
+        ),
+        warnings=None,
+        web_conditions=None,
+        forecast=None,
+        radar=_radar_snapshot([frame], "zmax"),
+        gauge_observations=None,
+    )
+
+
+def test_a_current_radar_echo_enters_the_ladder() -> None:
+    station = get_station(11858)
+    assert station is not None
+    # A frame reaches the listing ~6 min after its nominal time.
+    data = _radar_data(dt_util.utcnow() - timedelta(minutes=8), LocalEcho(30.0))
+
+    assert data.resolve_condition(station, None) == ("rainy", "radar")
+
+
+def test_a_stale_radar_frame_says_nothing() -> None:
+    """A held frame from a radar that stopped updating must not assert rain,
+    nor (more importantly) keep vetoing the model's."""
+    station = get_station(11858)
+    assert station is not None
+    data = _radar_data(
+        dt_util.utcnow() - RADAR_ECHO_STALE_AFTER - timedelta(minutes=1),
+        LocalEcho(30.0),
+    )
+
+    assert data.current_radar_echo(dt_util.utcnow()) is None
+    assert data.resolve_condition(station, None) == (None, "unknown")
 
 
 def _observation(ind_kli: int, weather_code: int) -> Observation:

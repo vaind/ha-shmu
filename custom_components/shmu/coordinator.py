@@ -37,6 +37,7 @@ from .const import (
     POLL_OFFSET_MAX_SECONDS,
     POLL_OFFSET_MIN_SECONDS,
     POLL_OFFSET_PAD_SECONDS,
+    RADAR_ECHO_STALE_AFTER,
     WEB_CONDITIONS_STALE_AFTER,
 )
 from .shmu_opendata import (
@@ -47,6 +48,7 @@ from .shmu_opendata import (
     Gauge,
     GaugeObservation,
     GaugeSnapshot,
+    LocalEcho,
     Observation,
     ObservationSnapshot,
     RadarFrame,
@@ -267,7 +269,7 @@ class ShmuData:
         diagnostics so they cannot drift. ``observation`` is supplied by the
         caller (the coordinator's carried-forward reading) so the fallback
         survives a one-cycle station dropout. ``source`` is ``"website"``,
-        ``"stav_poc"``, ``"aladin"`` or ``"unknown"``; the day/night
+        ``"stav_poc"``, ``"radar"``, ``"aladin"`` or ``"unknown"``; the day/night
         ``sunny`` -> ``clear-night`` shift is a UI concern and stays in the
         weather entity.
         """
@@ -296,8 +298,26 @@ class ShmuData:
                 observation.precipitation if observation is not None else None
             ),
             forecast_step=self.current_forecast_step(now),
+            radar_echo=self.current_radar_echo(now),
+            temperature=observation.temperature if observation is not None else None,
             trust_precipitation_codes=not station.untrusted_precipitation_codes,
         )
+
+    def current_radar_echo(self, now: datetime) -> LocalEcho | None:
+        """The echo near the station in a current radar frame, or ``None``.
+
+        Taken at the station (see ``_fetch``), from the newest frame, and only
+        while that frame is within :data:`RADAR_ECHO_STALE_AFTER` of ``now``:
+        a held frame from a radar that stopped updating must not veto or
+        assert precipitation. ``None`` also when the frame does not cover the
+        point.
+        """
+        if self.radar is None or not self.radar.frames:
+            return None
+        newest = self.radar.frames[-1]
+        if now - newest.valid_at > RADAR_ECHO_STALE_AFTER:
+            return None
+        return newest.echo
 
     def web_conditions_ignored(self, now: datetime) -> bool:
         """Whether a held website scrape is too old to enter the ladder.
@@ -841,6 +861,10 @@ class ShmuDataUpdateCoordinator(DataUpdateCoordinator[ShmuData]):
             self.location_longitude,
             previous=previous.radar if previous else None,
             tz=self.hass.config.time_zone,
+            # The ladder pairs the echo with the station's own present
+            # weather and temperature, and it was validated at station
+            # pixels, so it is sampled there, not at the measurement location.
+            echo_at=(self.station.latitude, self.station.longitude),
         )
         # A second, ~3x denser observation network (~70 KB vs the 392 KB
         # observation snapshot), on the same 5-minute grid and with the same

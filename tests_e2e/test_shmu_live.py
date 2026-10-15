@@ -233,3 +233,13 @@ async def test_radar(client: ShmuClient) -> None:
     assert snap.image.png.startswith(_PNG_SIGNATURE)
     assert snap.map_image.png.startswith(_PNG_SIGNATURE)
     assert snap.loop_png.startswith(_PNG_SIGNATURE)
+
+    # The condition ladder reads the newest frame's echo and drops it once the
+    # frame is older than RADAR_ECHO_STALE_AFTER (20 min, integration
+    # const.py). AGENTS.md: a frame reaches the listing 5-8 min after its
+    # nominal time, so the newest is at most ~14 min old; and the radar
+    # covered every station all month.
+    newest = snap.frames[-1]
+    assert newest.echo is not None, "radar does not cover the test point"
+    age = datetime.now(UTC) - newest.valid_at
+    assert age <= timedelta(minutes=15), f"newest radar frame is {age} old"

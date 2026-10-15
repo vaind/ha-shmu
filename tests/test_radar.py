@@ -6,11 +6,16 @@ import itertools
 import math
 import struct
 import zlib
+from dataclasses import replace
 
 import pytest
 
 from custom_components.shmu.shmu_opendata.exceptions import ShmuDataError
-from custom_components.shmu.shmu_opendata.geo import pixel_to_lonlat, vicinity_box
+from custom_components.shmu.shmu_opendata.geo import (
+    lonlat_to_pixel,
+    pixel_to_lonlat,
+    vicinity_box,
+)
 from custom_components.shmu.shmu_opendata.odim import read_odim
 from custom_components.shmu.shmu_opendata.radar import (
     _IDX_BORDER,
@@ -19,6 +24,7 @@ from custom_components.shmu.shmu_opendata.radar import (
     _IDX_RING,
     _N_DBZ,
     MAP_OVERLAY,
+    LocalEcho,
     RadarImage,
     RadarStyle,
     _draw_label,
@@ -28,6 +34,7 @@ from custom_components.shmu.shmu_opendata.radar import (
     _palette,
     _rows_from_zstream,
     encode_apng,
+    local_echo,
     render_radar,
 )
 
@@ -413,3 +420,53 @@ def test_progress_markers_match_timestamp_width_and_grow() -> None:
         _draw_progress(c, w, h, i, total)
         counts.append(sum(r.count(_IDX_DOT) for r in c))
     assert all(a < b for a, b in itertools.pairwise(counts))
+
+
+def _blank(fixture, raw_val: int = 0):
+    """The fixture composite with every pixel set to ``raw_val``."""
+    o = read_odim(fixture("radar_zmax.hdf"))
+    return replace(o, raw=bytes([raw_val]) * (o.width * o.height))
+
+
+def _set(composite, col: int, row: int, raw_val: int):
+    raw = bytearray(composite.raw)
+    raw[row * composite.width + col] = raw_val
+    return replace(composite, raw=bytes(raw))
+
+
+def _station_pixel(composite) -> tuple[int, int]:
+    col, row = lonlat_to_pixel(composite, _LON, _LAT)
+    return math.floor(col), math.floor(row)
+
+
+def test_local_echo_reports_a_covered_dry_pixel_as_no_echo(fixture) -> None:
+    assert local_echo(_blank(fixture), _LAT, _LON) == LocalEcho(max_dbz=None)
+
+
+def test_local_echo_takes_the_strongest_echo_within_the_disc(fixture) -> None:
+    o = _blank(fixture)
+    col, row = _station_pixel(o)
+    o = _set(o, col + 2, row, 100)  # inside the 3 px disc
+    o = _set(o, col, row - 1, 120)  # inside, stronger
+    o = _set(o, col + 3, row + 3, 250)  # corner of the box, 4.2 px away: outside
+    echo = local_echo(o, _LAT, _LON)
+    assert echo == LocalEcho(max_dbz=round(o.offset + o.gain * 120, 1))
+
+
+def test_local_echo_is_none_without_coverage(fixture) -> None:
+    # Every pixel "never radiated": the radar says nothing about the point.
+    assert local_echo(_blank(fixture, 255), _LAT, _LON) is None
+    # And a point beyond the mosaic.
+    assert local_echo(_blank(fixture), 60.0, 40.0) is None
+
+
+def test_local_echo_uses_the_covered_part_of_a_partly_covered_disc(fixture) -> None:
+    o = _blank(fixture, 255)
+    col, row = _station_pixel(o)
+    o = _set(o, col + 1, row + 1, 0)  # one covered, echo-free pixel
+    assert local_echo(o, _LAT, _LON) == LocalEcho(max_dbz=None)
+
+
+def test_local_echo_rejects_a_non_reflectivity_product(fixture) -> None:
+    with pytest.raises(ShmuDataError, match="Unsupported radar product"):
+        local_echo(read_odim(fixture("radar_unsupported.hdf")), _LAT, _LON)
