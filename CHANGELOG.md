@@ -4,6 +4,12 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- Fewer `SHMÚ … unavailable, keeping previous: … Server disconnected` warnings and `Error fetching shmu data` errors. SHMÚ's server now and then hangs up on a request without answering it; aiohttp already resends a request once in that case, but production logs showed the resend hanging up too, so a source fell back to its previous data, or the whole poll failed for observations, until the next poll five minutes later. Such a request is now retried up to two more times, which is safe because fetching a file changes nothing on the server. Any other failure — a timeout, a refused connection, an error status — still falls back at once.
+
 ## [0.11.0] - 2026-10-13
 
 ### Changed

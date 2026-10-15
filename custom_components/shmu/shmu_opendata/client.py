@@ -29,6 +29,7 @@ from .const import (
     BASE_URL,
     DEFAULT_RADAR_PRODUCT,
     DEFAULT_TIMEOUT,
+    DISCONNECT_RETRIES,
     FORECAST_HOURS,
     FORECAST_PATH,
     MIN_FORECAST_HOURS,
@@ -289,21 +290,33 @@ class ShmuClient:
         self._timeout = aiohttp.ClientTimeout(total=timeout)
 
     async def _request(self, url: str) -> tuple[bytes, datetime | None]:
-        """Fetch ``url``; return its body and parsed ``Last-Modified`` (UTC)."""
-        try:
-            async with self._session.get(
-                url,
-                timeout=self._timeout,
-                headers={"User-Agent": USER_AGENT},
-                ssl=self._ssl,
-            ) as response:
-                response.raise_for_status()
-                body = await response.read()
-                last_modified = response.headers.get("Last-Modified")
-        except aiohttp.ClientError as err:
-            raise ShmuConnectionError(f"Failed to fetch {url}: {err}") from err
-        except TimeoutError as err:
-            raise ShmuConnectionError(f"Timed out fetching {url}") from err
+        """Fetch ``url``; return its body and parsed ``Last-Modified`` (UTC).
+
+        Only a :class:`aiohttp.ServerDisconnectedError` is retried: the server
+        hung up before a complete response arrived, and a GET is idempotent,
+        so resending it is safe. Everything else — timeouts, refused or reset
+        connections, error statuses, a body cut short — fails at once and is
+        left to the caller's keep-previous fallback.
+        """
+        attempt = 1
+        while True:
+            try:
+                body, last_modified = await self._request_once(url)
+                break
+            except aiohttp.ServerDisconnectedError as err:
+                if attempt > DISCONNECT_RETRIES:
+                    raise ShmuConnectionError(f"Failed to fetch {url}: {err}") from err
+                _LOGGER.debug(
+                    "%s closed without answering (attempt %d of %d), retrying",
+                    url,
+                    attempt,
+                    DISCONNECT_RETRIES + 1,
+                )
+                attempt += 1
+            except aiohttp.ClientError as err:
+                raise ShmuConnectionError(f"Failed to fetch {url}: {err}") from err
+            except TimeoutError as err:
+                raise ShmuConnectionError(f"Timed out fetching {url}") from err
 
         published_at: datetime | None = None
         if last_modified:
@@ -312,6 +325,17 @@ class ShmuClient:
             except TypeError, ValueError:
                 published_at = None
         return body, published_at
+
+    async def _request_once(self, url: str) -> tuple[bytes, str | None]:
+        """One GET of ``url``: its body and raw ``Last-Modified`` header."""
+        async with self._session.get(
+            url,
+            timeout=self._timeout,
+            headers={"User-Agent": USER_AGENT},
+            ssl=self._ssl,
+        ) as response:
+            response.raise_for_status()
+            return await response.read(), response.headers.get("Last-Modified")
 
     async def _get_url(self, url: str) -> bytes:
         body, _ = await self._request(url)

@@ -31,6 +31,19 @@ Where a verified fact is cheap to assert, pin it in `tests_e2e/` too, so the dai
 ### The server
 
 - **opendata.shmu.sk serves a broken TLS chain**: it sends only the leaf cert and omits the Sectigo intermediate ("Sectigo Public Server Authentication CA DV R36"). We bundle that intermediate (`custom_components/shmu/shmu_opendata/certs/`, fetched from the cert's AIA) and add it to a normal trust store. **Never** disable verification to "fix" a TLS error here — refresh the bundled intermediate.
+- **It sometimes hangs up without answering, and that one failure is retried.**
+  Production Sentry (2026-10-14/15, aiohttp 3.14.4) showed `Failed to fetch …: Server disconnected` every 30–60 minutes, spread across every feed, on listings and files alike, each cleared by the next poll.
+  That bare message is aiohttp's `ServerDisconnectedError` for a connection the server closed before a complete response arrived (normally before its first byte); a close mid-body reads `Response payload is not completed` instead (`ClientPayloadError`).
+  **Verified live 2026-10-15**: Apache answers `Keep-Alive: timeout=5, max=100` and closes an idle connection after ~5 s, while aiohttp ignores that header and pools idle connections for 15 s (HA's shared connector keeps that default).
+  aiohttp does skip a pooled connection whose close it has already seen (`is_connected()` in `connector._get`), so dead connections do not pile up; a hang-up needs the close and our request to cross in flight.
+  aiohttp also resends an idempotent request once by itself, so every logged failure is a request that hung up **twice**; a loopback test (`test_recovers_from_a_real_close_without_answer`) reproduces exactly that message.
+  `ShmuClient._request` therefore retries `ServerDisconnectedError` — and only it — up to `DISCONNECT_RETRIES` more times; a GET is idempotent, so resending it is safe (RFC 9112 §9.3.1).
+  The same retry covers the website scrape on `www.shmu.sk`, since every fetch goes through `_request`.
+  Timeouts, refused connections, error statuses and truncated bodies still fail at once into the coordinator's keep-previous fallback, and so does a connection *reset* (`ClientOSError`), which the same race could produce but which has not been seen in production.
+  **Why it hangs up twice is not established.** A replay of one coordinator poll (92 requests, aiohttp 3.14.4, 2026-10-15) never reused a connection idle for more than ~2 s, far inside the 5 s window, and found no dead pooled connection, so the plain keep-alive race does not explain repeated hang-ups.
+  Something on the server side (worker recycling, a middlebox) or a busier HA event loop is more likely.
+  If the retry stops being enough, instrument the session with an aiohttp `TraceConfig` (new vs reused connection, idle time per attempt) before changing the bound.
+  The server speaks HTTP/1.1 only (no `h2` in ALPN, no `Alt-Svc`), so HTTP/2's GOAWAY or QUIC's negotiated idle timeout, which would remove the race, are not available.
 - **It is a plain Apache file index**, no API. Finding the newest file means parsing an HTML directory listing; hrefs are percent-encoded.
 
 ### Observations and rain gauges
