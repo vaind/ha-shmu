@@ -21,6 +21,7 @@ from custom_components.shmu.shmu_opendata import (
     ForecastSnapshot,
     ForecastStep,
     LocalEcho,
+    Observation,
     ObservationSnapshot,
     RadarFrame,
     WebCondition,
@@ -343,3 +344,42 @@ def test_a_stale_radar_frame_says_nothing() -> None:
 
     assert data.current_radar_echo(dt_util.utcnow()) is None
     assert data.resolve_condition(station, None) == (None, "unknown")
+
+
+def _observation(ind_kli: int, weather_code: int) -> Observation:
+    """A dry reading carrying only what the condition ladder reads."""
+    return Observation(
+        ind_kli=ind_kli,
+        measured_at=dt_util.utcnow(),
+        temperature=None,
+        humidity=None,
+        pressure=None,
+        wind_speed=None,
+        wind_gust=None,
+        wind_bearing=None,
+        precipitation=0.0,
+        snow_depth=None,
+        visibility=None,
+        ground_temperature=None,
+        global_radiation=None,
+        weather_code=weather_code,
+        raw={},
+    )
+
+
+def test_untrusted_present_weather_sensor_cannot_claim_rain() -> None:
+    """The station's flag reaches the ladder: its drizzle code is left out."""
+    data = replace(_web_data(dt_util.utcnow()), web_conditions=None)
+    banska_bystrica = get_station(11898)
+    hurbanovo = get_station(11858)
+    assert banska_bystrica is not None and hurbanovo is not None
+    assert banska_bystrica.untrusted_precipitation_codes
+
+    resolution = data.explain_condition(banska_bystrica, _observation(11898, 51))
+    assert (resolution.condition, resolution.source) == (None, "unknown")
+    assert resolution.ignored_weather_code == 51
+    # The same code from a sound sensor is believed.
+    assert data.resolve_condition(hurbanovo, _observation(11858, 51)) == (
+        "rainy",
+        "stav_poc",
+    )

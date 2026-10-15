@@ -44,6 +44,12 @@ at the 68 stations with a known elevation it misses by a median 46 m and up to
 777 m, i.e. tens of hPa once reduced to sea level, so a station with an
 unknown elevation borrows a neighbour's sea-level pressure instead (see
 :mod:`shmu_opendata.borrowing`).
+
+Five stations' present-weather sensors report precipitation far more often
+than it falls (measured against the radar composite and the stations' own
+gauges, see AGENTS.md), so they are marked ``untrusted_precipitation_codes``
+and the condition ladder ignores their precipitation codes
+(:mod:`shmu_opendata.resolution`). The raw code is still published as is.
 """
 
 from __future__ import annotations
@@ -63,6 +69,9 @@ class Station:
     synoptic network, which report a fuller set of quantities. ``in_feed`` is
     ``False`` for a station kept only because existing entries refer to it
     while SHMÚ does not publish its observations.
+    ``untrusted_precipitation_codes`` marks a present-weather sensor that
+    reports precipitation codes far more often than it rains or snows;
+    its "no significant weather" is still trusted.
     """
 
     ind_kli: int
@@ -72,6 +81,7 @@ class Station:
     elevation: float | None
     synoptic: bool = False
     in_feed: bool = True
+    untrusted_precipitation_codes: bool = False
 
     def distance_km(self, latitude: float, longitude: float) -> float:
         """Great-circle distance in km from this station to a point."""
@@ -101,7 +111,14 @@ STATIONS: tuple[Station, ...] = (
     Station(11849, "Žikava", 48.458319, 18.388436, 319.0),
     Station(11855, "Nitra", 48.2806, 18.1356, 135.0, synoptic=True),
     Station(11856, "Mochovce", 48.2894, 18.4561, 261.0, synoptic=True),
-    Station(11857, "Turzovka", 49.401564, 18.626783, 496.0),
+    Station(
+        11857,
+        "Turzovka",
+        49.401564,
+        18.626783,
+        496.0,
+        untrusted_precipitation_codes=True,
+    ),
     Station(11858, "Hurbanovo", 47.8733, 18.1944, 115.0, synoptic=True),
     Station(11862, "Beluša", 49.065833, 18.316389, 255.0),
     Station(11865, "Žilina-Vlčince", 49.211439, 18.771139, 358.0),
@@ -112,7 +129,14 @@ STATIONS: tuple[Station, ...] = (
     Station(11872, "Štiavnička (Ružomberok)", 49.071728, 19.34087, 507.0),
     Station(11874, "Liptovský Hrádok", 49.04033, 19.717285, 638.0),
     Station(11876, "Podbanské", 49.140056, 19.909004, 972.0),
-    Station(11878, "Liptovský Mikuláš-Lipt. Ondrašová", 49.09739, 19.590288, 569.0),
+    Station(
+        11878,
+        "Liptovský Mikuláš-Lipt. Ondrašová",
+        49.09739,
+        19.590288,
+        569.0,
+        untrusted_precipitation_codes=True,
+    ),
     Station(11879, "Kremnické Bane", 48.734789, 18.908094, 764.0),
     Station(11880, "Dudince", 48.1692, 18.8761, 139.0, synoptic=True),
     Station(11881, "Želiezovce", 48.045833, 18.641111, 137.0),
@@ -120,10 +144,24 @@ STATIONS: tuple[Station, ...] = (
     Station(11884, "Mužla", 47.800456, 18.595672, 120.0),
     Station(11890, "Oravské Veselé", 49.471175, 19.383519, 757.0),
     Station(11892, "Oravský Podzámok", 49.262162, 19.369081, 530.0),
-    Station(11893, "Žabokreky (pri Martine)", 49.026686, 18.922836, 427.0),
+    Station(
+        11893,
+        "Žabokreky (pri Martine)",
+        49.026686,
+        18.922836,
+        427.0,
+        untrusted_precipitation_codes=True,
+    ),
     Station(11894, "Donovaly", 48.8794, 19.2264, 992.0, synoptic=True),
     Station(11897, "Turčianske Teplice", 48.859067, 18.854947, 508.0),
-    Station(11898, "Banská Bystrica", 48.733419, 19.115097, 429.0),
+    Station(
+        11898,
+        "Banská Bystrica",
+        48.733419,
+        19.115097,
+        429.0,
+        untrusted_precipitation_codes=True,
+    ),
     Station(11900, "Žiar nad Hronom", 48.5861, 18.8522, 275.0, synoptic=True),
     Station(11901, "Banská Štiavnica", 48.449061, 18.919689, 570.0),
     Station(11902, "Bzovík", 48.318611, 19.0925, 353.0),
@@ -152,7 +190,14 @@ STATIONS: tuple[Station, ...] = (
     Station(11945, "Švedlár", 48.813205, 20.709754, None),
     Station(11946, "Štós - Kúpele", 48.718147, 20.795397, None),
     Station(11947, "Moldava nad Bodvou", 48.615076, 21.005117, None),
-    Station(11949, "Spišské Vlachy", 48.944197, 20.80201, None),
+    Station(
+        11949,
+        "Spišské Vlachy",
+        48.944197,
+        20.80201,
+        None,
+        untrusted_precipitation_codes=True,
+    ),
     Station(11950, "Podolínec", 49.262067, 20.542689, None),
     Station(11951, "Červený Kláštor", 49.387222, 20.4225, None),
     Station(11952, "Gánovce", 49.0333, 20.3167, 703.0, synoptic=True),

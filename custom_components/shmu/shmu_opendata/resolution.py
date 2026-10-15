@@ -49,6 +49,13 @@ The design choices encoded here:
   (``stav_poc`` 0, and dry), the model's *active* (rain/thunder) candidate is
   dropped in favour of its cloud-only *sky* state — the model alone must not
   paint a convective cell as rain/thunder over a station observing itself dry.
+* **A sensor known to invent precipitation is not believed about it.** For a
+  station whose present-weather sensor reports precipitation far more often
+  than it falls (``Station.untrusted_precipitation_codes``), the caller passes
+  ``trust_precipitation_codes=False`` and a precipitation code is dropped as if
+  none had been reported: the station's own gauge and the model decide
+  instead. Its "no significant weather" still vetoes the model, since that
+  half of the sensor was verified sound.
   The same quiet station also drops a radar echo: it observes the type of
   weather at its own point, the radar only reflectivity overhead.
 * **The radar says *that* it precipitates, not *what*.** An echo of at least
@@ -84,6 +91,9 @@ _MODEL_ACTIVE = frozenset(
     {"rainy", "pouring", "snowy", "snowy-rainy", "lightning-rainy"}
 )
 _CLEAR = "sunny"
+#: What a precipitation ``stav_poc`` code maps to; an untrusted sensor's code
+#: is dropped when it lands here (see :func:`explain_condition`).
+_PRECIPITATION = _MODEL_ACTIVE | {"hail"}
 
 #: ``stav_poc`` (WMO 4680 *wawa*) codes given a band by the code itself rather
 #: than by the condition string: 12 is *distant* lightning (a last-resort hint,
@@ -154,13 +164,16 @@ class ConditionResolution:
     ``suppressed_model_condition`` is the model's active condition that an
     observation vetoed (else ``None``), and ``suppressed_by`` which one: the
     station's "no significant weather" (``"stav_poc"``) or a radar pixel
-    without echo (``"radar"``).
+    without echo (``"radar"``). ``ignored_weather_code`` is the precipitation
+    code of an untrusted present-weather sensor that the ladder left out
+    (else ``None``).
     """
 
     condition: str | None
     source: str
     candidates: tuple[ConditionCandidate, ...]
     suppressed_model_condition: str | None
+    ignored_weather_code: int | None
     suppressed_by: str | None = None
 
 
@@ -262,17 +275,28 @@ def explain_condition(
     forecast_step: ForecastStep | None,
     radar_echo: LocalEcho | None = None,
     temperature: float | None = None,
+    trust_precipitation_codes: bool = True,
 ) -> ConditionResolution:
     """Evaluate the full ladder, returning every candidate and the winner.
 
     ``forecast_step`` is the ALADIN step nearest the current hour and
-    ``radar_echo`` the echo near the location in a current radar frame, or
+    ``radar_echo`` the echo near the station in a current radar frame, or
     ``None`` when there is no such frame or it does not cover the point (the
     caller selects both; this module does not look at the clock).
     ``temperature`` is the station's own 2 m reading, which types an echo as
-    rain or snow; the model's is used when it is missing. The candidates are
-    returned highest priority first for diagnostics.
+    rain or snow; the model's is used when it is missing. With
+    ``trust_precipitation_codes`` false, a ``weather_code`` meaning
+    precipitation is ignored, as if the station had reported no code. The
+    candidates are returned highest priority first for diagnostics.
     """
+    ignored = (
+        weather_code
+        if not trust_precipitation_codes
+        and condition_from_weather_code(weather_code) in _PRECIPITATION
+        else None
+    )
+    if ignored is not None:
+        weather_code = None
     candidates = _website_candidates(web)
     aws = _stav_poc_candidate(weather_code, precipitation)
     if aws is not None:
@@ -320,6 +344,7 @@ def explain_condition(
             forecast_step.condition if vetoed and forecast_step else None
         ),
         suppressed_by=veto if vetoed else None,
+        ignored_weather_code=ignored,
     )
 
 
@@ -331,6 +356,7 @@ def resolve_condition(
     forecast_step: ForecastStep | None,
     radar_echo: LocalEcho | None = None,
     temperature: float | None = None,
+    trust_precipitation_codes: bool = True,
 ) -> tuple[str | None, str]:
     """Resolve an HA condition and its source (the winner of the ladder).
 
@@ -345,5 +371,6 @@ def resolve_condition(
         forecast_step=forecast_step,
         radar_echo=radar_echo,
         temperature=temperature,
+        trust_precipitation_codes=trust_precipitation_codes,
     )
     return resolution.condition, resolution.source

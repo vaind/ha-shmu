@@ -70,3 +70,9 @@ def test_station_missing_from_the_feed_is_kept_but_never_nearest() -> None:
     # ...but even standing on it, a reporting station is chosen instead.
     assert nearest_station(sliac.latitude, sliac.longitude).name == "Banská Bystrica"
     assert [s.ind_kli for s in STATIONS if not s.in_feed] == [11903]
+
+
+def test_over_reporting_present_weather_sensors_are_flagged() -> None:
+    # Measured 2026-10-15 against the radar and their own gauges (AGENTS.md).
+    flagged = {s.ind_kli for s in STATIONS if s.untrusted_precipitation_codes}
+    assert flagged == {11857, 11878, 11893, 11898, 11949}

@@ -300,6 +300,7 @@ class ShmuData:
             forecast_step=self.current_forecast_step(now),
             radar_echo=self.current_radar_echo(now),
             temperature=observation.temperature if observation is not None else None,
+            trust_precipitation_codes=not station.untrusted_precipitation_codes,
         )
 
     def current_radar_echo(self, now: datetime) -> LocalEcho | None:
