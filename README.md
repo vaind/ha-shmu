@@ -65,7 +65,7 @@ It is distributed through HACS rather than Home Assistant core because part of t
 
 | Option | What it does |
 |---|---|
-| **Station** | The SHMÚ automatic weather station whose observations drive the current conditions and sensors. The one nearest your Home Assistant location is preselected; any of the ~95 can be picked. The 27 *synoptic* stations, marked ★, report the most; the others mostly report temperature, humidity, wind and precipitation, with pressure, present weather and visibility at only some of them (see [Stations](#stations)). To follow another station, add the integration again — each station is its own device. |
+| **Station** | The SHMÚ automatic weather station whose observations drive the current conditions and sensors. The one nearest your Home Assistant location is preselected; any of the ~95 can be picked. The 27 *synoptic* stations (the ones whose observations are exchanged with weather services worldwide), marked ★, report the most; the others mostly report temperature, humidity, wind and precipitation, with pressure, present weather and visibility at only some of them (see [Stations](#stations)). To follow another station, add the integration again — each station is its own device. |
 | **Name** | The device name, which also prefixes every entity ID. Defaults to your Home Assistant location name (e.g. *Home* → `weather.home`). |
 | **Measurement location** | The point used for the forecast, radar crop, warning relevance and nearest rain gauge: *Same as the station*, *Home Assistant location*, or *Custom location* picked on a map. |
 

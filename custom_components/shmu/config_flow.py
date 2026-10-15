@@ -39,9 +39,9 @@ from .const import (
 )
 from .shmu_opendata import STATIONS, get_station, nearest_station
 
-#: Marks the synoptic stations, which report far more than the rest (station
-#: pressure, present weather, visibility). A symbol rather than a word, because
-#: option labels are not translated; the field description explains it.
+#: Marks the synoptic stations, which report the most information. A symbol
+#: rather than a word, because option labels are not translated; the field
+#: description explains it.
 SYNOPTIC_MARK = "★"
 
 _STATION_OPTIONS = [

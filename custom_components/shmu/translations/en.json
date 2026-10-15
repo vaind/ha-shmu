@@ -10,7 +10,7 @@
           "location_mode": "Measurement location"
         },
         "data_description": {
-          "ind_kli": "The SHMÚ weather station to read current observations from. Synoptic stations (★) report the most, including pressure and present weather. To track another station, add this integration again — each station is its own device.",
+          "ind_kli": "The SHMÚ weather station to read current observations from. Synoptic stations (★) report the most information. To track another station, add this integration again — each station is its own device.",
           "name": "Name for this device and its entities (e.g. \"Home\").",
           "location_mode": "The point used for the forecast, radar and warnings — independent of the observation station."
         }
