@@ -292,9 +292,9 @@ class ShmuClient:
     async def _request(self, url: str) -> tuple[bytes, datetime | None]:
         """Fetch ``url``; return its body and parsed ``Last-Modified`` (UTC).
 
-        Only a :class:`aiohttp.ServerDisconnectedError` is retried: it means
-        the server hung up before sending a single byte of the response, so
-        the request was not acted on. Everything else — timeouts, refused
+        Only a :class:`aiohttp.ServerDisconnectedError` is retried: the server
+        hung up before a complete response arrived, and a GET is idempotent,
+        so resending it is safe. Everything else — timeouts, refused or reset
         connections, error statuses, a body cut short — fails at once and is
         left to the caller's keep-previous fallback.
         """
