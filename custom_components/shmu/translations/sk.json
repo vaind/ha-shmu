@@ -3,14 +3,14 @@
     "step": {
       "user": {
         "title": "Počasie SHMÚ",
-        "description": "Neoficiálna integrácia — nie je spojená so SHMÚ ani ním schválená; použitie na vlastné riziko. Vyberte synoptickú stanicu SHMÚ; predvolená je stanica najbližšie k polohe vášho Home Assistant.",
+        "description": "Neoficiálna integrácia — nie je spojená so SHMÚ ani ním schválená; použitie na vlastné riziko. Vyberte meteorologickú stanicu SHMÚ; predvolená je stanica najbližšie k polohe vášho Home Assistant.",
         "data": {
           "ind_kli": "Stanica",
           "name": "Názov",
           "location_mode": "Poloha merania"
         },
         "data_description": {
-          "ind_kli": "Synoptická stanica SHMÚ, z ktorej sa čítajú aktuálne pozorovania. Ak chcete sledovať ďalšiu stanicu, pridajte túto integráciu znova — každá stanica je samostatné zariadenie.",
+          "ind_kli": "Meteorologická stanica SHMÚ, z ktorej sa čítajú aktuálne pozorovania. Synoptické stanice (★) poskytujú najviac údajov. Ak chcete sledovať ďalšiu stanicu, pridajte túto integráciu znova — každá stanica je samostatné zariadenie.",
           "name": "Názov tohto zariadenia a jeho entít (napr. „Domov“).",
           "location_mode": "Bod použitý pre predpoveď, radar a výstrahy — nezávisle od pozorovacej stanice."
         }

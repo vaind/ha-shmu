@@ -10,6 +10,7 @@ changed later via the options flow without re-adding the integration.
 
 from __future__ import annotations
 
+import unicodedata
 from typing import Any
 
 import voluptuous as vol
@@ -39,9 +40,33 @@ from .const import (
 )
 from .shmu_opendata import STATIONS, get_station, nearest_station
 
+#: Marks the synoptic stations, which report the most information. A symbol
+#: rather than a word, because option labels are not translated; the field
+#: description explains it.
+SYNOPTIC_MARK = "★"
+
+
+def _sort_key(name: str) -> tuple[str, str]:
+    """Order station names alphabetically regardless of diacritics.
+
+    Sorting by code point would put Čadca, Štós and every Ž… name after
+    Zlatá Baňa; folding the marks away keeps them among the plain letters,
+    and the raw name breaks ties so the order is still total.
+    """
+    folded = unicodedata.normalize("NFD", name)
+    base = "".join(c for c in folded if not unicodedata.combining(c))
+    return base.casefold(), name
+
+
 _STATION_OPTIONS = [
-    SelectOptionDict(value=str(station.ind_kli), label=station.name)
-    for station in sorted(STATIONS, key=lambda s: s.name)
+    SelectOptionDict(
+        value=str(station.ind_kli),
+        label=f"{station.name} {SYNOPTIC_MARK}" if station.synoptic else station.name,
+    )
+    for station in sorted(STATIONS, key=lambda s: _sort_key(s.name))
+    # A station SHMÚ no longer publishes stays in the catalogue only so that
+    # existing entries keep loading; a new entry on it would never get data.
+    if station.in_feed
 ]
 
 

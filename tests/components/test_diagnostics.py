@@ -45,6 +45,7 @@ async def test_config_entry_diagnostics(
 
     assert diag["station"]["ind_kli"] == 11858
     assert diag["station"]["name"] == "Hurbanovo"
+    assert diag["station"]["synoptic"] is True
     assert diag["coordinator"]["last_update_success"] is True
     # Website said Zamračené/Dážď -> rainy via the website source.
     derived = diag["derived_condition"]

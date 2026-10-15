@@ -123,7 +123,7 @@ async def async_setup_entry(
 
 
 class ShmuWeather(ShmuStationEntity, WeatherEntity):
-    """Current conditions for a SHMÚ synoptic station.
+    """Current conditions for a SHMÚ weather station.
 
     Measurements come from the open-data feed; the qualitative ``condition``
     is resolved by a cross-source priority ladder (see
@@ -195,10 +195,11 @@ class ShmuWeather(ShmuStationEntity, WeatherEntity):
         The observation reports station-level pressure (QFE); reducing it to
         sea level keeps "now" on the same datum as the forecast steps (whose
         ``pressure`` is already ALADIN's PRMSL) and is what HA's weather card
-        expects.
+        expects. Unknown at a station whose elevation is unknown: the raw
+        reading is on a different datum, so it would not be comparable.
         """
         obs = self.observation
-        if obs is None:
+        if obs is None or self._station.elevation is None:
             return None
         return sea_level_pressure(
             obs.pressure, self._station.elevation, obs.temperature

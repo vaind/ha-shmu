@@ -71,6 +71,7 @@ async def async_get_config_entry_diagnostics(
             "latitude": station.latitude,
             "longitude": station.longitude,
             "elevation": station.elevation,
+            "synoptic": station.synoptic,
         },
         "coordinator": {
             "last_update_success": coordinator.last_update_success,

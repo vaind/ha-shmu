@@ -26,7 +26,9 @@ class ShmuStationEntity(CoordinatorEntity[ShmuDataUpdateCoordinator]):
             identifiers={(DOMAIN, str(station.ind_kli))},
             name=coordinator.device_name,
             manufacturer=MANUFACTURER,
-            model="Synoptic station",
+            model=(
+                "Synoptic station" if station.synoptic else "Automatic weather station"
+            ),
             entry_type=DeviceEntryType.SERVICE,
             configuration_url=(
                 f"https://www.shmu.sk/sk/?page=1&id=meteo_apocasie_sk"

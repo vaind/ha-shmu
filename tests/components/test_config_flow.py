@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import pytest
 from homeassistant.config_entries import SOURCE_USER
 from homeassistant.const import CONF_LATITUDE, CONF_LONGITUDE, CONF_NAME
 from homeassistant.core import HomeAssistant
-from homeassistant.data_entry_flow import FlowResultType
+from homeassistant.data_entry_flow import FlowResultType, InvalidData
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
+from custom_components.shmu.config_flow import SYNOPTIC_MARK
 from custom_components.shmu.const import (
     CONF_IND_KLI,
     CONF_LOCATION,
@@ -17,6 +19,7 @@ from custom_components.shmu.const import (
     LOCATION_MODE_HASS,
     LOCATION_MODE_STATION,
 )
+from custom_components.shmu.shmu_opendata import STATIONS
 
 
 async def test_user_flow_creates_entry(hass: HomeAssistant) -> None:
@@ -122,17 +125,74 @@ async def test_user_flow_custom_location_second_step(hass: HomeAssistant) -> Non
     }
 
 
-async def test_user_flow_defaults_to_nearest_station(hass: HomeAssistant) -> None:
-    # Place "home" right by Košice; its ind_kli must be the preselected default.
-    hass.config.latitude = 48.7164
-    hass.config.longitude = 21.2611
+@pytest.mark.parametrize(
+    ("latitude", "longitude", "expected"),
+    [
+        # Right by Hurbanovo, a synoptic station.
+        (47.8733, 18.1944, "11858"),
+        # Banská Bystrica: its station is not synoptic, and the nearest
+        # synoptic one (Sliač) is ~10 km away — the full list must be used.
+        (48.7350, 19.1150, "11898"),
+    ],
+)
+async def test_user_flow_defaults_to_nearest_station(
+    hass: HomeAssistant, latitude: float, longitude: float, expected: str
+) -> None:
+    hass.config.latitude = latitude
+    hass.config.longitude = longitude
 
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": SOURCE_USER}
     )
     schema = result["data_schema"].schema
     key = next(iter(schema))
-    assert key.default() == "11968"  # Košice
+    assert key.default() == expected
+
+
+async def test_user_flow_lists_every_station_marking_synoptic(
+    hass: HomeAssistant,
+) -> None:
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": SOURCE_USER}
+    )
+    selector = next(iter(result["data_schema"].schema.values()))
+    labels = {o["value"]: o["label"] for o in selector.config["options"]}
+    assert len(labels) == sum(1 for s in STATIONS if s.in_feed)
+    # Sliač is kept for existing entries but not offered for new ones.
+    assert "11903" not in labels
+    assert labels["11858"] == f"Hurbanovo {SYNOPTIC_MARK}"
+    assert labels["11898"] == "Banská Bystrica"
+    # Accented names sort among their base letters, not after Z.
+    order = list(labels)
+    assert order.index("11866") < order.index("11841")  # Čadca < Dolný Hričov
+    assert order.index("11820") > order.index("11872")  # Žihárec > Štiavnička
+
+
+async def test_station_missing_from_the_feed_cannot_be_chosen(
+    hass: HomeAssistant,
+) -> None:
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": SOURCE_USER}
+    )
+    with pytest.raises(InvalidData) as err:
+        await hass.config_entries.flow.async_configure(
+            result["flow_id"], {CONF_IND_KLI: "11903"}
+        )
+    # Rejected as a station choice, not for some other field.
+    assert err.value.path == [CONF_IND_KLI]
+
+
+async def test_automatic_station_creates_entry(hass: HomeAssistant) -> None:
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": SOURCE_USER}
+    )
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_IND_KLI: "11898", CONF_NAME: ""}
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    # A cleared Name falls back to the station name, as for synoptic ones.
+    assert result["title"] == "Banská Bystrica"
+    assert result["data"][CONF_IND_KLI] == 11898
 
 
 async def test_duplicate_station_is_aborted(hass: HomeAssistant) -> None:
