@@ -48,6 +48,13 @@ The design choices encoded here:
   (``stav_poc`` 0, and dry), the model's *active* (rain/thunder) candidate is
   dropped in favour of its cloud-only *sky* state — the model alone must not
   paint a convective cell as rain/thunder over a station observing itself dry.
+* **A sensor known to invent precipitation is not believed about it.** For a
+  station whose present-weather sensor reports precipitation far more often
+  than it falls (``Station.untrusted_precipitation_codes``), the caller passes
+  ``trust_precipitation_codes=False`` and a precipitation code is dropped as if
+  none had been reported: the station's own gauge and the model decide
+  instead. Its "no significant weather" still vetoes the model, since that
+  half of the sensor was verified sound.
 
 Pure and Home-Assistant-free (plain condition strings), so it stays
 offline-testable. A clear sky is returned as ``sunny``; the day/night
@@ -70,6 +77,9 @@ _MODEL_ACTIVE = frozenset(
     {"rainy", "pouring", "snowy", "snowy-rainy", "lightning-rainy"}
 )
 _CLEAR = "sunny"
+#: What a precipitation ``stav_poc`` code maps to; an untrusted sensor's code
+#: is dropped when it lands here (see :func:`explain_condition`).
+_PRECIPITATION = _MODEL_ACTIVE | {"hail"}
 
 #: ``stav_poc`` (WMO 4680 *wawa*) codes given a band by the code itself rather
 #: than by the condition string: 12 is *distant* lightning (a last-resort hint,
@@ -130,12 +140,15 @@ class ConditionResolution:
     first; the winner is ``candidates[0]`` and matches ``condition``/``source``.
     ``suppressed_model_condition`` is the model's active condition that a
     station's "no significant weather" observation vetoed (else ``None``).
+    ``ignored_weather_code`` is the precipitation code of an untrusted
+    present-weather sensor that the ladder left out (else ``None``).
     """
 
     condition: str | None
     source: str
     candidates: tuple[ConditionCandidate, ...]
     suppressed_model_condition: str | None
+    ignored_weather_code: int | None
 
 
 def _website_candidates(web: WebCondition | None) -> list[ConditionCandidate]:
@@ -234,13 +247,24 @@ def explain_condition(
     weather_code: int | None,
     precipitation: float | None,
     forecast_step: ForecastStep | None,
+    trust_precipitation_codes: bool = True,
 ) -> ConditionResolution:
     """Evaluate the full ladder, returning every candidate and the winner.
 
     ``forecast_step`` is the ALADIN step nearest the current hour (the caller
-    selects it; this module does not look at the clock). The candidates are
-    returned highest priority first for diagnostics.
+    selects it; this module does not look at the clock). With
+    ``trust_precipitation_codes`` false, a ``weather_code`` meaning
+    precipitation is ignored, as if the station had reported no code. The
+    candidates are returned highest priority first for diagnostics.
     """
+    ignored = (
+        weather_code
+        if not trust_precipitation_codes
+        and condition_from_weather_code(weather_code) in _PRECIPITATION
+        else None
+    )
+    if ignored is not None:
+        weather_code = None
     candidates = _website_candidates(web)
     aws = _stav_poc_candidate(weather_code, precipitation)
     if aws is not None:
@@ -274,6 +298,7 @@ def explain_condition(
         source=source,
         candidates=tuple(candidates),
         suppressed_model_condition=suppressed,
+        ignored_weather_code=ignored,
     )
 
 
@@ -283,6 +308,7 @@ def resolve_condition(
     weather_code: int | None,
     precipitation: float | None,
     forecast_step: ForecastStep | None,
+    trust_precipitation_codes: bool = True,
 ) -> tuple[str | None, str]:
     """Resolve an HA condition and its source (the winner of the ladder).
 
@@ -295,5 +321,6 @@ def resolve_condition(
         weather_code=weather_code,
         precipitation=precipitation,
         forecast_step=forecast_step,
+        trust_precipitation_codes=trust_precipitation_codes,
     )
     return resolution.condition, resolution.source

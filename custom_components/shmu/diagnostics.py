@@ -125,6 +125,9 @@ async def async_get_config_entry_diagnostics(
                 "active": resolution.suppressed_model_condition is not None,
                 "suppressed_model_condition": resolution.suppressed_model_condition,
             },
+            # A precipitation code the ladder left out because this station's
+            # present-weather sensor over-reports precipitation (stations.py).
+            "ignored_weather_code": resolution.ignored_weather_code,
         },
         "observations": {
             "source": obs_snapshot.source,

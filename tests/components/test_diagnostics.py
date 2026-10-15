@@ -55,6 +55,7 @@ async def test_config_entry_diagnostics(
     assert derived["condition"] == "rainy"
     assert derived["source"] == "website"
     assert derived["veto"]["active"] is False
+    assert derived["ignored_weather_code"] is None
     # The winning candidate is flagged and matches the resolved condition.
     winner = next(c for c in derived["candidates"] if c["won"])
     assert (winner["source"], winner["condition"]) == ("website", "rainy")
@@ -225,3 +226,28 @@ async def test_diagnostics_report_the_current_step_upper_air(
     assert current is not None
     assert current["freezing_level"] == 2450.0
     assert current["temperature_850hpa"] == -3.5
+
+
+async def test_diagnostics_show_an_ignored_precipitation_code(
+    hass: HomeAssistant, load: Callable[[str], bytes]
+) -> None:
+    """A flagged station's dropped code must reach the dump, not just ``None``."""
+    client = _FakeClient(load)
+    # Banská Bystrica's sensor is untrusted; serve it Hurbanovo's rain code 61.
+    client.station_aliases = {11898: 11858}
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="11898",
+        title="Banská Bystrica",
+        data={CONF_IND_KLI: 11898},
+    )
+    entry.add_to_hass(hass)
+
+    with patch("custom_components.shmu.ShmuClient", return_value=client):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    derived = (await async_get_config_entry_diagnostics(hass, entry))[
+        "derived_condition"
+    ]
+    assert derived["ignored_weather_code"] == 61
