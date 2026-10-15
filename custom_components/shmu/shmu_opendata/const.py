@@ -54,6 +54,14 @@ MIN_FORECAST_HOURS: Final = 72
 
 DEFAULT_TIMEOUT: Final = 30.0
 
+#: Extra attempts after the server closes a connection without answering.
+#: Apache drops idle keep-alive connections after 5 s (verified 2026-10-15),
+#: so a request can cross that close in flight; aiohttp resends a GET only
+#: once, and in production that resend hung up too. The request was never
+#: answered, so sending it again is safe (RFC 9112 §9.3.1). Kept small: a
+#: server that keeps hanging up is down, and the caller's fallback applies.
+DISCONNECT_RETRIES: Final = 2
+
 #: Identifies this client to SHMÚ (they log client IPs for abuse protection;
 #: a clear UA is courteous and aids their operations).
 USER_AGENT: Final = "shmu-opendata (+https://github.com/vaind/ha-shmu)"

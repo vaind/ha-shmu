@@ -19,6 +19,7 @@ import aiohttp
 import pytest
 from pytest_homeassistant_custom_component.test_util.aiohttp import (
     AiohttpClientMocker,
+    AiohttpClientMockResponse,
 )
 from yarl import URL
 
@@ -209,6 +210,95 @@ async def test_connection_error_is_wrapped(http, session) -> None:
     client = ShmuClient(session)
     with pytest.raises(ShmuConnectionError):
         await client.async_get_observations()
+
+
+def _disconnect_first(n: int, **response):
+    """A mock ``side_effect`` closing the first ``n`` requests without an answer."""
+    calls = 0
+
+    async def side_effect(method, url, data):
+        nonlocal calls
+        calls += 1
+        if calls <= n:
+            raise aiohttp.ServerDisconnectedError()
+        return AiohttpClientMockResponse(method, url, **response)
+
+    return side_effect
+
+
+async def test_server_disconnect_is_retried(http, session, caplog) -> None:
+    url = f"{BASE}{WARN}/"
+    retries = client_module.DISCONNECT_RETRIES
+    http.get(url, side_effect=_disconnect_first(retries, text=_listing()))
+    client = ShmuClient(session)
+    with caplog.at_level("DEBUG", logger=client_module.__name__):
+        snap = await client.async_get_warnings()
+    assert snap.warnings == []
+    assert _fetches(http, url) == retries + 1
+    assert f"{url} closed without answering" in caplog.text
+
+
+async def test_persistent_server_disconnect_is_wrapped(http, session) -> None:
+    url = f"{BASE}{WARN}/"
+    retries = client_module.DISCONNECT_RETRIES
+    http.get(url, side_effect=_disconnect_first(retries + 1, text=_listing()))
+    client = ShmuClient(session)
+    with pytest.raises(ShmuConnectionError, match="Server disconnected"):
+        await client.async_get_warnings()
+    assert _fetches(http, url) == retries + 1
+
+
+@pytest.mark.parametrize(
+    "registration",
+    [
+        # The server may have acted on these, or is plainly down; the
+        # coordinator's keep-previous fallback is the right answer to them.
+        {"exc": TimeoutError()},
+        {"exc": aiohttp.ClientConnectionError("Connection refused")},
+        {"exc": aiohttp.ClientPayloadError("Response payload is not completed")},
+        {"status": 503},
+    ],
+    ids=["timeout", "connection-refused", "truncated-body", "http-503"],
+)
+async def test_only_a_server_disconnect_is_retried(http, session, registration) -> None:
+    url = f"{BASE}{WARN}/"
+    http.get(url, **registration)
+    client = ShmuClient(session)
+    with pytest.raises(ShmuConnectionError):
+        await client.async_get_warnings()
+    assert _fetches(http, url) == 1
+
+
+async def test_recovers_from_a_real_close_without_answer(socket_enabled) -> None:
+    """A real aiohttp session against a server that hangs up before answering.
+
+    Pins that this failure surfaces as the retried ``ServerDisconnectedError``
+    (and not, say, a payload error), and that the retry gets through even when
+    aiohttp's own one-shot retry has already met a second hang-up.
+    """
+    body = _listing().encode()
+    hang_ups = 2
+    connections = 0
+
+    async def handle(reader, writer) -> None:
+        nonlocal connections
+        connections += 1
+        await reader.readuntil(b"\r\n\r\n")
+        if connections > hang_ups:
+            writer.write(
+                b"HTTP/1.1 200 OK\r\nConnection: close\r\n"
+                b"Content-Length: %d\r\n\r\n%s" % (len(body), body)
+            )
+            await writer.drain()
+        writer.close()
+
+    server = await asyncio.start_server(handle, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    async with server, aiohttp.ClientSession() as real_session:
+        client = ShmuClient(real_session, base_url=f"http://127.0.0.1:{port}")
+        snap = await client.async_get_warnings()
+    assert snap.warnings == []
+    assert connections == hang_ups + 1
 
 
 def _register_run(http, fixture, day: str, run: str, hours: list[int]) -> None:
