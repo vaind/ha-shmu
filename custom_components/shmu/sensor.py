@@ -310,6 +310,18 @@ class ShmuSensor(ShmuStationEntity, SensorEntity):
         self._attr_unique_id = f"{station.ind_kli}_{description.key}"
 
     @property
+    def available(self) -> bool:
+        """Available only while the station's fresh reading carries this value.
+
+        Many stations never measure some quantities (see
+        ``shmu_opendata.stations``), and HA's ``entity-unavailable`` rule keeps
+        *unknown* for a value missing only temporarily. Treating each reading
+        on its own makes a quantity the station does not report unavailable,
+        rather than an unknown that looks as if a value were on its way.
+        """
+        return super().available and self.native_value is not None
+
+    @property
     def native_value(self) -> StateType:
         """Return the current value, or ``None`` if the station omits it."""
         obs = self.observation
@@ -337,6 +349,14 @@ class ShmuSeaLevelPressureSensor(ShmuStationEntity, SensorEntity):
         """Initialise the sea-level pressure sensor."""
         super().__init__(coordinator, station)
         self._attr_unique_id = f"{station.ind_kli}_pressure_sea_level"
+
+    @property
+    def available(self) -> bool:
+        """Available only while pressure and temperature can be reduced.
+
+        Same per-reading rule as :class:`ShmuSensor`.
+        """
+        return super().available and self.native_value is not None
 
     @property
     def native_value(self) -> StateType:
@@ -403,9 +423,14 @@ class ShmuRainGaugePrecipitationSensor(ShmuStationEntity, SensorEntity):
 
         The two networks are independent: the station dropping out of a
         snapshot says nothing about the gauge, and vice versa. Overrides
-        :attr:`ShmuStationEntity.available`, which gates on the station.
+        :attr:`ShmuStationEntity.available`, which gates on the station. A
+        gauge reading without a precipitation sum is unavailable too, the same
+        per-reading rule as :class:`ShmuSensor`.
         """
-        return self.coordinator.gauge_observation is not None
+        return (
+            self.coordinator.gauge_observation is not None
+            and self.native_value is not None
+        )
 
     @property
     def native_value(self) -> StateType:
@@ -439,8 +464,13 @@ class ShmuForecastSensor(ShmuStationEntity, SensorEntity):
 
     @property
     def available(self) -> bool:
-        """Available while a recent successful fetch backs the held run."""
-        return self.coordinator.has_recent_success
+        """Available while a recent fetch backs a run that has this value now.
+
+        A run without the field, or one too stale to cover the present, makes
+        the sensor unavailable — the same per-reading rule as
+        :class:`ShmuSensor`.
+        """
+        return self.coordinator.has_recent_success and self.native_value is not None
 
     @property
     def native_value(self) -> StateType:

@@ -78,7 +78,7 @@ If you change the measurement location and a different rain gauge becomes the ne
 Every station SHMÚ publishes in its open-data observation feed can be picked, but they do not all measure the same things.
 The 27 **synoptic** stations (★ in the station list) report the fullest set.
 The other ~70 all report temperature, humidity, wind and precipitation; roughly a third also report pressure, and fewer still present weather, visibility or global radiation.
-A sensor for a quantity the chosen station does not measure stays *unknown*.
+A sensor for a quantity the chosen station does not measure is *unavailable*, while the station's other sensors keep updating.
 
 - **Sea-level pressure** needs the station's elevation, which is known for about 70 of the stations.
   Where it is not (mostly SHMÚ's eastern regional stations), the sea-level pressure sensor is not created and the weather entity shows no pressure; the raw **Pressure** sensor still reports the station's own reading if it measures one.
