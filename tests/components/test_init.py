@@ -495,7 +495,7 @@ async def test_automatic_station_without_elevation(
     assert weather.attributes["pressure"] == pytest.approx(expected, abs=0.1)
 
 
-async def test_no_lender_in_range_leaves_sea_level_pressure_unknown(
+async def test_no_lender_in_range_leaves_sea_level_pressure_unavailable(
     hass: HomeAssistant, load: Callable[[str], bytes]
 ) -> None:
     # The fixture's own stations are all over 40 km from Bardejov, or above
@@ -507,7 +507,9 @@ async def test_no_lender_in_range_leaves_sea_level_pressure_unknown(
         station_aliases={_BARDEJOV: 11858},
     )
     sea_level = hass.states.get("sensor.bardejov_sea_level_pressure")
-    assert sea_level.state == "unknown"
+    # The station itself reports, but no value exists: unavailable, not
+    # unknown, by the same per-reading rule as every other station sensor.
+    assert sea_level.state == "unavailable"
     assert "source_ind_kli" not in sea_level.attributes
     assert hass.states.get("weather.bardejov").attributes.get("pressure") is None
 
@@ -524,7 +526,50 @@ async def test_a_lagging_neighbour_is_not_borrowed_from(
         station_aliases={_BARDEJOV: 11858, _TISINEC: 11858},
         station_lag=(_TISINEC, 45),
     )
-    assert hass.states.get("sensor.bardejov_sea_level_pressure").state == "unknown"
+    state = hass.states.get("sensor.bardejov_sea_level_pressure")
+    assert state.state == "unavailable"
+
+
+async def test_a_borrowed_value_outlives_the_station_dropping_out(
+    hass: HomeAssistant, load: Callable[[str], bytes]
+) -> None:
+    """The lender's reading does not depend on the station's own.
+
+    Bardejov leaves the feed for longer than the freshness window while
+    snapshots keep coming: its own sensors go unavailable, but the value
+    borrowed from Tisinec stays, because each sensor follows its own reading.
+    """
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id=str(_BARDEJOV),
+        title="Bardejov",
+        data={CONF_IND_KLI: _BARDEJOV, CONF_NAME: "Bardejov"},
+    )
+    entry.add_to_hass(hass)
+    client = _FakeClient(load)
+    client.station_aliases = {_BARDEJOV: 11858, _TISINEC: 11858}
+    now = datetime(2026, 5, 17, 12, 0, tzinfo=UTC)
+
+    def _now() -> datetime:
+        return now
+
+    with (
+        patch("custom_components.shmu.coordinator.dt_util.utcnow", _now),
+        patch("custom_components.shmu.ShmuClient", return_value=client),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        del client.station_aliases[_BARDEJOV]
+        for _ in range(4):
+            now += timedelta(minutes=12)
+            await entry.runtime_data.async_refresh()
+            await hass.async_block_till_done()
+
+        assert hass.states.get("sensor.bardejov_temperature").state == "unavailable"
+        sea_level = hass.states.get("sensor.bardejov_sea_level_pressure")
+        assert sea_level.state != "unavailable"
+        assert sea_level.attributes["source_ind_kli"] == _TISINEC
 
 
 async def test_a_frozen_feed_stops_lending(
