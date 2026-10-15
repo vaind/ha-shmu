@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
-from unittest.mock import patch
+from unittest.mock import PropertyMock, patch
 
 import pytest
 from homeassistant.config_entries import ConfigEntryState
@@ -28,6 +28,7 @@ from custom_components.shmu.const import (
     LOCATION_MODE_STATION,
     OBSERVATION_STALE_AFTER,
 )
+from custom_components.shmu.coordinator import ShmuDataUpdateCoordinator
 from custom_components.shmu.shmu_opendata import (
     ForecastSnapshot,
     GaugeSnapshot,
@@ -528,6 +529,35 @@ async def test_a_lagging_neighbour_is_not_borrowed_from(
     )
     state = hass.states.get("sensor.bardejov_sea_level_pressure")
     assert state.state == "unavailable"
+
+
+async def test_sea_level_sensor_resolves_its_source_once_per_write(
+    hass: HomeAssistant, load: Callable[[str], bytes]
+) -> None:
+    """Availability, value and attributes come from one resolution.
+
+    The coordinator property is time-dependent; read separately, the three
+    could straddle a freshness window's edge and write an available sensor
+    with no value. Once written, the entity must not consult it again.
+    """
+    await _setup_entry(
+        hass,
+        load,
+        data={CONF_IND_KLI: _BARDEJOV, CONF_NAME: "Bardejov"},
+        station_aliases={_BARDEJOV: 11858, _TISINEC: 11858},
+    )
+    entity = hass.data["entity_components"]["sensor"].get_entity(
+        "sensor.bardejov_sea_level_pressure"
+    )
+    with patch.object(
+        ShmuDataUpdateCoordinator,
+        "sea_level_pressure",
+        new_callable=PropertyMock,
+        side_effect=AssertionError("read outside a coordinator update"),
+    ):
+        assert entity.available
+        assert entity.native_value is not None
+        assert entity.extra_state_attributes["source_ind_kli"] == _TISINEC
 
 
 async def test_a_borrowed_value_outlives_the_station_dropping_out(

@@ -113,6 +113,7 @@ Where a verified fact is cheap to assert, pin it in `tests_e2e/` too, so the dai
     Hence the rule: a source within 40 km and below 1000 m, nearest first.
     Of the 54 feed stations without a QFF of their own (no `tlak` or no elevation), 52 have such a source.
     A neighbour lends only from a snapshot acquired within `OBSERVATION_STALE_AFTER`, and only if its record keeps up with that snapshot's newest (`_reading_is_current`, shared with the rain gauges); unlike the station's own reading it is never carried forward.
+  The two bounds add up, so a borrowed reading can be up to ~60 min old in wall time (a record 30 min behind its snapshot, in a snapshot acquired 30 min ago), against ≤30 min for the station's own; for sea-level pressure, which changes by a few hPa a day, that is well inside its borrowing error.
     The sensor's `source_*` attributes name the lender; diagnostics show it under `sea_level_pressure`.
     Any other reading would need its own measurement before it joins `BORROW_RULES`: present weather, fog and snow depth are local, and temperature, humidity and wind are reported by every station anyway.
   - **ALADIN orography is not a substitute** and was measured, not assumed: at the 68 stations with a known elevation, the hour-000 terrain of the nearest grid point misses by a median 46 m, p90 188 m, max 777 m (Lomnický Štít) — about 5.6, 23 and 94 hPa after reduction to sea level.

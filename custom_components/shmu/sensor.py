@@ -27,7 +27,7 @@ from homeassistant.const import (
     UnitOfTemperature,
     UnitOfVolumetricFlux,
 )
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.typing import StateType
@@ -35,7 +35,7 @@ from homeassistant.util import dt as dt_util
 
 from .coordinator import ShmuConfigEntry, ShmuData
 from .entity import ShmuStationEntity
-from .shmu_opendata import ForecastStep, Observation
+from .shmu_opendata import ForecastStep, Observation, SourcedReading
 
 #: All entities read a single shared coordinator snapshot; there is no
 #: per-entity device I/O to rate-limit, so updates need not be serialised.
@@ -353,6 +353,17 @@ class ShmuSeaLevelPressureSensor(ShmuStationEntity, SensorEntity):
         """Initialise the sea-level pressure sensor."""
         super().__init__(coordinator, station)
         self._attr_unique_id = f"{station.ind_kli}_pressure_sea_level"
+        #: The sourced value, resolved once per state write. The coordinator
+        #: property is time-dependent (freshness windows), so reading it
+        #: separately for availability, value and attributes could straddle a
+        #: window's edge and write an available sensor with no value.
+        self._reading: SourcedReading | None = coordinator.sea_level_pressure
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """Resolve the sourced value once, then write the state from it."""
+        self._reading = self.coordinator.sea_level_pressure
+        super()._handle_coordinator_update()
 
     @property
     def available(self) -> bool:
@@ -365,18 +376,17 @@ class ShmuSeaLevelPressureSensor(ShmuStationEntity, SensorEntity):
         already in :attr:`ShmuDataUpdateCoordinator.sea_level_pressure`, which
         uses only a carried-forward own reading and a current snapshot.
         """
-        return self.coordinator.sea_level_pressure is not None
+        return self._reading is not None
 
     @property
     def native_value(self) -> StateType:
         """Sea-level pressure, or ``None`` when no admissible source has one."""
-        reading = self.coordinator.sea_level_pressure
-        return reading.value if reading is not None else None
+        return self._reading.value if self._reading is not None else None
 
     @property
     def extra_state_attributes(self) -> dict[str, int | str | float] | None:
         """Which station the value came from; 0 km for the station's own."""
-        reading = self.coordinator.sea_level_pressure
+        reading = self._reading
         if reading is None:
             return None
         return {

@@ -30,7 +30,7 @@ NITRA = _station(11855)  # 135 m, 45.5 km
 BARDEJOV = _station(11962)  # elevation unknown
 LIPTOVSKY_HRADOK = _station(11874)  # 638 m
 CHOPOK = _station(11916)  # 2005 m, 14.1 km from Liptovský Hrádok
-BREZNO = _station(11917)  # 488 m, 16.3 km from Liptovský Hrádok
+BREZNO = _station(11917)  # 488 m, 27.3 km from Liptovský Hrádok
 
 RULE = BORROW_RULES["sea_level_pressure"]
 
