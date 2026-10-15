@@ -41,8 +41,9 @@ Latitude/longitude are WGS84 degrees; elevation is metres above sea level, or
 ``None`` where no authoritative value exists (OSCAR does not register SHMÚ's
 eastern regional stations). The ALADIN model terrain is **not** a substitute:
 at the 68 stations with a known elevation it misses by a median 46 m and up to
-777 m, i.e. tens of hPa once reduced to sea level, so an unknown elevation
-leaves the sea-level pressure unknown instead.
+777 m, i.e. tens of hPa once reduced to sea level, so a station with an
+unknown elevation borrows a neighbour's sea-level pressure instead (see
+:mod:`shmu_opendata.borrowing`).
 """
 
 from __future__ import annotations

@@ -61,6 +61,7 @@ async def async_get_config_entry_diagnostics(
     # Shared resolver — exactly what the weather entity uses, but the full
     # evaluation (every candidate + which won) so a dump explains the result.
     resolution = data.explain_condition(station, served)
+    pressure = coordinator.sea_level_pressure
     current_step = data.current_forecast_step(dt_util.utcnow())
 
     return {
@@ -72,6 +73,19 @@ async def async_get_config_entry_diagnostics(
             "longitude": station.longitude,
             "elevation": station.elevation,
             "synoptic": station.synoptic,
+        },
+        # Where the sea-level pressure comes from: the station itself, or a
+        # neighbour standing in for it (``BORROW_RULES``). The distance between
+        # the two is left out: both stations are named, so it adds nothing,
+        # and keeping every distance out of the dump keeps the blanket
+        # private-location check in the tests meaningful.
+        "sea_level_pressure": None
+        if pressure is None
+        else {
+            "value": pressure.value,
+            "source_ind_kli": pressure.source.ind_kli,
+            "source_name": pressure.source.name,
+            "borrowed": pressure.borrowed,
         },
         "coordinator": {
             "last_update_success": coordinator.last_update_success,

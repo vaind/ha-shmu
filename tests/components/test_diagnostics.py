@@ -46,6 +46,9 @@ async def test_config_entry_diagnostics(
     assert diag["station"]["ind_kli"] == 11858
     assert diag["station"]["name"] == "Hurbanovo"
     assert diag["station"]["synoptic"] is True
+    # Hurbanovo reduces its own pressure, so it is its own source.
+    assert diag["sea_level_pressure"]["source_ind_kli"] == 11858
+    assert diag["sea_level_pressure"]["borrowed"] is False
     assert diag["coordinator"]["last_update_success"] is True
     # Website said Zamračené/Dážď -> rainy via the website source.
     derived = diag["derived_condition"]

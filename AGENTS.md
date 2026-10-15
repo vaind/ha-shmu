@@ -107,7 +107,14 @@ Where a verified fact is cheap to assert, pin it in `tests_e2e/` too, so the dai
     Searched and empty: `climate/now/metadata/` (element descriptions only), `?page=317`/`308`/`310` (network descriptions, no station tables), the per-station `?ii=` page.
     OSCAR (`oscar.wmo.int/surface/rest/api/search/station?territoryName=SVK`, 78 records) is the WMO registry SHMÚ reports to: its coordinates equal the `?page=838` map's to six decimals, and over the synoptic stations its elevations agree with `?page=318` to a median 1 m (max 27 m, Donovaly).
     A record is used only on an exact coordinate match; Holíč, which is not on the map, is matched by name and takes OSCAR's coordinates too.
-    OSCAR does not register most of SHMÚ's eastern regional stations, so **26 stations have `elevation=None`**, 9 of which report `tlak`; for them the sea-level pressure sensor is not created and the weather entity's pressure is unknown.
+    OSCAR does not register most of SHMÚ's eastern regional stations, so **26 stations have `elevation=None`**, 9 of which report `tlak`; their sea-level pressure is borrowed from a neighbour (next bullet).
+  - **Sea-level pressure is borrowed from a neighbour where a station cannot compute its own** (`borrowing.py`, `BORROW_RULES`), and nothing else is.
+    **Measured live 2026-10-15** over 31 daily `aws1min` snapshots, comparing the QFF of every pair of stations with a known elevation: with both below 1000 m the two differ by a median 0.3–0.7 hPa (p90 1.5–2.3 hPa) at every distance from 0 to 100 km, so the error is each station's own reduction bias rather than distance; with one at or above 1000 m it roughly doubles (median 1.0–1.4 hPa, p90 up to 3.6 hPa).
+    Hence the rule: a source within 40 km and below 1000 m, nearest first.
+    Of the 54 feed stations without a QFF of their own (no `tlak` or no elevation), 52 have such a source.
+    A neighbour lends only from a snapshot acquired within `OBSERVATION_STALE_AFTER`, and only if its record keeps up with that snapshot's newest (`_reading_is_current`, shared with the rain gauges); unlike the station's own reading it is never carried forward.
+    The sensor's `source_*` attributes name the lender; diagnostics show it under `sea_level_pressure`.
+    Any other reading would need its own measurement before it joins `BORROW_RULES`: present weather, fog and snow depth are local, and temperature, humidity and wind are reported by every station anyway.
   - **ALADIN orography is not a substitute** and was measured, not assumed: at the 68 stations with a known elevation, the hour-000 terrain of the nearest grid point misses by a median 46 m, p90 188 m, max 777 m (Lomnický Štít) — about 5.6, 23 and 94 hPa after reduction to sea level.
   - **What the non-synoptic stations report** (70 in one snapshot): `t`, `vlh_rel` and wind at all 70, `zra_uhrn` 69, `sneh_pokr` 28, `tlak` 24, `zglo` 20, `stav_poc` 19, `dohl` 19.
     Over the archive, 50 stations reported `tlak` and 35 `stav_poc` at least once.

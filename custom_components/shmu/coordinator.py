@@ -40,6 +40,7 @@ from .const import (
     WEB_CONDITIONS_STALE_AFTER,
 )
 from .shmu_opendata import (
+    BORROW_RULES,
     ConditionResolution,
     ForecastSnapshot,
     ForecastStep,
@@ -53,10 +54,12 @@ from .shmu_opendata import (
     ShmuClient,
     ShmuConnectionError,
     ShmuDataError,
+    SourcedReading,
     Station,
     Warning,
     WarningsSnapshot,
     WebConditionsSnapshot,
+    borrow,
     explain_condition,
     get_station,
     nearest_gauge,
@@ -79,10 +82,26 @@ def _next_grid_time(now: datetime, interval_minutes: int) -> datetime:
     return _grid_floor(now, interval_minutes) + timedelta(minutes=interval_minutes)
 
 
-def _gauge_reading_is_current(
-    observation: GaugeObservation, snapshot: GaugeSnapshot
+def _feed_now(snapshot: GaugeSnapshot | ObservationSnapshot) -> datetime | None:
+    """The newest record anywhere in a snapshot, or ``None`` if it is empty.
+
+    That feed's own notion of "now", against which
+    :func:`_reading_is_current` measures each station.
+    """
+    if not snapshot.observations:
+        return None
+    return max(o.measured_at for o in snapshot.observations.values())
+
+
+def _reading_is_current(
+    observation: GaugeObservation | Observation,
+    snapshot: GaugeSnapshot | ObservationSnapshot,
 ) -> bool:
-    """Whether a gauge's newest record keeps up with the rest of its network.
+    """Whether a station's newest record keeps up with the rest of its network.
+
+    Used for the rain gauges and for the neighbouring stations a reading is
+    borrowed from; the evidence below comes from the rain-gauge feed, the one
+    seen to misbehave.
 
     The precipitation feed republishes backfill, so neither a gauge's presence
     in a snapshot nor its timestamp merely *advancing* proves it is still
@@ -107,10 +126,11 @@ def _gauge_reading_is_current(
     archive, 99.8% of gauge readings sit within 10 minutes of their snapshot's
     newest record, and the stragglers are hours behind.
     """
-    if not snapshot.observations:
-        return False
-    feed_now = max(o.measured_at for o in snapshot.observations.values())
-    return feed_now - observation.measured_at <= OBSERVATION_STALE_AFTER
+    feed_now = _feed_now(snapshot)
+    return (
+        feed_now is not None
+        and feed_now - observation.measured_at <= OBSERVATION_STALE_AFTER
+    )
 
 
 #: Slack when comparing a step's accumulation window to the gap before it.
@@ -392,6 +412,10 @@ class ShmuDataUpdateCoordinator(DataUpdateCoordinator[ShmuData]):
         #: seen; tells a new snapshot from a cache hit, exactly as
         #: ``_last_gauge_source`` does for the rain gauges.
         self._last_observation_source: str | None = None
+        #: When the newest *new* observation snapshot was acquired. Neighbours'
+        #: readings are only borrowed from a snapshot younger than
+        #: ``OBSERVATION_STALE_AFTER``, so a stalled feed stops lending too.
+        self._last_observation_snapshot_at: datetime | None = None
         #: Same carry-forward for the rain gauge. Updated only from a genuine
         #: gauge fetch (see ``_fetch``), never from a kept-previous snapshot —
         #: otherwise a total gauge-feed outage would refresh the acquisition
@@ -463,6 +487,49 @@ class ShmuDataUpdateCoordinator(DataUpdateCoordinator[ShmuData]):
         if dt_util.utcnow() - self._last_observation_at > OBSERVATION_STALE_AFTER:
             return None
         return obs
+
+    def neighbour_observations(self) -> dict[int, Observation]:
+        """Other stations' readings that are current enough to borrow from.
+
+        Empty once the newest snapshot we acquired is older than
+        ``OBSERVATION_STALE_AFTER`` (so a frozen feed stops lending, just as
+        it stops renewing the station's own reading), and otherwise only the
+        records that keep up with their own snapshot (:func:`_reading_is_current`).
+        Unlike the station's own reading, nothing is carried forward: a
+        neighbour missing from this snapshot simply is not offered.
+        """
+        if (
+            self.data is None
+            or self._last_observation_snapshot_at is None
+            or dt_util.utcnow() - self._last_observation_snapshot_at
+            > OBSERVATION_STALE_AFTER
+        ):
+            return {}
+        snapshot = self.data.observations
+        feed_now = _feed_now(snapshot)
+        if feed_now is None:
+            return {}
+        return {
+            ind_kli: obs
+            for ind_kli, obs in snapshot.observations.items()
+            if ind_kli != self.station.ind_kli
+            and feed_now - obs.measured_at <= OBSERVATION_STALE_AFTER
+        }
+
+    @property
+    def sea_level_pressure(self) -> SourcedReading | None:
+        """Sea-level pressure: the station's own, else a nearby station's.
+
+        Shared by the sea-level pressure sensor, the weather entity and
+        diagnostics so they always agree on the value and its source. See
+        :data:`shmu_opendata.BORROW_RULES` for which neighbours qualify.
+        """
+        return borrow(
+            BORROW_RULES["sea_level_pressure"],
+            self.station,
+            self.observation,
+            self.neighbour_observations(),
+        )
 
     def _carry_forward_remaining(self) -> timedelta | None:
         """How much longer the cached reading is served, for logging.
@@ -716,6 +783,7 @@ class ShmuDataUpdateCoordinator(DataUpdateCoordinator[ShmuData]):
         # rain gauges (see ``_last_gauge_source``).
         if data.observations.source != self._last_observation_source:
             self._last_observation_source = data.observations.source
+            self._last_observation_snapshot_at = self._last_success_at
             # A cache hit's Last-Modified is the lag already sampled when the
             # file was new; re-feeding it every poll of a stall would flush the
             # deque down to that one value and could shrink the offset below a
@@ -830,7 +898,7 @@ class ShmuDataUpdateCoordinator(DataUpdateCoordinator[ShmuData]):
         # would never go unavailable.
         #
         # Only a reading that is current *within its own snapshot* counts (see
-        # `_gauge_reading_is_current`); a backfilled one leaves both fields
+        # `_reading_is_current`); a backfilled one leaves both fields
         # untouched, so the acquisition time keeps ageing and the sensor goes
         # unavailable on schedule rather than serving day-old rain as current.
         if not isinstance(gauges, BaseException) and (
@@ -845,7 +913,7 @@ class ShmuDataUpdateCoordinator(DataUpdateCoordinator[ShmuData]):
             self._last_gauge_source = gauges.source
             self._log_gauge_presence(gauges)
             gauge_obs = gauges.observations.get(self.gauge.ind_zra)
-            if gauge_obs is not None and _gauge_reading_is_current(gauge_obs, gauges):
+            if gauge_obs is not None and _reading_is_current(gauge_obs, gauges):
                 self._last_gauge_observation = gauge_obs
                 self._last_gauge_observation_at = dt_util.utcnow()
         gauges = self._keep_previous(
