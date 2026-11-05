@@ -114,12 +114,10 @@ def _reading_is_current(
 
     So the reading is compared against the newest record anywhere in the same
     snapshot, which is that feed's own notion of "now", rather than against
-    the wall clock. An absolute age check would work too now that `minuta` is
-    parsed in its documented zone (it was read as UTC until 2026-08-26, which
-    put every reading an hour in the future and would have made anything look
-    permanently fresh). The relative test is kept because it measures what
-    actually goes wrong here — a gauge falling behind *its own network* — and
-    holds regardless of the HA host's clock.
+    the wall clock. The relative test measures what actually goes wrong here,
+    a gauge falling behind *its own network*, and holds regardless of the HA
+    host's clock and of the zone `minuta` is stamped in, which SHMÚ has changed
+    before (see AGENTS.md).
 
     It does not by itself catch the whole feed freezing: that is covered
     separately, by only counting a snapshot whose source path changed.

@@ -4,6 +4,12 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- The weather entity's `observation_time` attribute is no longer an hour early. SHMÚ changed the observation timestamps from UTC+1 to UTC on 2026-10-25, while its metadata still says UTC+1. Readings themselves were never affected: only the reported time of the observation was wrong.
+
 ## [0.12.0] - 2026-10-15
 
 ### Added

@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Mapping
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import unquote
 from xml.etree import ElementTree as ET
@@ -23,12 +23,6 @@ from .models import GaugeObservation, Observation, Warning
 _HREF_RE = re.compile(r'<a\s+href="([^"?/][^"]*)"', re.IGNORECASE)
 
 _CAP_NS = "urn:oasis:names:tc:emergency:cap:1.2"
-
-#: The zone the observation feeds stamp ``minuta`` in: "SEC"
-#: (*stredoeurópsky čas*, Central European Time) is the **standard-time**
-#: designation, so it is a fixed UTC+1 and does not follow local summer time
-#: (which Slovak would call *SELČ*). See AGENTS.md for the live verification.
-_SEC = timezone(timedelta(hours=1))
 
 
 def list_directory(html: str) -> list[str]:
@@ -62,11 +56,11 @@ def _to_int(value: Any) -> int | None:
 def _parse_minuta(value: str) -> datetime:
     """Parse an observation timestamp.
 
-    ``minuta`` carries no zone suffix (e.g. ``2026-05-17T06:50:00``); both
-    feeds' metadata document it as "termín merania v case SEC", i.e. a fixed
-    UTC+1, so attach that explicitly rather than reading it as UTC.
+    ``minuta`` carries no zone suffix (e.g. ``2026-05-17T06:50:00``) and has
+    read UTC since 2026-10-25, whatever the feeds' metadata says. See AGENTS.md
+    for the measurement and for what to re-check on the spring clock change.
     """
-    return datetime.fromisoformat(value).replace(tzinfo=_SEC)
+    return datetime.fromisoformat(value).replace(tzinfo=UTC)
 
 
 def _snapshot_records(payload: bytes | str, feed: str) -> list[Mapping[str, Any]]:
@@ -235,9 +229,6 @@ def _cap_datetime(element: ET.Element | None) -> datetime | None:
     # naive we therefore have nothing to read the zone from, and UTC is this
     # parser's deterministic fallback — a fixed (if possibly wrong) instant
     # beats letting astimezone() vary the result with the host's local zone.
-    # Note it is deliberately *not* the observations' SEC: that zone is
-    # documented for `minuta` by the observation feeds, and says nothing about
-    # this one.
     if parsed.tzinfo is None:
         return parsed.replace(tzinfo=UTC)
     return parsed.astimezone(UTC)
