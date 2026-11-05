@@ -50,6 +50,9 @@ FRESH_WITHIN = timedelta(minutes=30)
 FUTURE_SLACK = timedelta(minutes=5)
 
 _PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+# AGENTS.md: for the first minutes of each hour the website table lists only
+# the synoptic stations, so the full catalogue is only asserted after that.
+WEBSITE_TABLE_COMPLETE_FROM_MINUTE = 15
 
 _BRATISLAVA = ZoneInfo("Europe/Bratislava")
 # Upload lag between a snapshot's nominal time and its Last-Modified: seconds
@@ -180,13 +183,15 @@ async def test_warnings(client: ShmuClient) -> None:
 
 
 async def test_website_conditions(client: ShmuClient) -> None:
+    table_complete = datetime.now(UTC).minute >= WEBSITE_TABLE_COMPLETE_FROM_MINUTE
     snap = await client.async_get_web_conditions()
 
     # The scraper must still find the table and map its rows to stations. The
     # condition columns themselves are often blank, so they are not asserted.
-    parsed = sum(1 for s in STATIONS if s.ind_kli in snap.conditions)
-    assert parsed >= 0.8 * len(STATIONS), (
-        f"scraper matched only {parsed}/{len(STATIONS)} catalogue stations"
+    expected = [s for s in STATIONS if table_complete or s.synoptic]
+    parsed = sum(1 for s in expected if s.ind_kli in snap.conditions)
+    assert parsed >= 0.8 * len(expected), (
+        f"scraper matched only {parsed}/{len(expected)} expected stations"
     )
 
 
