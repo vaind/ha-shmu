@@ -44,9 +44,9 @@ LATITUDE, LONGITUDE = 48.377, 17.588
 # The 5-minute feeds publish within a few minutes; matches the integration's
 # OBSERVATION_STALE_AFTER, past which it would treat a reading as stale anyway.
 FRESH_WITHIN = timedelta(minutes=30)
-# A future timestamp means a time-zone regression (`minuta` was once read as
-# UTC instead of SEC, putting every reading an hour ahead). Small slack for
-# clock skew on the CI runner.
+# A future timestamp means `minuta` is no longer in the zone we read it in, and
+# the 2027-03-28 clock change is when that could next happen (AGENTS.md). Small
+# slack for clock skew on the CI runner.
 FUTURE_SLACK = timedelta(minutes=5)
 
 _PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
@@ -128,9 +128,9 @@ async def test_observations(client: ShmuClient) -> None:
 
 
 async def test_observation_file_names_are_local_time(client: ShmuClient) -> None:
-    # AGENTS.md: day folders and file names are Slovak wall time (CET/CEST),
-    # unlike `minuta`, which is fixed UTC+1. Read as UTC instead, the name
-    # would sit one or two hours *after* the file's Last-Modified.
+    # AGENTS.md: day folders and file names are Slovak wall time (CET/CEST).
+    # Read as UTC instead, the name would sit one or two hours *after* the
+    # file's Last-Modified.
     snap = await client.async_get_observations()
     assert snap.published_at is not None, "no Last-Modified on the newest file"
     match = re.search(r"(\d{4}-\d{2}-\d{2} \d{2}-\d{2}-\d{2})\.json$", snap.source)
