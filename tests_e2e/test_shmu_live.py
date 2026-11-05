@@ -55,6 +55,8 @@ _BRATISLAVA = ZoneInfo("Europe/Bratislava")
 # Upload lag between a snapshot's nominal time and its Last-Modified: seconds
 # when verified, loose so a slow publish isn't mistaken for a convention change.
 PUBLISH_LAG = timedelta(minutes=10)
+# SHMÚ's writer clock drifts, so a file can be stamped seconds before its name.
+WRITER_CLOCK_SKEW = timedelta(minutes=1)
 
 
 def test_library_loads_without_home_assistant() -> None:
@@ -144,7 +146,7 @@ async def test_observation_file_names_are_local_time(client: ShmuClient) -> None
     # midnight it is a UTC day ahead.
     assert snap.source.split("/")[-2] == match[1][:10].replace("-", "")
     lag = snap.published_at - named
-    assert timedelta(0) <= lag <= PUBLISH_LAG, (
+    assert -WRITER_CLOCK_SKEW <= lag <= PUBLISH_LAG, (
         f"{snap.source}: Last-Modified {snap.published_at} is {lag} after the "
         "name read as Europe/Bratislava time"
     )
