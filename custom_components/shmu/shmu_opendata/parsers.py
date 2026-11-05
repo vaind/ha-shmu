@@ -56,9 +56,11 @@ def _to_int(value: Any) -> int | None:
 def _parse_minuta(value: str) -> datetime:
     """Parse an observation timestamp.
 
-    ``minuta`` carries no zone suffix (e.g. ``2026-05-17T06:50:00``) and has
-    read UTC since 2026-10-25, whatever the feeds' metadata says. See AGENTS.md
-    for the measurement and for what to re-check on the spring clock change.
+    ``minuta`` carries no zone suffix (e.g. ``2026-11-05T06:50:00``) and has
+    read UTC since 2026-10-25, whatever the feeds' metadata says. Older archive
+    files read UTC+1, which is fine because the client only fetches the newest
+    file. See AGENTS.md for the measurement and for what to re-check on the
+    spring clock change.
     """
     return datetime.fromisoformat(value).replace(tzinfo=UTC)
 

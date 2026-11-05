@@ -33,7 +33,7 @@ def test_parse_observations_keeps_latest_minute_per_station(fixture) -> None:
     # Three minutes for 11858; the 06:52 record must win.
     hurbanovo = obs[11858]
     # The offset is asserted too, since that is what the entity attribute renders.
-    assert hurbanovo.measured_at == datetime(2026, 5, 17, 6, 52, tzinfo=UTC)
+    assert hurbanovo.measured_at == datetime(2026, 11, 5, 6, 52, tzinfo=UTC)
     assert hurbanovo.measured_at.utcoffset() == timedelta(0)
     assert hurbanovo.temperature == 12.1
     assert hurbanovo.weather_code == 61
@@ -48,7 +48,7 @@ def test_parse_gauge_observations_keeps_latest_minute_per_gauge(fixture) -> None
 
     # Three minutes for 17720, listed out of order; the 06:52 record wins.
     kolarovo = gauges[17720]
-    assert kolarovo.measured_at == datetime(2026, 5, 17, 6, 52, tzinfo=UTC)
+    assert kolarovo.measured_at == datetime(2026, 11, 5, 6, 52, tzinfo=UTC)
     assert kolarovo.measured_at.utcoffset() == timedelta(0)
     assert kolarovo.precipitation == 0.4
     assert kolarovo.temperature == 12.1
@@ -64,7 +64,7 @@ def test_parse_gauge_observations_ignores_backfilled_records(fixture) -> None:
     gauges = parse_gauge_observations(fixture("gauge_observations.json"))
 
     koliba = gauges[17140]
-    assert koliba.measured_at == datetime(2026, 5, 17, 6, 52, tzinfo=UTC)
+    assert koliba.measured_at == datetime(2026, 11, 5, 6, 52, tzinfo=UTC)
     assert koliba.precipitation == 1.2  # not the 02:15 backfill's 9.9
 
 
