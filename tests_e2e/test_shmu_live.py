@@ -183,8 +183,8 @@ async def test_warnings(client: ShmuClient) -> None:
 
 
 async def test_website_conditions(client: ShmuClient) -> None:
-    table_complete = datetime.now(UTC).minute >= WEBSITE_TABLE_COMPLETE_FROM_MINUTE
     snap = await client.async_get_web_conditions()
+    table_complete = snap.fetched_at.minute >= WEBSITE_TABLE_COMPLETE_FROM_MINUTE
 
     # The scraper must still find the table and map its rows to stations. The
     # condition columns themselves are often blank, so they are not asserted.
