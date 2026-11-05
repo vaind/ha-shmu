@@ -81,7 +81,8 @@ Where a verified fact is cheap to assert, pin it in `tests_e2e/` too, so the dai
   Nothing else depends on the zone: within a file all records share it, and the freshness rules compare a record against its own snapshot.
 - **The `YYYYMMDD/` day folders and the file names are Slovak local wall time (CET/CEST), not UTC.**
   **Verified live 2026-10-13** (CEST): `climate/now/data/20261013/aws1min - 2026-10-13 00-00-00.json` has HTTP `Last-Modified` 2026-10-12 22:00 UTC, so the folder rolls over at local midnight and the name is the local time of the snapshot; a later file, `… 10-40-00.json`, was `Last-Modified` 08:40:07 UTC, i.e. published within seconds of its name.
-  `tests_e2e` pins this (`test_observation_file_names_are_local_time`): the name read as Europe/Bratislava time must sit just before the file's `Last-Modified`.
+  `tests_e2e` pins this (`test_observation_file_names_are_local_time`): the name read as Europe/Bratislava time must sit within seconds of the file's `Last-Modified`.
+  **That can be either side of the name**: over 2026-10-10 to 11-05 the gap ran from -8 s to +10 s, sliding about 2 s a day and then jumping back, in both feeds alike, which looks like the writer's clock drifting between syncs.
   **Observed on 2026-10-25, the autumn clock change (03:00 CEST → 02:00 CET): SHMÚ overwrote the first pass's `02-xx` files in place.**
   Checked 2026-10-26 in the archive, both feeds alike: each `20261025/` listing holds the usual 288 files, all with the usual names and none twice, and every `02-00-00` … `02-55-00` file is `Last-Modified` 01:00–01:55 UTC, the second pass.
   The first pass's files of those names, which a live installation fetched with `Last-Modified` 00:00–00:55 UTC, are gone, so the listing shows no file written between 23:55 and 01:00 UTC; from `02-00-00` on, the names run +1 h ahead of `Last-Modified` instead of +2 h.
