@@ -4,6 +4,12 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- The daily forecast no longer shows rain on a day that is forecast to stay almost dry. A single damp hour used to put a rain icon on the whole day, even when the day added up to only 0.2 mm and the hourly forecast showed rain in just that one hour. A day now shows rain, snow or a thunderstorm only when it adds up to at least 1 mm of precipitation, and otherwise shows the sky around noon. The day's precipitation amount is unchanged.
+
 ## [0.12.1] - 2026-11-05
 
 ### Fixed

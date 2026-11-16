@@ -167,12 +167,17 @@ async def test_daily_forecast_aggregates_by_local_day(
     assert day0["condition"] is not None
 
 
-def _step(when: datetime, temperature: float) -> ForecastStep:
-    """A minimal dry forecast step at ``when`` for daily-aggregation tests."""
+def _step(
+    when: datetime,
+    temperature: float,
+    precipitation: float = 0.0,
+    condition: str = "partlycloudy",
+) -> ForecastStep:
+    """A minimal forecast step at ``when`` for daily-aggregation tests."""
     return ForecastStep(
         time=when,
         temperature=temperature,
-        precipitation=0.0,
+        precipitation=precipitation,
         wind_speed=1.0,
         wind_gust=2.0,
         wind_bearing=180.0,
@@ -181,7 +186,7 @@ def _step(when: datetime, temperature: float) -> ForecastStep:
         cape=0.0,
         temperature_850hpa=None,
         freezing_level=None,
-        condition="partlycloudy",
+        condition=condition,
         span_hours=1.0,
         run=when,
     )
@@ -236,6 +241,47 @@ async def test_daily_forecast_keeps_full_days_before_truncated_tail(
     daily = _aggregate_daily(steps)
 
     assert [d["datetime"][:10] for d in daily] == ["2026-07-21", "2026-07-22"]
+
+
+def _wet_day(wet_hours: dict[int, float]) -> list[ForecastStep]:
+    """One full local day (2026-07-21, CEST) of cloudy steps, wet at ``wet_hours``.
+
+    Keys are local hours, values that hour's precipitation. One step past local
+    midnight keeps the day inside the horizon.
+    """
+    start = datetime(2026, 7, 20, 22, tzinfo=UTC)  # local 00:00 on the 21st
+    return [
+        _step(start + timedelta(hours=h), 15.0, wet_hours[h], "rainy")
+        if h in wet_hours
+        else _step(start + timedelta(hours=h), 15.0, condition="cloudy")
+        for h in range(25)
+    ]
+
+
+async def test_daily_condition_ignores_a_trace_of_rain(hass: HomeAssistant) -> None:
+    """A day whose rain adds up to under 1 mm shows its sky, not rain.
+
+    Seen live: one hour of 0.14 mm in an otherwise dry day (0.19 mm in all)
+    put a rain icon on the daily card while the hourly view showed none.
+    """
+    await hass.config.async_set_time_zone("Europe/Bratislava")
+
+    daily = _aggregate_daily(_wet_day({11: 0.14, 12: 0.03, 8: 0.02}))
+
+    assert daily[0]["datetime"].startswith("2026-07-21")
+    assert daily[0]["native_precipitation"] == pytest.approx(0.19)
+    assert daily[0]["condition"] == "cloudy"
+
+
+async def test_daily_condition_shows_rain_from_one_millimetre(
+    hass: HomeAssistant,
+) -> None:
+    await hass.config.async_set_time_zone("Europe/Bratislava")
+
+    daily = _aggregate_daily(_wet_day({7: 0.9, 1: 0.13}))
+
+    assert daily[0]["native_precipitation"] == pytest.approx(1.03)
+    assert daily[0]["condition"] == "rainy"
 
 
 async def test_hourly_forecast_trims_elapsed_hours(
