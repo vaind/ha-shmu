@@ -49,25 +49,35 @@ _PRECIP_CONDITIONS = {
     "pouring",
     "rainy",
 }
+#: A day needs this much precipitation to show as wet: the climatological "wet
+#: day" bar. Hourly steps go wet from 0.05 mm/h, so a lower bar lets one damp
+#: hour put a rain icon on an otherwise dry day.
+_WET_DAY_MM = 1.0
 
 
 def _daily_condition(steps: list[ForecastStep]) -> str | None:
     """Most significant condition for a day.
 
-    A day with any precipitation is summarised by its worst precipitation
-    condition (a thunderstorm should not be hidden behind a "cloudy"
-    average); an otherwise-dry day uses the sky state nearest local noon so
-    the daily icon reflects daytime, not a clear night.
+    A day with at least ``_WET_DAY_MM`` of precipitation is summarised by its
+    worst precipitation condition (a thunderstorm should not be hidden behind
+    a "cloudy" average). Any other day uses the sky state nearest local noon,
+    so the daily icon reflects daytime, not a clear night.
     """
     conditions = [s.condition for s in steps if s.condition is not None]
     if not conditions:
         return None
+    total = sum(s.precipitation for s in steps if s.precipitation is not None)
     precip = [c for c in conditions if c in _PRECIP_CONDITIONS]
-    if precip:
+    if precip and total >= _WET_DAY_MM:
         return max(precip, key=lambda c: _CONDITION_SEVERITY[c])
-    noon_step = min(steps, key=lambda s: abs(dt_util.as_local(s.time).hour - 12))
+    dry = [s for s in steps if s.condition not in _PRECIP_CONDITIONS]
+    if not dry:
+        return max(precip, key=lambda c: _CONDITION_SEVERITY[c])
+    noon_step = min(dry, key=lambda s: abs(dt_util.as_local(s.time).hour - 12))
     return noon_step.condition or max(
-        conditions, key=lambda c: _CONDITION_SEVERITY.get(c, 0)
+        (s.condition for s in dry if s.condition is not None),
+        key=lambda c: _CONDITION_SEVERITY.get(c, 0),
+        default=None,
     )
 
 
