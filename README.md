@@ -3,7 +3,7 @@
 A Home Assistant integration for Slovak weather data published by the **Slovak Hydrometeorological Institute (SHMÚ)**.
 
 [![CI](https://github.com/vaind/ha-shmu/actions/workflows/ci.yml/badge.svg)](https://github.com/vaind/ha-shmu/actions/workflows/ci.yml)
-[![HACS: Default](https://img.shields.io/badge/HACS-Default-41BDF5.svg)](https://hacs.xyz/)
+[![Marketplace: Default](https://img.shields.io/badge/Marketplace%20%2F%20HACS-Default-41BDF5.svg)](https://www.hacs.xyz/docs/marketplace/)
 
 > Current conditions, the ALADIN/SHMÚ daily & hourly forecast, weather warnings and radar — decoded in pure Python, with no native dependency.
 
@@ -47,19 +47,21 @@ A Home Assistant integration for Slovak weather data published by the **Slovak H
 - **Radar** — the national reflectivity composite cropped to your measurement location, as a still image, an autoplaying ~1-hour loop and a slider-scrubbable frame — plus the same three as geo-referenced overlays you can pan and zoom on a map card (see [Radar](#radar)).
 - **Fresh data** — one shared fetch per cycle, timed to SHMÚ's 5-minute publish schedule (and auto-tuned to its observed publish lag), so readings arrive within minutes rather than up to a poll interval late. A station that drops out of one snapshot keeps its last reading until it is genuinely stale, instead of flickering to unavailable.
 
-## Installation (HACS)
+## Installation (Marketplace or HACS)
 
-It is part of the **default HACS store** — no custom repository needed. Requires Home Assistant 2026.3 or newer.
+It is listed in the default catalog of the Home Assistant Marketplace, which replaced HACS in Home Assistant 2026.11, so no custom repository is needed. Requires Home Assistant 2026.3 or newer.
 
-1. HACS → search for **SHMÚ Weather** → *Download*, then restart Home Assistant.
+1. *Settings → Marketplace* (HACS before Home Assistant 2026.11) → search for **SHMÚ Weather** → *Download*, then restart Home Assistant if asked to.
 
-   [![Open your Home Assistant instance and open the SHMÚ Weather repository inside HACS.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=vaind&repository=ha-shmu&category=integration)
+   The button below opens the repository in whichever of the two your Home Assistant has.
+
+   [![Open your Home Assistant instance and open the SHMÚ Weather repository in the Marketplace or HACS.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=vaind&repository=ha-shmu&category=integration)
 
 2. *Settings → Devices & Services → Add Integration → SHMÚ Weather*, then fill in the options below.
 
    [![Open your Home Assistant instance and start setting up SHMÚ Weather.](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=shmu)
 
-It is distributed through HACS rather than Home Assistant core because part of the current condition is read from the SHMÚ website — the open-data observations carry no cloud cover — and because it bundles its own SHMÚ client (see [Why HACS](CONTRIBUTING.md#why-hacs-and-not-home-assistant-core)).
+It is distributed through the Marketplace rather than Home Assistant core because part of the current condition is read from the SHMÚ website — the open-data observations carry no cloud cover — and because it bundles its own SHMÚ client (see [Why HACS](CONTRIBUTING.md#why-hacs-and-not-home-assistant-core)).
 
 ## Configuration
 
@@ -134,7 +136,7 @@ The `*_radar_map*` entities are the same frames rendered for a map instead: the 
 Draping one over a Leaflet map card gives you pan and zoom, and sets the echo against towns, roads and terrain — none of which a radar picture can show on its own.
 Alignment is exact, not approximate: the SHMÚ grid and web maps are both spherical Mercator, so every pixel lands where the map itself puts that coordinate.
 
-This needs one custom card — [ha-map-card](https://github.com/nathan-gs/ha-map-card) by nathan-gs — which you install once from HACS (*Frontend* → search for **Map card**).
+This needs one custom card — [ha-map-card](https://github.com/nathan-gs/ha-map-card) by nathan-gs — which you install once from the Marketplace or HACS (search for **Map card**).
 The plugin that puts the radar on it **ships with this integration** and is served at `/shmu_static/radar-map-overlay.js`, so there is nothing else to download and no Lovelace resource to register.
 
 ```yaml
@@ -165,7 +167,7 @@ On a wall dashboard, mind the bandwidth: the animated map loop is ~330 KB and th
 ## Removing the integration
 
 1. *Settings → Devices & Services → SHMÚ Weather → ⋮ → Delete* for each configured station. This removes its device, entities and history.
-2. Optionally, in HACS → *SHMÚ Weather* → ⋮ → *Remove*, then restart Home Assistant to delete the integration files.
+2. Optionally, in *Settings → Marketplace* (or HACS) → *SHMÚ Weather* → ⋮ → *Remove*, then restart Home Assistant to delete the integration files.
 
 No external account or credential exists, so nothing else needs cleaning up.
 
