@@ -39,7 +39,11 @@ Where a verified fact is cheap to assert, pin it in `tests_e2e/` too, so the dai
   aiohttp also resends an idempotent request once by itself, so every logged failure is a request that hung up **twice**; a loopback test (`test_recovers_from_a_real_close_without_answer`) reproduces exactly that message.
   `ShmuClient._request` therefore retries `ServerDisconnectedError` — and only it — up to `DISCONNECT_RETRIES` more times; a GET is idempotent, so resending it is safe (RFC 9112 §9.3.1).
   The same retry covers the website scrape on `www.shmu.sk`, since every fetch goes through `_request`.
-  Timeouts, refused connections, error statuses and truncated bodies still fail at once into the coordinator's keep-previous fallback, and so does a connection *reset* (`ClientOSError`), which the same race could produce but which has not been seen in production.
+  Timeouts, refused connections, error statuses and truncated bodies still fail at once into the coordinator's keep-previous fallback, and so does a connection *reset*.
+  **A reset while connecting was seen in production on 2026-11-19** (Home Assistant 2026.11.2): the rain-gauge listing failed twice in six hours with `Cannot connect to host opendata.shmu.sk:443 … [Connection reset by peer]`.
+  That message is aiohttp's `ClientConnectorError`, raised while the connection is being opened, so it is not the keep-alive race, which needs a pooled connection.
+  Both times the previous reading was kept and a later poll succeeded, so it is not retried.
+  A reset on an established connection (a bare `ClientOSError`), which the race could produce, has still not been seen.
   **Why it hangs up twice is not established.** A replay of one coordinator poll (92 requests, aiohttp 3.14.4, 2026-10-15) never reused a connection idle for more than ~2 s, far inside the 5 s window, and found no dead pooled connection, so the plain keep-alive race does not explain repeated hang-ups.
   Something on the server side (worker recycling, a middlebox) or a busier HA event loop is more likely.
   If the retry stops being enough, instrument the session with an aiohttp `TraceConfig` (new vs reused connection, idle time per attempt) before changing the bound.
