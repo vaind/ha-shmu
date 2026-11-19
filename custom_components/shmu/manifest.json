@@ -11,5 +11,5 @@
   "loggers": ["custom_components.shmu"],
   "quality_scale": "silver",
   "requirements": [],
-  "version": "0.12.2"
+  "version": "1.0.0"
 }
