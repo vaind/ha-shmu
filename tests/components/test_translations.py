@@ -79,3 +79,21 @@ async def test_registered_translation_keys_resolve(
         )
         checked += 1
     assert checked  # at least the named sensors/binary_sensor were verified
+
+
+def test_icons_name_only_translated_entities() -> None:
+    """A typo in `icons.json` would silently leave the default icon in place."""
+    strings = _load("strings.json")["entity"]
+    icons = _load("icons.json")["entity"]
+    for platform, keys in icons.items():
+        assert set(keys) <= set(strings[platform]), platform
+    level = icons["sensor"]["warning_level"]["state"]
+    assert set(level) <= set(strings["sensor"]["warning_level"]["state"])
+
+
+def test_entities_without_a_device_class_icon_have_one() -> None:
+    icons = _load("icons.json")["entity"]
+    assert set(icons["image"]) == set(_load("strings.json")["entity"]["image"])
+    assert {"weather_code", "warning_level", "snow_depth", "visibility"} <= set(
+        icons["sensor"]
+    )

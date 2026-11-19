@@ -117,9 +117,7 @@ rules:
     comment: >
       The config flow raises no user-facing exceptions; update failures surface
       via UpdateFailed / entity availability, not translatable user errors.
-  icon-translations:
-    status: todo
-    comment: Entities rely on device-class default icons; no icon translations yet.
+  icon-translations: done
   reconfiguration-flow:
     status: exempt
     comment: >

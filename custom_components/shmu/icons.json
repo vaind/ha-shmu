@@ -1,0 +1,29 @@
+{
+  "entity": {
+    "sensor": {
+      "wind_gust": { "default": "mdi:weather-windy-variant" },
+      "snow_depth": { "default": "mdi:snowflake" },
+      "visibility": { "default": "mdi:eye" },
+      "ground_temperature": { "default": "mdi:thermometer-low" },
+      "weather_code": { "default": "mdi:weather-partly-cloudy" },
+      "freezing_level": { "default": "mdi:snowflake-thermometer" },
+      "warning_level": {
+        "default": "mdi:alert",
+        "state": {
+          "none": "mdi:shield-check-outline"
+        }
+      }
+    },
+    "image": {
+      "radar": { "default": "mdi:radar" },
+      "radar_loop": { "default": "mdi:radar" },
+      "radar_frame": { "default": "mdi:radar" },
+      "radar_map": { "default": "mdi:map" },
+      "radar_map_loop": { "default": "mdi:map" },
+      "radar_map_frame": { "default": "mdi:map" }
+    },
+    "number": {
+      "radar_frame": { "default": "mdi:history" }
+    }
+  }
+}
