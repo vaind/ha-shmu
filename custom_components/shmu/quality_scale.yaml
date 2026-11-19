@@ -87,9 +87,7 @@ rules:
     status: exempt
     comment: Nothing is discovered; there is no discovered connection info to update.
   docs-data-update: done
-  docs-examples:
-    status: todo
-    comment: README documents features; automation/use-case examples not yet added.
+  docs-examples: done
   docs-known-limitations: done
   docs-supported-devices:
     status: exempt
@@ -97,12 +95,8 @@ rules:
       Not a device integration; data comes from fixed SHMÚ weather stations,
       enumerated and selectable in the config flow.
   docs-supported-functions: done
-  docs-troubleshooting:
-    status: todo
-    comment: Dedicated troubleshooting section not yet written.
-  docs-use-cases:
-    status: todo
-    comment: Use-case walkthroughs not yet written.
+  docs-troubleshooting: done
+  docs-use-cases: done
   dynamic-devices:
     status: exempt
     comment: >

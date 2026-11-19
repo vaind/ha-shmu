@@ -9,9 +9,8 @@ A Home Assistant integration for Slovak weather data published by the **Slovak H
 
 ## ⚠️ Disclaimer
 
-- This is an **unofficial, community project**. It is **not affiliated with, developed by, endorsed by, or supported by the Slovak Hydrometeorological Institute (SHMÚ)** in any way. "SHMÚ" is used only to identify the data source.
-- The integration reads data from public SHMÚ endpoints that have no stable API contract; it can break if SHMÚ changes them.
-- Provided **"as is", without warranty of any kind. Use at your own risk.** Do not rely on it for safety-critical decisions; always consult official SHMÚ channels for authoritative weather warnings.
+This is an **unofficial community project**, not affiliated with or endorsed by the Slovak Hydrometeorological Institute (SHMÚ).
+Do not rely on it for safety-critical decisions: consult SHMÚ's official channels for authoritative weather warnings.
 
 ## Screenshots
 
@@ -163,6 +162,162 @@ Point `entity` at `image.<device>_radar_map_frame` and add the scrubber card to 
 That pairing is provisional, like the scrubber itself — see the note under the radar entities.
 
 On a wall dashboard, mind the bandwidth: the animated map loop is ~330 KB and the browser re-fetches it every 5 minutes while the card is open, so prefer the still `image.<device>_radar_map` (~30 KB) where that matters.
+
+## How data is updated
+
+The integration polls SHMÚ every 5 minutes, in one shared fetch for all entities, timed just after SHMÚ's own 5-minute publishing schedule.
+How fresh each entity is depends on how often SHMÚ publishes its source:
+
+| Data | New data upstream | Notes |
+|---|---|---|
+| Station observations and rain gauges | every 5 minutes | The newest reading in a file is about 2 minutes old when SHMÚ publishes it. |
+| Radar | every 5 minutes | A frame appears 5 to 8 minutes after the time it shows. |
+| Observed weather and cloud cover (SHMÚ website) | every hour | Published about 2 minutes past the hour. |
+| Warnings | whenever SHMÚ issues them | Checked on every poll. |
+| ALADIN forecast | four runs a day (00, 06, 12 and 18 UTC) | A run becomes available 3 to 5 hours after its start. |
+
+When a fetch fails, the integration keeps the last data it has and tries again on the next poll.
+It does not keep that data forever:
+
+- A station or rain-gauge reading is kept for 30 minutes, after which its sensors become *unavailable*.
+- The weather observed on the website is set aside after an hour, and the condition then comes from the station, the radar and the forecast model.
+- A radar frame older than 20 minutes no longer decides the weather condition.
+
+## Use cases and examples
+
+In the examples, replace `<device>` with the device name you chose during setup (e.g. `home`).
+
+**Get notified when a warning comes into force at your location.**
+The warning binary sensor lists the active warnings in its `warnings` attribute, worst first, each with `event`, `severity`, `awareness_level`, `awareness_type`, `headline`, `onset`, `expires` and `areas`.
+
+```yaml
+automation:
+  - alias: Notify on a SHMÚ weather warning
+    triggers:
+      - trigger: state
+        entity_id: binary_sensor.<device>_weather_warning
+        to: "on"
+    actions:
+      - action: notify.notify
+        data:
+          title: SHMÚ weather warning
+          message: "{{ state_attr('binary_sensor.<device>_weather_warning', 'warnings')[0].headline }}"
+```
+
+To react only to the more serious warnings, trigger on `sensor.<device>_warning_level` changing to `orange` or `red` instead.
+
+**Retract an awning or close a roof window when it starts to rain.**
+The rain-gauge sensor is usually the closest measurement to your home, and any value above zero means the gauge collected rain in the last reported minute.
+
+```yaml
+automation:
+  - alias: Retract the awning when it rains
+    triggers:
+      - trigger: numeric_state
+        entity_id: sensor.<device>_rain_gauge_precipitation
+        above: 0
+    actions:
+      - action: cover.close_cover
+        target:
+          entity_id: cover.awning
+```
+
+The gauge reports rain only once it has fallen, up to a few minutes earlier.
+For an earlier signal, watch the radar on a dashboard, since `max_dbz` of `image.<device>_radar` covers the whole picture rather than your location.
+
+**Warn about ground frost.**
+The ground temperature is measured just above the ground, where frost forms before the air temperature at 2 m reaches zero.
+
+```yaml
+automation:
+  - alias: Ground frost warning
+    triggers:
+      - trigger: numeric_state
+        entity_id: sensor.<device>_ground_temperature
+        below: 0
+    actions:
+      - action: notify.notify
+        data:
+          message: Ground frost at the weather station - cover the plants.
+```
+
+**Show the forecast on a dashboard.**
+The weather entity works with the built-in `weather-forecast` card and any card that reads Home Assistant's daily or hourly forecast.
+The radar cards are described under [Radar](#radar).
+
+## Known limitations
+
+- **The forecast reaches about four days ahead.**
+  SHMÚ publishes the ALADIN model to at most 102 hours, hourly for the first 48 hours and in 3-hour steps after that, and the daily forecast lists only the days the model covers to their end.
+  SHMÚ publishes its longer-range forecasts as pictures only, so the integration cannot read them.
+- **There is no rainfall total.**
+  Both precipitation sensors report an intensity in mm/h taken from one minute in every five, so summing them does not give a daily amount.
+- **Readings come from the station, not from your home.**
+  The station can be tens of kilometres away and at a different altitude.
+  Only the forecast, the radar, the warnings and the rain gauge follow the measurement location.
+- **A station reports only what it measures.**
+  Many stations have no barometer, present-weather sensor or visibility sensor, and those sensors stay *unavailable* (see [Stations](#stations)).
+- **The weather condition is a best estimate.**
+  At most stations nobody observes the sky, so the condition comes from the radar and the forecast model, and the radar alone never reports a thunderstorm.
+- **The station cannot be changed after setup.**
+  Add the integration again for another station and remove the old one.
+- **Slovakia only.**
+  The stations, the forecast grid and the warnings cover Slovakia, and the radar a little beyond its borders.
+- **No air quality.**
+  SHMÚ does not publish it as open data.
+- **The map radar loop shows no time**, because the browser plays the animation on its own and the card cannot tell which frame is on screen.
+- **SHMÚ can change its data without notice.**
+  Its public endpoints have no stable API contract, so a change can break a sensor until the integration is updated.
+
+## Troubleshooting
+
+**A sensor is unavailable.**
+If it is always unavailable, the station does not measure that quantity: pick a ★ station for the fullest set.
+If all of the station's sensors are unavailable, SHMÚ has published no new reading for that station for 30 minutes.
+Check that <https://opendata.shmu.sk/meteorology/climate/now/data/> lists a file from the last few minutes.
+The radar, forecast and warning entities do not depend on the station and keep working.
+
+**The log shows `SHMÚ … unavailable, keeping previous`.**
+One of SHMÚ's sources failed to answer.
+The integration keeps the previous data, logs the message once and logs again when the source is back, so an occasional message needs no action.
+
+**The weather condition looks wrong.**
+The weather entity's `condition_source` attribute names the source that decided it (`website`, `stav_poc`, `radar` or `aladin`).
+The diagnostics download shows every source's candidate under `derived_condition`.
+
+**Home Assistant raised a repair about a changed unit or mean type.**
+Version 0.11.0 changed the precipitation sensors to mm/h and the wind bearing to a wind direction.
+Delete the old statistics for those sensors under *Developer tools → Statistics*, as the [changelog](CHANGELOG.md) describes.
+
+**The radar does not appear on the map card.**
+Check that [ha-map-card](https://github.com/nathan-gs/ha-map-card) is installed, that the plugin `url` is exactly `/shmu_static/radar-map-overlay.js` and that `entity` is one of the three `image.<device>_radar_map*` entities.
+With no rain anywhere in the country the overlay is fully transparent, so compare with `image.<device>_radar`.
+
+**Reporting a problem.**
+Open an [issue](https://github.com/vaind/ha-shmu/issues) and attach the diagnostics: *Settings → Devices & Services → SHMÚ Weather → ⋮ → Download diagnostics*.
+It contains the station and the raw SHMÚ data behind every entity, and neither credentials nor your home coordinates.
+For a problem that comes and goes, turn on *Enable debug logging* in the same menu, wait for it to happen again and attach the log too.
+
+## Versioning
+
+The integration follows [Semantic Versioning](https://semver.org/).
+From version 1.0 on, a breaking change to any of the following comes only with a new major version and is announced in the [changelog](CHANGELOG.md):
+
+- the entities, their entity IDs and unique IDs
+- the meaning and unit of each entity's state
+- the entity attributes described in this README
+- the configuration options
+- the map plugin's URL and options
+
+Not covered, and free to change in any release:
+
+- the scrubber entities marked provisional under [Radar](#radar)
+- the content of the diagnostics download
+- log messages
+- how the weather condition is resolved from its sources, which keeps improving
+- the Python API of the bundled SHMÚ client
+
+A change that SHMÚ forces by changing or withdrawing its data may arrive in a minor version.
 
 ## Removing the integration
 
