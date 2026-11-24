@@ -6,13 +6,14 @@ Thanks for helping improve **SHMÚ Weather**. This is an unofficial community pr
 
 ```bash
 uv venv .venv
-uv pip install --group dev
+uv pip install --group dev --compile-bytecode
 ```
 
 uv takes the Python version from `.python-version`, which tracks the one Python minor the newest Home Assistant runs on; the daily e2e run fails when Home Assistant moves to a newer one.
 The dev tools are listed once, in the `dev` dependency group in `pyproject.toml`, which CI installs the same way.
 Add a new tool there rather than to a command line.
 They are loose lower bounds with no lockfile, so Dependabot does not track them (it only bumps the GitHub Actions pins).
+`--compile-bytecode` writes the `.pyc` files at install time, so a shell that sets `PYTHONDONTWRITEBYTECODE` (as some agent sandboxes do) does not recompile Home Assistant on every test run, which costs about 2 s.
 
 ## Before you push
 
