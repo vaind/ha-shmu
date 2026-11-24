@@ -19,7 +19,7 @@ They are loose lower bounds with no lockfile, so Dependabot does not track them 
 ```bash
 .venv/bin/ruff check custom_components/ tests/ tests_e2e/
 .venv/bin/ruff format custom_components/ tests/ tests_e2e/
-.venv/bin/python -m mypy
+.venv/bin/ty check
 .venv/bin/python -m pytest tests/      # must stay green and offline
 ```
 

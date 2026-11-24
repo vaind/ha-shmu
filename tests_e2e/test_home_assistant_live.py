@@ -36,7 +36,7 @@ def test_python_version_satisfies_newest_home_assistant() -> None:
     assert running in SpecifierSet(requires_python), (
         f"Home Assistant {ha_version} requires Python {requires_python}, but "
         f".python-version is {pinned} (running {running}). Bump .python-version "
-        "and the ruff target-version / mypy python_version in pyproject.toml, "
+        "and the ruff target-version / ty python-version in pyproject.toml, "
         "and raise the minimum in hacs.json to the first HA release requiring "
         "the new Python."
     )

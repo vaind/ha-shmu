@@ -136,8 +136,8 @@ rules:
   strict-typing:
     status: exempt
     comment: >
-      The vendored library is checked under mypy --strict in isolation. The
-      HA-integration glue is fully type-annotated but not yet gated by strict
-      mypy, and Platinum additionally expects the dependency to be a published
+      The vendored library is type-checked by ty, with annotations required by
+      ruff. The HA-integration glue is fully type-annotated but not yet gated
+      by a type checker, and Platinum additionally expects the dependency to be a published
       PEP 561 typed package — not applicable to a deliberately vendored library
       (see dependency-transparency).
