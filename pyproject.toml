@@ -7,6 +7,7 @@
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
+    "pytest-xdist>=3.0",
     "ruff>=0.12",  # first with target-version py314
     "mypy>=1.11",
     "pytest-homeassistant-custom-component",
@@ -15,7 +16,9 @@ dev = [
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
-addopts = "-q"
+# Each worker imports Home Assistant (~1 s), so more than about six workers
+# cost more to start than they save.
+addopts = "-q -n auto --maxprocesses=6"
 
 [tool.ruff]
 target-version = "py314"

@@ -21,5 +21,5 @@ def pytest_configure(config: pytest.Config) -> None:
     if config.pluginmanager.has_plugin("homeassistant"):
         raise pytest.UsageError(
             "tests_e2e/ needs the network; run it as "
-            "`python -m pytest tests_e2e/ -p no:homeassistant`"
+            "`python -m pytest tests_e2e/ -p no:homeassistant -n 0`"
         )

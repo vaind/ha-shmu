@@ -23,12 +23,16 @@ They are loose lower bounds with no lockfile, so Dependabot does not track them 
 .venv/bin/python -m pytest tests/      # must stay green and offline
 ```
 
+`pytest` runs the tests in parallel worker processes (`addopts` in `pyproject.toml`).
+Add `-n 0` to run them in one process, for example to stop in `pdb`.
+
 `tests_e2e/` is the one deliberate exception to "offline": it runs the real client against SHMÚ and checks the upstream facts recorded in [AGENTS.md](AGENTS.md) (freshness, coverage, forecast horizon, radar loop).
 The `E2E (live SHMÚ)` workflow (`.github/workflows/e2e.yml`) runs it daily.
-Run it yourself after touching a fetch path or when SHMÚ seems to have changed something:
+Run it yourself after touching a fetch path or when SHMÚ seems to have changed something.
+`-n 0` keeps its requests to SHMÚ in one process, one at a time:
 
 ```bash
-.venv/bin/python -m pytest tests_e2e/ -p no:homeassistant
+.venv/bin/python -m pytest tests_e2e/ -p no:homeassistant -n 0
 ```
 
 When it fails, re-verify against the live server before changing code, then record what you found in AGENTS.md.
