@@ -23,7 +23,7 @@ Where a verified fact is cheap to assert, pin it in `tests_e2e/` too, so the dai
 | `tests_e2e/` | Live tests against SHMÚ, run daily by `e2e.yml` — the only tests allowed on the network |
 
 - `manifest.json` `requirements` is **empty**: the vendored library is bundled and `aiohttp` ships with HA (the library is HACS-only by design, not on PyPI — see [Why HACS](CONTRIBUTING.md#why-hacs-and-not-home-assistant-core)).
-- mypy strict-checks the vendored library **in isolation** (see `pyproject.toml` `mypy_path`), so it never imports the HA-dependent parent package.
+- ty type-checks only the vendored library (`[tool.ty]` in `pyproject.toml`), with its off-by-default `unsound-*` and `missing-type-argument` rules turned on; ruff's `ANN` rules require annotations there, which ty does not check.
 
 ## Non-obvious data-source facts
 
