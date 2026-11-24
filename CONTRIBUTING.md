@@ -6,13 +6,14 @@ Thanks for helping improve **SHMÚ Weather**. This is an unofficial community pr
 
 ```bash
 uv venv .venv
-uv pip install --group dev
+uv pip install --group dev --compile-bytecode
 ```
 
 uv takes the Python version from `.python-version`, which tracks the one Python minor the newest Home Assistant runs on; the daily e2e run fails when Home Assistant moves to a newer one.
 The dev tools are listed once, in the `dev` dependency group in `pyproject.toml`, which CI installs the same way.
 Add a new tool there rather than to a command line.
 They are loose lower bounds with no lockfile, so Dependabot does not track them (it only bumps the GitHub Actions pins).
+`--compile-bytecode` writes the `.pyc` files at install time, so a shell that sets `PYTHONDONTWRITEBYTECODE` (as some agent sandboxes do) does not recompile Home Assistant on every test run, which costs about 2 s.
 
 Then install the git hooks, which run the checks below for you:
 
@@ -32,12 +33,16 @@ The hooks share one `.git/hooks` across all worktrees of the clone and use each 
 .venv/bin/python -m pytest tests/      # must stay green and offline
 ```
 
+`pytest` runs the tests in parallel worker processes (`addopts` in `pyproject.toml`).
+Add `-n 0` to run them in one process, for example to stop in `pdb`.
+
 `tests_e2e/` is the one deliberate exception to "offline": it runs the real client against SHMÚ and checks the upstream facts recorded in [AGENTS.md](AGENTS.md) (freshness, coverage, forecast horizon, radar loop).
 The `E2E (live SHMÚ)` workflow (`.github/workflows/e2e.yml`) runs it daily.
-Run it yourself after touching a fetch path or when SHMÚ seems to have changed something:
+Run it yourself after touching a fetch path or when SHMÚ seems to have changed something.
+`-n 0` keeps its requests to SHMÚ in one process, one at a time:
 
 ```bash
-.venv/bin/python -m pytest tests_e2e/ -p no:homeassistant
+.venv/bin/python -m pytest tests_e2e/ -p no:homeassistant -n 0
 ```
 
 When it fails, re-verify against the live server before changing code, then record what you found in AGENTS.md.

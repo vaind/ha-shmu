@@ -7,6 +7,7 @@
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
+    "pytest-xdist>=3.0",
     "ruff>=0.12",  # first with target-version py314
     # Exact pin: ty is pre-1.0 and its releases add and change rules, so an
     # upgrade could fail the gate with no code change. Bump it on purpose.
@@ -18,7 +19,9 @@ dev = [
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
-addopts = "-q"
+# Each worker imports Home Assistant (~1 s), so more than about six workers
+# cost more to start than they save.
+addopts = "-q -n auto --maxprocesses=6"
 
 [tool.ruff]
 target-version = "py314"

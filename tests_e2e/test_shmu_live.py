@@ -9,7 +9,7 @@ as a user's log full of warnings.
 
 They hit the network on purpose, so they live outside ``tests/`` (whose
 contract is offline and deterministic) and run only when asked:
-``python -m pytest tests_e2e/ -p no:homeassistant`` (that plugin blocks every
+``python -m pytest tests_e2e/ -p no:homeassistant -n 0`` (that plugin blocks every
 non-localhost socket; ``conftest.py`` refuses to run without the opt-out).
 Thresholds are deliberately loose — they must pass on
 any ordinary day — so a failure means the contract moved, not that the weather
