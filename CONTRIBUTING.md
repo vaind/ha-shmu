@@ -14,6 +14,15 @@ The dev tools are listed once, in the `dev` dependency group in `pyproject.toml`
 Add a new tool there rather than to a command line.
 They are loose lower bounds with no lockfile, so Dependabot does not track them (it only bumps the GitHub Actions pins).
 
+Then install the git hooks, which run the checks below for you:
+
+```bash
+.venv/bin/pre-commit install --hook-type pre-commit --hook-type pre-push
+```
+
+Commits run ruff (fixing what it can) and ty, and pushes also run the offline tests.
+The hooks share one `.git/hooks` across all worktrees of the clone and use each worktree's own `.venv`, so every worktree needs the dev group installed.
+
 ## Before you push
 
 ```bash

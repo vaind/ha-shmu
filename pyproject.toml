@@ -12,6 +12,7 @@ dev = [
     # upgrade could fail the gate with no code change. Bump it on purpose.
     "ty==0.0.109",
     "pytest-homeassistant-custom-component",
+    "pre-commit>=4.0",
 ]
 
 [tool.pytest.ini_options]

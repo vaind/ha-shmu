@@ -1,0 +1,30 @@
+# Runs the dev group's own tools from .venv, so the versions match CI and
+# pyproject.toml stays the one place they are listed. Install with:
+#   .venv/bin/pre-commit install --hook-type pre-commit --hook-type pre-push
+repos:
+  - repo: local
+    hooks:
+      - id: ruff-check
+        name: ruff check
+        entry: .venv/bin/ruff check --fix
+        language: system
+        types: [python]
+      - id: ruff-format
+        name: ruff format
+        entry: .venv/bin/ruff format
+        language: system
+        types: [python]
+      # ty checks its configured scope as a whole, not the staged files.
+      - id: ty
+        name: ty check
+        entry: .venv/bin/ty check
+        language: system
+        types: [python]
+        pass_filenames: false
+      - id: pytest
+        name: pytest (offline)
+        entry: .venv/bin/python -m pytest tests/
+        language: system
+        types: [python]
+        pass_filenames: false
+        stages: [pre-push]
