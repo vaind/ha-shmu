@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
+from functools import cache
 from unittest.mock import PropertyMock, patch
 
 import pytest
@@ -63,6 +64,10 @@ _FCAST_FIXTURE_HOURS = (0, 1, 2, 24)
 _STATION_RATE = "12.0"  # station 11858's newest minute: 0.2 mm
 _KOLAROVO_RATE = "24.0"  # gauge 17720 (nearest Hurbanovo): 0.4 mm
 _KOLIBA_RATE = "72.0"  # gauge 17140 (nearest Bratislava): 1.2 mm
+
+#: Every poll of the fake client renders the same fixture frames, and the
+#: render is pure with frozen results, so we render each combination once.
+_render_fixture_frame = cache(_render_frame)
 
 
 class _FakeClient:
@@ -221,7 +226,7 @@ class _FakeClient:
             valid_at = datetime(2026, 5, 17, 20, int(m), tzinfo=UTC)
             # Render through the client's own helper, so the double cannot
             # drift from the picture/map pair the real client produces.
-            image, map_image, echo = _render_frame(
+            image, map_image, echo = _render_fixture_frame(
                 self._load("radar_zmax.hdf"),
                 latitude,
                 longitude,
