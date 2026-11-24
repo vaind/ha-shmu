@@ -9,8 +9,11 @@ dev = [
     "pytest-asyncio>=0.24",
     "pytest-xdist>=3.0",
     "ruff>=0.12",  # first with target-version py314
-    "mypy>=1.11",
+    # Exact pin: ty is pre-1.0 and its releases add and change rules, so an
+    # upgrade could fail the gate with no code change. Bump it on purpose.
+    "ty==0.0.109",
     "pytest-homeassistant-custom-component",
+    "pre-commit>=4.0",
 ]
 
 [tool.pytest.ini_options]
@@ -25,17 +28,32 @@ target-version = "py314"
 line-length = 88
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "SIM", "ASYNC", "RUF"]
+select = ["E", "F", "I", "UP", "B", "SIM", "ASYNC", "RUF", "ANN"]
+# ty does not flag missing annotations, so ruff enforces them in the vendored
+# library. An explicit `Any` is a deliberate choice, so it stays allowed.
+ignore = ["ANN401"]
 
-[tool.mypy]
-python_version = "3.14"
-strict = true
-warn_unused_ignores = true
-# Strict-type only the vendored library, analysed in isolation as the
-# top-level package `shmu_opendata`. Putting its parent dir on mypy_path
-# (with explicit_package_bases) stops mypy from importing the HA-dependent
-# custom_components.shmu package just to resolve the parent.
-mypy_path = "custom_components/shmu"
-explicit_package_bases = true
-namespace_packages = true
-files = ["custom_components/shmu/shmu_opendata"]
+[tool.ruff.lint.per-file-ignores]
+"!custom_components/shmu/shmu_opendata/**" = ["ANN"]
+
+[tool.ty.environment]
+python-version = "3.14"
+
+[tool.ty.src]
+# Type-check only the vendored library. Its imports are all relative, so ty
+# never needs the HA-dependent custom_components.shmu package to resolve it.
+include = ["custom_components/shmu/shmu_opendata"]
+
+[tool.ty.rules]
+# Off by default. They stop an `Any` from leaking into a typed value and
+# reject bare generics such as `dict` or `list`.
+unsound-assignment = "error"
+unsound-return = "error"
+unsound-yield = "error"
+missing-type-argument = "error"
+possibly-missing-attribute = "error"
+possibly-missing-import = "error"
+possibly-unresolved-reference = "error"
+
+[tool.ty.terminal]
+error-on-warning = true

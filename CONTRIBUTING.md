@@ -15,12 +15,21 @@ Add a new tool there rather than to a command line.
 They are loose lower bounds with no lockfile, so Dependabot does not track them (it only bumps the GitHub Actions pins).
 `--compile-bytecode` writes the `.pyc` files at install time, so a shell that sets `PYTHONDONTWRITEBYTECODE` (as some agent sandboxes do) does not recompile Home Assistant on every test run, which costs about 2 s.
 
+Then install the git hooks, which run the checks below for you:
+
+```bash
+.venv/bin/pre-commit install --hook-type pre-commit --hook-type pre-push
+```
+
+Commits run ruff (fixing what it can) and ty, and pushes also run the offline tests.
+The hooks share one `.git/hooks` across all worktrees of the clone and use each worktree's own `.venv`, so every worktree needs the dev group installed.
+
 ## Before you push
 
 ```bash
 .venv/bin/ruff check custom_components/ tests/ tests_e2e/
 .venv/bin/ruff format custom_components/ tests/ tests_e2e/
-.venv/bin/python -m mypy
+.venv/bin/ty check
 .venv/bin/python -m pytest tests/      # must stay green and offline
 ```
 

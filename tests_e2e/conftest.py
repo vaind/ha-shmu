@@ -1,7 +1,7 @@
 """Live-test setup.
 
-The client library is imported standalone, as ``shmu_opendata`` (like mypy
-does): importing it via ``custom_components.shmu`` would load Home Assistant.
+The client library is imported standalone, as ``shmu_opendata``:
+importing it via ``custom_components.shmu`` would load Home Assistant.
 """
 
 from __future__ import annotations

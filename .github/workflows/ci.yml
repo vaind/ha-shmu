@@ -36,8 +36,8 @@ jobs:
       - name: ruff format --check
         run: .venv/bin/ruff format --check custom_components/ tests/ tests_e2e/
 
-      - name: mypy (strict, vendored library)
-        run: .venv/bin/python -m mypy
+      - name: ty (vendored library)
+        run: .venv/bin/ty check
 
       - name: pytest (offline)
         run: .venv/bin/python -m pytest tests/
