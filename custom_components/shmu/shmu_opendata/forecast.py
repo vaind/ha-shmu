@@ -162,11 +162,11 @@ def grid_index(latitude: float, longitude: float) -> tuple[int, int]:
     only the cone constant ``n`` and the projected radius ``rho`` are needed.
     """
     n = math.sin(_PHI0)
-    f = (math.cos(_PHI0) * math.tan(math.pi / 4 + _PHI0 / 2) ** n) / n
+    f = (math.cos(_PHI0) * math.pow(math.tan(math.pi / 4 + _PHI0 / 2), n)) / n
 
     def project(lat_deg: float, lon_deg: float) -> tuple[float, float]:
         lat = math.radians(lat_deg)
-        rho = _EARTH_RADIUS_M * f / math.tan(math.pi / 4 + lat / 2) ** n
+        rho = _EARTH_RADIUS_M * f / math.pow(math.tan(math.pi / 4 + lat / 2), n)
         theta = n * (math.radians(lon_deg) - _LOV)
         return rho * math.sin(theta), -rho * math.cos(theta)
 
