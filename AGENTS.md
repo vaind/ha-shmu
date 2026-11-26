@@ -14,6 +14,29 @@ Don't add workarounds for failure modes that don't occur.
 Where a verified fact is cheap to assert, pin it in `tests_e2e/` too, so the daily live run notices when SHMÚ stops honouring it.
 A `#N` after a fact is the PR or issue that holds the full measurement.
 
+## Keeping the docs short
+
+AGENTS.md, README.md and CHANGELOG.md each have one reader, and anything that reader can do without belongs somewhere else.
+Get shorter by saying fewer things, never by dropping the words a sentence needs.
+Before you add to one of them, look for the fact already stated there or in another file, and change that instead of adding a second version.
+
+- **AGENTS.md is for agents changing the code.** A fact keeps four things: the fact, the date it was verified, the rule it implies for the code, and when to re-check it.
+  - The evidence behind it (sample sizes, tables, timelines, the method) goes in the PR description, and the fact ends with that PR's `#N`.
+  - History ("we used to…") gets one clause, and only where it explains a guard that would otherwise look removable.
+  - When a fact changes, rewrite it in place rather than appending a dated update below it, since git keeps the old version.
+  - Recipes and per-module detail live in the module's docstring, so point there instead of copying them.
+  - A new fact rarely needs more than five sentences. More usually means evidence that belongs in the PR.
+  - Delete a fact once the code or the upstream behaviour it describes is gone.
+- **README.md is for users.** It says what the integration does, how to set it up, what each entity and attribute means, and what to do when something looks wrong.
+  - Explain a design choice in one sentence of user terms, and leave the mechanism to AGENTS.md.
+  - Keep the numbers a user acts on (how long a reading is kept, bandwidth, the forecast horizon) and drop the ones that only justify a threshold.
+  - Say a thing once, in the section a user would look in, and link to it from the others.
+- **CHANGELOG.md is for users upgrading.** An entry says what they will see change and what they must do, in one to three sentences, rarely more than about 100 words.
+  - Name the symptom a user would recognise and give the cause in at most one clause. Leave out function names, timings and how the bug was found.
+  - A breaking change may run longer, but only for the steps to migrate.
+  - The release workflow publishes a section verbatim as the GitHub Release (see [Releasing](CONTRIBUTING.md#releasing)), so get each entry short in the PR that adds it.
+- **All three** follow the same style: one sentence per line, no em-dashes (use " - " or split the sentence), and no semicolons between clauses (write two sentences instead).
+
 ## Layout
 
 | Path | What |
