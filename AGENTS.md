@@ -71,7 +71,7 @@ Before you add to one of them, look for the fact already stated there or in anot
   If the retry stops being enough, instrument the session with an aiohttp `TraceConfig` (new vs reused connection, idle time per attempt) before changing the bound.
   The server speaks HTTP/1.1 only (no `h2` in ALPN, no `Alt-Svc`), so HTTP/2 and QUIC, which would avoid that race, are not available.
 - **It is a plain Apache file index** with no API. Finding the newest file means parsing an HTML directory listing, and hrefs are percent-encoded.
-- **It throttles a fast client with `403 Forbidden` on every path** (seen 2026-11-26, #PR).
+- **It throttles a fast client with `403 Forbidden` on every path** (seen 2026-11-26, #112).
   An archive scan got the block after about 600 requests in three minutes, six at a time, and the block lifted within a few minutes. About 700 requests one at a time, 1.5 s apart, went through.
   The integration's poll is far below that rate. Scan the archive one request at a time, because the block also stops any Home Assistant on the same network.
 
@@ -253,7 +253,7 @@ Before you add to one of them, look for the fact already stated there or in anot
   An area with neither a polygon nor an outline in `regions.py` makes the parser reject its alert, which the client logs and skips, because covering the whole country would repeat #99. `tests_e2e` fails on such a skip, and when any alert names a region that `regions.py` lacks.
   Neighbouring regions' CAP polygons overlap in slivers along their boundaries, so a point right on one can get both regions' warnings.
   Every station and rain gauge lies in exactly one region, by the CAP polygons and by `regions.py` alike, and both keep the city of Košice, a region of its own, out of Košice okolie.
-- **SHMÚ issues most warnings before they come into force** (verified 2026-11-26 on the last issuance of six days across the archive, #PR).
+- **SHMÚ issues most warnings before they come into force** (verified 2026-11-26 on the last issuance of six days across the archive, #112).
   Every one of those issuances held alerts whose `onset` lay after the issuance was sent, 245 of 452 in all, by a median 8 h and up to 67 h.
   `Warning.is_active` is false for them, so the binary sensor and the warning level leave them out, and only the calendar shows them (`ShmuData.unexpired_warnings_for`).
   Every alert carried both `onset` and `expires`. The calendar leaves out an alert without them rather than invent a span, and `tests_e2e` fails if one appears.
