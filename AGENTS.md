@@ -225,6 +225,17 @@ Where a verified fact is cheap to assert, pin it in `tests_e2e/` too, so the dai
   # the last two issuance folders (expect them ~equal, not disjoint).
   ```
   **An empty `cap/` root is a valid state, not an outage.** Verified live 2026-10-13: the folder listed no day folders at all (its `Last-Modified` was 2026-10-11 02:00) while SHMÚ's warnings page showed level 0 in every region. So once the last alert expires, old day folders get pruned and no empty issuance replaces them. `async_get_warnings` returns an empty snapshot only for a listing with no entries at all; entries that are not `YYYYMMDD/` folders still raise, since they mean the layout changed rather than that the weather is calm. It used to raise instead, and the coordinator logged "warnings unavailable" every poll for as long as the calm lasted.
+  **An issuance is written over several minutes, so a poll can list only part of it.**
+  **Verified live 2026-11-26** over the whole archive (128 issuances, 2026-11-06 to 11-26), by the listings' minute-resolution `Last-modified`: before 11-24 all but two issuances were written within a minute, and since then 13 of 14, holding 108–155 files each, took 2–5 min.
+  `20261126/1042` wrote its 155 files from 10:44 to 10:48 UTC.
+  The files are not written in name order (`00002` before `00001`), so a partial listing is a random subset of the alerts, not a prefix.
+  Every issuance folder's own `Last-modified` equals its newest file's, so no file arrives after the writing ends.
+  The client used to key its cache on the issuance path alone, so a poll inside that window kept the partial set until the next issuance, hours later (issue #100: 74 files of 155, and an orange alert missing).
+  Now `async_get_warnings` lists the served issuance on every poll and reads only the files new since (`WarningsSnapshot.files`).
+  A newer issuance replaces it only once two polls in a row list the same files (`pending_source`/`pending_files`), and never while it lists none, so a new issuance is served 5–10 min after SHMÚ finishes writing it, and a half-written one never hides alerts still in force.
+  With no alerts to keep serving (first poll, or after an empty root), a new issuance is read at once and grows on the next polls.
+  Issuances sometimes follow each other within minutes (`0629`/`0630` on 11-14, `2216`/`2217` on 11-11), and the newest one then restarts the wait.
+  A fixed wait after the folder's `Last-modified` would also work, but it has to cover the longest write and compares the server's clock with ours, so we don't use one.
 - **Each alert covers one warning region, and Piešťany's alerts carry no polygon.**
   **Verified 2026-11-26** over the whole CAP archive (21 days, 129 issuances, 1259 alerts): every alert has exactly one `<area>`, named by an `EMMA_ID` geocode for one of 72 regions, which are the districts with the city districts of Bratislava and of Košice merged into one region each.
   The other 71 regions always send a `<polygon>`, together with the parameter `use_polygon_over_geocode` set to `True`, and each region's polygon was identical in all its alerts.

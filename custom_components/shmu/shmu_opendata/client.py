@@ -16,8 +16,8 @@ import asyncio
 import logging
 import re
 import ssl
-from collections.abc import Sequence
-from dataclasses import dataclass
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from urllib.parse import quote
@@ -103,11 +103,21 @@ class GaugeSnapshot:
 
 @dataclass(frozen=True, slots=True)
 class WarningsSnapshot:
-    """All warnings from the latest CAP issuance, plus its source folder."""
+    """All warnings from the latest written CAP issuance, plus its source folder.
+
+    ``files`` maps each CAP file read from ``source`` to its alert, or to
+    ``None`` when it did not parse, so a later poll fetches only the files that
+    are new since. ``pending_source`` is a newer issuance that the last poll
+    found still being written, and ``pending_files`` the files it listed then
+    (see :meth:`ShmuClient.async_get_warnings`).
+    """
 
     warnings: list[Warning]
     source: str
     fetched_at: datetime
+    files: Mapping[str, Warning | None] = field(default_factory=dict)
+    pending_source: str | None = None
+    pending_files: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True, slots=True)
@@ -472,8 +482,16 @@ class ShmuClient:
         """Fetch all warnings from the latest CAP issuance.
 
         Returns every parsed alert (no time/area filtering); callers decide
-        what is active and relevant. If the newest issuance folder is unchanged
-        from ``previous``, the XML set is not re-downloaded.
+        what is active and relevant. Pass the ``previous`` snapshot back in:
+        only the CAP files it has not read are downloaded.
+
+        **SHMÚ writes an issuance over several minutes** (up to 5, verified
+        2026-11-26), so a poll can list only part of it. We list the issuance
+        we serve on every poll and read the files that appeared since. A newer
+        issuance replaces it only once two polls in a row list the same files,
+        and never while it lists none, so a half-written one never hides
+        alerts still in force. Without
+        alerts to keep serving, a new issuance is read at once instead.
 
         **Verified invariant (2026-05-17):** each ``HHMM/`` issuance folder
         republishes the *complete* set of currently-active alerts, not deltas
@@ -506,25 +524,69 @@ class ShmuClient:
         day_path = f"{WARNINGS_PATH}/{day.rstrip('/')}"
         issuance = await self._latest_entry(day_path, _ISSUANCE_DIR_RE)
         issuance_path = f"{day_path}/{issuance.rstrip('/')}"
+        names = frozenset(
+            e for e in await self._list(issuance_path) if _CAP_FILE_RE.match(e)
+        )
 
         if previous is not None and previous.source == issuance_path:
-            _LOGGER.debug("Warnings unchanged (%s); using cache", issuance_path)
-            return previous
+            if names == previous.files.keys():
+                _LOGGER.debug("Warnings unchanged (%s); using cache", issuance_path)
+                return previous
+            return await self._read_issuance(issuance_path, names, previous.files)
 
-        files = [e for e in await self._list(issuance_path) if _CAP_FILE_RE.match(e)]
-        warnings: list[Warning] = []
-        for name in sorted(files):
+        # An empty listing never counts as written: SHMÚ marks calm with an
+        # empty CAP root, so an empty issuance is one whose files are still due.
+        if (
+            previous is not None
+            and previous.warnings
+            and (
+                not names
+                or previous.pending_source != issuance_path
+                or previous.pending_files != names
+            )
+        ):
+            _LOGGER.debug(
+                "Issuance %s may still be written (%d files so far); "
+                "serving %s until its listing settles",
+                issuance_path,
+                len(names),
+                previous.source,
+            )
+            return replace(previous, pending_source=issuance_path, pending_files=names)
+        return await self._read_issuance(issuance_path, names, {})
+
+    async def _read_issuance(
+        self,
+        issuance_path: str,
+        names: frozenset[str],
+        known: Mapping[str, Warning | None],
+    ) -> WarningsSnapshot:
+        """Read the CAP files ``names``, taking the ones in ``known`` from it."""
+        files: dict[str, Warning | None] = {}
+        for name in sorted(names):
+            if name in known:
+                files[name] = known[name]
+                continue
             payload = await self._get(f"{issuance_path}/{quote(name)}")
             try:
-                warnings.append(parse_cap_alert(payload))
+                files[name] = parse_cap_alert(payload)
             except ShmuDataError as err:
-                # One alert we cannot read or place must not sink the batch.
+                # One alert we cannot read or place must not sink the batch. We
+                # keep its name, so it is not fetched and logged again every poll.
                 _LOGGER.warning("Skipping CAP file %s: %s", name, err)
-        _LOGGER.debug("Parsed %d warnings from %s", len(warnings), issuance_path)
+                files[name] = None
+        warnings = [w for w in files.values() if w is not None]
+        _LOGGER.debug(
+            "Parsed %d warnings from %s (%d files new since the last poll)",
+            len(warnings),
+            issuance_path,
+            len(names - known.keys()),
+        )
         return WarningsSnapshot(
             warnings=warnings,
             source=issuance_path,
             fetched_at=datetime.now(UTC),
+            files=files,
         )
 
     async def async_get_web_conditions(self) -> WebConditionsSnapshot:

@@ -285,6 +285,8 @@ async def async_get_config_entry_diagnostics(
             "source": data.warnings.source,
             "fetched_at": data.warnings.fetched_at.isoformat(),
             "total_parsed": len(data.warnings.warnings),
+            # A newer issuance that is not served until SHMÚ finishes writing it.
+            "pending_source": data.warnings.pending_source,
             "active_for_location": [
                 {
                     "event": w.event,
