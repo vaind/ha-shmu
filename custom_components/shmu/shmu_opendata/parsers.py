@@ -299,23 +299,25 @@ def parse_cap_alert(payload: bytes | str) -> Warning:
             awareness_type = parts[-1] if len(parts) > 1 else value
 
     areas: list[str] = []
+    region_ids: list[str] = []
     polygons: list[tuple[tuple[float, float], ...]] = []
     for area in info.findall(q("area")):
         desc = _cap_text(area.find(q("areaDesc")))
         if desc is not None:
             areas.append(desc)
+        emma_ids = [
+            value
+            for geocode in area.findall(q("geocode"))
+            if _cap_text(geocode.find(q("valueName"))) == "EMMA_ID"
+            and (value := _cap_text(geocode.find(q("value")))) is not None
+        ]
+        region_ids.extend(emma_ids)
         rings = [
             ring
             for polygon in area.findall(q("polygon"))
             if (ring := _parse_polygon(_cap_text(polygon)))
         ]
         if not rings:
-            emma_ids = [
-                value
-                for geocode in area.findall(q("geocode"))
-                if _cap_text(geocode.find(q("valueName"))) == "EMMA_ID"
-                and (value := _cap_text(geocode.find(q("value")))) is not None
-            ]
             rings = [_region_ring(identifier, desc, emma_ids)]
         polygons.extend(rings)
 
@@ -333,6 +335,7 @@ def parse_cap_alert(payload: bytes | str) -> Warning:
         description=_cap_text(info.find(q("description"))),
         instruction=_cap_text(info.find(q("instruction"))),
         areas=tuple(areas),
+        region_ids=tuple(region_ids),
         polygons=tuple(polygons),
         web=_cap_text(info.find(q("web"))),
     )

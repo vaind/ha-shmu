@@ -76,6 +76,8 @@ class Warning:
     description: str | None
     instruction: str | None
     areas: tuple[str, ...]
+    #: The areas' Meteoalarm ``EMMA_ID`` geocodes, the keys of :mod:`.regions`.
+    region_ids: tuple[str, ...]
     #: Rings of (lat, lon) vertices outlining the alert's areas: each area's
     #: ``<polygon>``, or its region's outline from :mod:`.regions` when SHMÚ
     #: sends none. Empty only for an alert that names no area at all.

@@ -8,7 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
-- Warnings for the Piešťany district no longer show up everywhere in Slovakia. SHMÚ sends those warnings without the district's outline, and the weather warning and warning level sensors used to treat them as covering the whole country. They now cover only the Piešťany district, whose outline comes from the map on SHMÚ's own warnings page.
+- Warnings for the Piešťany district no longer show up everywhere in Slovakia. SHMÚ sends those warnings without the district's outline, and the weather warning and warning level sensors used to treat them as covering the whole country. They now cover only the Piešťany district, whose outline comes from the map on SHMÚ's own warnings page. The integration carries that map's outline of every district, so a warning for any other district that arrives without an outline is placed the same way.
 
 ## [1.0.0] - 2026-11-19
 

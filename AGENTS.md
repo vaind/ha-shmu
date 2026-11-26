@@ -230,11 +230,14 @@ Where a verified fact is cheap to assert, pin it in `tests_e2e/` too, so the dai
   The other 71 regions always send a `<polygon>`, together with the parameter `use_polygon_over_geocode` set to `True`, and each region's polygon was identical in all its alerts.
   Piešťany (SK204) sent neither in any of its 13 alerts, which appeared in 49 of the 129 issuances.
   `Warning.covers()` treated an alert without polygons as country-wide, so those alerts matched every location in Slovakia (issue #99).
-  The parser now outlines such an area by its region from `regions.py`, generated from the district map that SHMÚ's own warnings page draws (`www.shmu.sk/assets/maps/meteo_map.json`, recipe in the module docstring).
+  The parser now outlines such an area by its region from `regions.py`, which holds all 72 regions so the fallback also works for any other region whose polygon goes missing.
+  The table is generated from the district map that SHMÚ's own warnings page draws (`www.shmu.sk/assets/maps/meteo_map.json`, recipe in the module docstring).
   That map's `ID` is not the `EMMA_ID` number, so a map feature is matched to an alert by the district abbreviation that ends the alert's `<identifier>`.
-  An area with no polygon and no outline in `regions.py` makes the parser reject its alert, which the client logs and skips, because covering the whole country would repeat issue #99. `tests_e2e` fails on such a skip.
+  The map's boundaries are not the CAP polygons': a CAP vertex lies a median of 90 m (p90 190 m) from the map's boundary of the same region, except around Kežmarok, whose CAP polygon takes in about 200 km² that the map gives to its neighbours.
+  An area with no polygon and no outline in `regions.py` makes the parser reject its alert, which the client logs and skips, because covering the whole country would repeat issue #99.
+  `tests_e2e` fails on such a skip, and also when any alert names a region that `regions.py` lacks.
   Neighbouring regions' CAP polygons overlap in slivers along their shared boundaries, so a point right on a boundary can get both regions' warnings.
-  Every station and rain gauge lies in exactly one region, and the Košice okolie polygon leaves out the city of Košice, which is a region of its own.
+  Every station and rain gauge lies in exactly one region, by the CAP polygons and by `regions.py` alike, and both leave the city of Košice, a region of its own, out of Košice okolie.
 
 ### Radar
 

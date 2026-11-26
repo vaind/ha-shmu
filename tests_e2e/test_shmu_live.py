@@ -37,6 +37,7 @@ from shmu_opendata.const import (
     RADAR_LOOP_FRAMES,
     WARNINGS_PATH,
 )
+from shmu_opendata.regions import REGION_POLYGONS
 
 # Trnava: inside both the forecast grid and the radar composite.
 LATITUDE, LONGITUDE = 48.377, 17.588
@@ -190,6 +191,10 @@ async def test_warnings(client: ShmuClient, caplog: pytest.LogCaptureFixture) ->
         assert warning.event
         assert warning.severity
         assert warning.polygons, warning.identifier
+        # regions.py outlines a region whose polygon goes missing, so it has to
+        # know every region SHMÚ issues alerts for.
+        unknown = set(warning.region_ids) - REGION_POLYGONS.keys()
+        assert not unknown, (warning.identifier, warning.areas, unknown)
 
 
 async def test_website_conditions(client: ShmuClient) -> None:
