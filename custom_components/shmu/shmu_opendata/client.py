@@ -489,7 +489,8 @@ class ShmuClient:
         2026-11-26), so a poll can list only part of it. We list the issuance
         we serve on every poll and read the files that appeared since. A newer
         issuance replaces it only once two polls in a row list the same files,
-        so a half-written one never hides alerts still in force. Without
+        and never while it lists none, so a half-written one never hides
+        alerts still in force. Without
         alerts to keep serving, a new issuance is read at once instead.
 
         **Verified invariant (2026-05-17):** each ``HHMM/`` issuance folder
@@ -533,11 +534,14 @@ class ShmuClient:
                 return previous
             return await self._read_issuance(issuance_path, names, previous.files)
 
+        # An empty listing never counts as written: SHMÚ marks calm with an
+        # empty CAP root, so an empty issuance is one whose files are still due.
         if (
             previous is not None
             and previous.warnings
             and (
-                previous.pending_source != issuance_path
+                not names
+                or previous.pending_source != issuance_path
                 or previous.pending_files != names
             )
         ):

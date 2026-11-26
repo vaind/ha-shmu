@@ -250,6 +250,20 @@ async def test_a_new_issuance_is_served_once_its_listing_settles(
     assert snap.pending_source is None
 
 
+async def test_a_new_issuance_that_lists_no_files_never_settles(
+    http, session, fixture
+) -> None:
+    _serve_cap(http, fixture, {"0353": [1, 2, 3]})
+    client = ShmuClient(session)
+    snap = await client.async_get_warnings()
+
+    # The folder exists before its first file, here for two polls in a row.
+    _serve_cap(http, fixture, {"0353": [1, 2, 3], "0900": []})
+    for _ in range(2):
+        snap = await client.async_get_warnings(previous=snap)
+        assert (snap.source, len(snap.warnings)) == (f"{WARN}/20260517/0353", 3)
+
+
 async def test_a_new_issuance_is_read_at_once_when_no_alerts_are_served(
     http, session, fixture
 ) -> None:
