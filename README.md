@@ -99,7 +99,7 @@ The other is the whole country at native resolution with nothing drawn on, for [
 The radar is national data, so its entities stay available even when your station drops out of an observation snapshot.
 The colours show reflectivity (rain and storm intensity), *not* cloud cover.
 
-The entities belong to the station device, where `<device>` is the device name you chose during setup (e.g. `home`):
+The entities belong to the station device, where `<device>` is the device name you chose during setup (e.g. `home`), and their attributes are listed under [Entity attributes](#entity-attributes):
 
 | Entity | What it shows |
 |---|---|
@@ -200,7 +200,7 @@ Each warning holds:
 | `onset`, `expires` | When the warning comes into force and when it ends. |
 | `areas` | The names of the regions the warning covers, such as `Bratislava`. |
 
-`headline`, `description` and `instruction` can each be empty (`null`).
+`headline`, `description`, `instruction`, `onset` and `expires` can each be empty (`null`).
 
 A Markdown card can show each warning as an alert in its colour, with its time span, full text and instruction, and hide itself while no warning is in force:
 
@@ -214,8 +214,9 @@ content: |
   {%- set ws = state_attr('binary_sensor.<device>_weather_warning', 'warnings') or [] -%}
   {%- set dot = {'red': '🔴', 'orange': '🟠', 'yellow': '🟡'} -%}
   {%- set kind = {'red': 'error', 'orange': 'warning', 'yellow': 'warning'} -%}
+  {%- set f = '%-d.%-m. %H:%M' -%}
   {%- for w in ws %}
-  <ha-alert alert-type="{{ kind.get(w.awareness_level, 'info') }}" title="{{ dot.get(w.awareness_level, '') }} {{ w.event | e }}">{{ as_local(as_datetime(w.onset)).strftime('%-d.%-m. %H:%M') }} – {{ as_local(as_datetime(w.expires)).strftime('%-d.%-m. %H:%M') }}<br>{{ (w.description or w.headline) | e | replace('\n\n', '<br><br>') }}{% if w.instruction %}<br><br><i>{{ w.instruction | e }}</i>{% endif %}</ha-alert>
+  <ha-alert alert-type="{{ kind.get(w.awareness_level, 'info') }}" title="{{ dot.get(w.awareness_level, '') }} {{ w.event | e }}">{% if w.onset or w.expires %}{% if w.onset %}{{ as_local(as_datetime(w.onset)).strftime(f) }}{% endif %} – {% if w.expires %}{{ as_local(as_datetime(w.expires)).strftime(f) }}{% endif %}<br>{% endif %}{{ (w.description or w.headline) | e | replace('\n\n', '<br><br>') }}{% if w.instruction %}<br><br><i>{{ w.instruction | e }}</i>{% endif %}</ha-alert>
   {% endfor -%}
 ```
 
