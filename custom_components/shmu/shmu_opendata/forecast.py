@@ -385,14 +385,15 @@ def parse_forecast(
 ) -> list[ForecastStep]:
     """Decode a run into per-step forecasts at a location.
 
-    ``hourly_files`` is ``(forecast_hour, grib_bytes)`` pairs, one step each.
-    A step's precipitation comes from its own file alone (see
-    :func:`_precipitation`), so the files may come in any order.
+    ``hourly_files`` is ``(forecast_hour, grib_bytes)`` pairs, one step each,
+    with hour 000 first. A step's precipitation comes from its own file alone
+    (see :func:`_precipitation`), but its upper-air profile does not.
 
     The model terrain height is published only in a run's hour-000 file and is
-    constant, so it is picked up from whichever file carries it and reused for
-    every step's upper-air profile. In production that file is always present
-    and first (the client takes a run's *contiguous leading* hours, and
+    constant, so it is picked up from that file and reused for every later
+    step's upper-air profile. A step decoded before it has no
+    ``freezing_level``. In production that file is always present and first
+    (the client takes a run's *contiguous leading* hours, and
     ``FORECAST_HOURS`` starts at 0). A caller passing later hours only gets no
     ``freezing_level`` at all rather than an unanchored guess at one; the
     850 hPa temperature, a plain lookup, is unaffected.
