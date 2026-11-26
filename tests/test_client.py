@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import threading
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Collection
 from datetime import UTC, datetime
 
 import aiohttp
@@ -179,7 +179,7 @@ async def test_get_warnings(http, session, fixture) -> None:
 
 
 def _serve_cap(
-    http, fixture, issuances: dict[str, list[int]], broken: set[int] = frozenset()
+    http, fixture, issuances: dict[str, list[int]], broken: Collection[int] = ()
 ) -> None:
     """Serve a CAP day folder whose issuances list the given alert numbers.
 
