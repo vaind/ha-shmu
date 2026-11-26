@@ -75,6 +75,8 @@ class ShmuWarningBinarySensor(ShmuStationEntity, BinarySensorEntity):
                     "awareness_level": w.awareness_level,
                     "awareness_type": w.awareness_type,
                     "headline": w.headline,
+                    "description": w.description,
+                    "instruction": w.instruction,
                     "onset": w.onset.isoformat() if w.onset else None,
                     "expires": w.expires.isoformat() if w.expires else None,
                     "areas": list(w.areas),

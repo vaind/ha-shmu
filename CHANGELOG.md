@@ -4,6 +4,12 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Each warning in the weather warning sensor's `warnings` attribute now carries SHMÚ's full warning text: `description` says what to expect, such as how much snow will fall, and `instruction` says what to do. Until now only the `headline` was published, and it is often generic.
+
 ## [1.0.1] - 2026-11-26
 
 ### Fixed

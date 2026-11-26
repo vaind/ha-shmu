@@ -189,7 +189,9 @@ When a fetch fails, the integration keeps the last data it has and tries again o
 In the examples, replace `<device>` with the device name you chose during setup (e.g. `home`).
 
 **Get notified when a warning comes into force at your location.**
-The warning binary sensor lists the active warnings in its `warnings` attribute, worst first, each with `event`, `severity`, `awareness_level`, `awareness_type`, `headline`, `onset`, `expires` and `areas`.
+The warning binary sensor lists the active warnings in its `warnings` attribute, worst first, each with `event`, `severity`, `awareness_level`, `awareness_type`, `headline`, `description`, `instruction`, `onset`, `expires` and `areas`.
+`description` holds SHMÚ's full warning text, such as how much snow is expected, and `instruction` says what to do.
+Use them rather than `headline`, which is often generic.
 
 ```yaml
 automation:
@@ -202,7 +204,9 @@ automation:
       - action: notify.notify
         data:
           title: SHMÚ weather warning
-          message: "{{ state_attr('binary_sensor.<device>_weather_warning', 'warnings')[0].headline }}"
+          message: >-
+            {% set warning = state_attr('binary_sensor.<device>_weather_warning', 'warnings')[0] -%}
+            {{ warning.event }}: {{ warning.description or warning.headline }}
 ```
 
 To react only to the more serious warnings, trigger on `sensor.<device>_warning_level` changing to `orange` or `red` instead.
