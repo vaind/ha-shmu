@@ -766,8 +766,13 @@ async def test_warnings_follow_measurement_location(
                 },
             },
         )
-        assert hass.states.get("binary_sensor.bratislava_weather_warning").state == "on"
+        state = hass.states.get("binary_sensor.bratislava_weather_warning")
+        assert state.state == "on"
         assert hass.states.get("sensor.bratislava_warning_level").state != "none"
+        # The headline alone is often generic, so the full text is published too.
+        [warning] = state.attributes["warnings"]
+        assert warning["description"] == "V okrese sa očakáva dážď."
+        assert warning["instruction"] == "ZVÝŠTE POZORNOSŤ."
 
 
 async def test_options_update_reloads_and_reapplies_location(

@@ -139,6 +139,8 @@ def test_parse_cap_alert_prefers_slovak_and_extracts_polygon(fixture) -> None:
     assert warning.severity == "Moderate"
     assert warning.awareness_level == "yellow"
     assert warning.awareness_type == "Rain"
+    assert warning.description == "V okrese sa očakáva dážď."
+    assert warning.instruction == "ZVÝŠTE POZORNOSŤ."
     assert warning.onset == datetime(2026, 5, 15, 18, 0, tzinfo=UTC)
     assert warning.expires == datetime(2026, 5, 17, 18, 0, tzinfo=UTC)
     assert "Bratislava" in warning.areas
@@ -151,6 +153,39 @@ _CAP_AREA = """<alert xmlns="urn:oasis:names:tc:emergency:cap:1.2">
 <info><language>sk</language><event>e</event>
 <area><areaDesc>Somewhere</areaDesc>{}</area></info>
 </alert>"""
+
+
+def test_parse_cap_alert_unwraps_the_text_but_keeps_its_paragraphs() -> None:
+    # Real text from SHMÚ's Bratislava alerts of 2026-11-26, which break lines
+    # mid-sentence, so a notification would show them ragged.
+    payload = """<alert xmlns="urn:oasis:names:tc:emergency:cap:1.2">
+<identifier>x</identifier>
+<info><language>sk</language><event>e</event>
+<description>
+V okrese Bratislava
+sa MIESTAMI očakáva tvorba poľadovice.
+
+Tvorba poľadovice predstavuje potenciálne nebezpečenstvo pre ľudské aktivity
+(doprava, pohyb osôb, infraštruktúra - rôzne typy vedenia..).
+</description>
+<instruction>
+BUĎTE PRIPRAVENÍ na sneh a/alebo ľad spôsobujúci narušenie cestnej,
+železničnej a leteckej dopravy ako aj aktivít vonku.
+</instruction>
+<area><areaDesc>Somewhere</areaDesc>{}</area></info>
+</alert>""".format(_geocode("SK100"))
+
+    warning = parse_cap_alert(payload)
+
+    assert warning.description == (
+        "V okrese Bratislava sa MIESTAMI očakáva tvorba poľadovice.\n\n"
+        "Tvorba poľadovice predstavuje potenciálne nebezpečenstvo pre ľudské "
+        "aktivity (doprava, pohyb osôb, infraštruktúra - rôzne typy vedenia..)."
+    )
+    assert warning.instruction == (
+        "BUĎTE PRIPRAVENÍ na sneh a/alebo ľad spôsobujúci narušenie cestnej, "
+        "železničnej a leteckej dopravy ako aj aktivít vonku."
+    )
 
 
 def _geocode(emma_id: str) -> str:

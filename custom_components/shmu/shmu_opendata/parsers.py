@@ -240,6 +240,18 @@ def _cap_text(element: ET.Element | None) -> str | None:
     return text or None
 
 
+def _cap_prose(element: ET.Element | None) -> str | None:
+    """A CAP free-text field with its line wrapping undone.
+
+    SHMÚ breaks lines mid-sentence, so we join each paragraph into one line
+    and keep only the blank lines between paragraphs.
+    """
+    text = _cap_text(element)
+    if text is None:
+        return None
+    return "\n\n".join(" ".join(p.split()) for p in re.split(r"\n\s*\n", text))
+
+
 def _cap_datetime(element: ET.Element | None) -> datetime | None:
     text = _cap_text(element)
     if text is None:
@@ -333,8 +345,8 @@ def parse_cap_alert(payload: bytes | str) -> Warning:
         expires=_cap_datetime(info.find(q("expires"))),
         sent=sent,
         headline=_cap_text(info.find(q("headline"))),
-        description=_cap_text(info.find(q("description"))),
-        instruction=_cap_text(info.find(q("instruction"))),
+        description=_cap_prose(info.find(q("description"))),
+        instruction=_cap_prose(info.find(q("instruction"))),
         areas=tuple(areas),
         region_ids=tuple(region_ids),
         polygons=tuple(polygons),
