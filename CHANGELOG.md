@@ -8,10 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
-- Weather warnings no longer miss alerts that SHMÚ publishes a few minutes into an update. SHMÚ writes the files of one warnings update over up to five minutes, and a refresh in that window used to read only the alerts written so far and keep that partial set until the next update, hours later. A location could then show a yellow warning level while an orange warning was in force. Every refresh now also reads the alerts added since the previous one, and a new warnings update replaces the previous one only once SHMÚ has finished writing it, 5 to 10 minutes after it is complete, so a half-written update never hides alerts that are still in force.
-- Warnings for the Piešťany district no longer show up everywhere in Slovakia. SHMÚ sends those warnings without the district's outline, and the weather warning and warning level sensors used to treat them as covering the whole country. They now cover only the Piešťany district, whose outline comes from the map on SHMÚ's own warnings page. The integration carries that map's outline of every district, so a warning for any other district that arrives without an outline is placed the same way.
-- Forecast precipitation is no longer about a tenth of SHMÚ's own forecast. Each ALADIN file holds the precipitation of its own hour, but the integration read it as a total since the model run started and kept only how much it grew from one hour to the next, so a steady rain or snow showed as almost dry and its hours as *Cloudy*. The hourly forecast now shows each hour's amount as SHMÚ forecasts it, and the daily totals and conditions follow.
-- The hourly forecast now has a step for every hour up to the model's horizon. Past 48 hours it used to list only every third hour, and the two hours in between were missing from the daily precipitation total.
+- Weather warnings no longer miss alerts that SHMÚ publishes a few minutes into an update. SHMÚ writes one warnings update over up to five minutes, and a refresh in that window used to keep the partial set until the next update, hours later, so a location could show yellow while an orange warning was in force. Every refresh now also reads the alerts added since the previous one, and a new update replaces the previous one only once SHMÚ has finished writing it, 5 to 10 minutes after it is complete.
+- Warnings for the Piešťany district no longer show up everywhere in Slovakia. SHMÚ sends them without the district's outline, and the warning sensors treated them as covering the whole country. They now cover only the district, outlined from the map on SHMÚ's warnings page, and the same applies to any other district whose warning arrives without an outline.
+- Forecast precipitation is no longer about a tenth of SHMÚ's own forecast. Each ALADIN file holds one hour's precipitation, but the integration read it as a running total and kept only the hourly increase, so steady rain or snow showed as almost dry and its hours as *Cloudy*. The hourly amounts, daily totals and conditions now match SHMÚ's forecast.
+- The hourly forecast now has a step for every hour up to the model's horizon. Past 48 hours it used to list only every third hour, which left two hours in three out of the daily precipitation total.
 
 ## [1.0.0] - 2026-11-19
 
@@ -19,157 +19,152 @@ The first stable release. From now on, a breaking change to the entities, their 
 
 ### Changed
 
-- Entities that had a generic icon now have a fitting one: snow depth, visibility, wind gust, ground temperature, freezing level, weather code, warning level, the radar images and the radar frame selector. An icon you set yourself on an entity is kept.
+- Entities that had a generic icon now have a fitting one: snow depth, visibility, wind gust, ground temperature, freezing level, weather code, warning level, the radar images and the radar frame selector. An icon you set yourself is kept.
 
 ## [0.12.2] - 2026-11-16
 
 ### Fixed
 
-- The daily forecast no longer shows rain on a day that is forecast to stay almost dry. A single damp hour used to put a rain icon on the whole day, even when the day added up to only 0.2 mm and the hourly forecast showed rain in just that one hour. A day now shows rain, snow or a thunderstorm only when it adds up to at least 1 mm of precipitation, and otherwise shows the sky around noon. The day's precipitation amount is unchanged.
+- The daily forecast no longer shows rain on a day forecast to stay almost dry. A single damp hour used to put a rain icon on the whole day, even when the day added up to 0.2 mm. A day now shows rain, snow or a thunderstorm only when it adds up to at least 1 mm, and otherwise shows the sky around noon. The day's precipitation amount is unchanged.
 
 ## [0.12.1] - 2026-11-05
 
 ### Fixed
 
-- The weather entity's `observation_time` attribute is no longer an hour early. SHMÚ changed the observation timestamps from UTC+1 to UTC on 2026-10-25, while its metadata still says UTC+1. Readings themselves were never affected: only the reported time of the observation was wrong.
+- The weather entity's `observation_time` attribute is no longer an hour early. SHMÚ switched its observation timestamps from UTC+1 to UTC on 2026-10-25, while its metadata still says UTC+1. The readings themselves were never affected.
 
 ## [0.12.0] - 2026-10-15
 
 ### Added
 
-- **Every SHMÚ automatic weather station can now be picked, not only the 27 synoptic ones** — 94 to choose from, roughly halving the typical distance to the nearest station. Synoptic stations are marked ★ in the station list, because they report the most: the others all measure temperature, humidity, wind and precipitation, but only some measure pressure, present weather or visibility, and sensors for what a station does not measure are unavailable. A station that cannot give a **Sea-level pressure** of its own — no barometer, or no known elevation, which SHMÚ does not publish for about a quarter of them — shows the value of the nearest station within 40 km that can, and the sensor's `source_name` and `source_distance_km` attributes say which one. Reduced to sea level, pressure barely differs over that distance (typically under 1 hPa between stations), whereas estimating the missing elevation from the forecast model's terrain would have put it off by tens of hPa. The weather entity's pressure follows the same sensor. At five of the new stations (Banská Bystrica, Spišské Vlachy, Žabokreky, Turzovka and Liptovský Mikuláš) the present-weather sensor reports drizzle or rain in a third to a half of all hours, while the radar and the station's own rain gauge show precipitation in only a small fraction of them, so their weather condition ignores those reports and comes from the rain gauge and the forecast model instead; the **Weather code** sensor still shows the code SHMÚ publishes. Existing installations are unchanged; a new installation preselects the nearest station of the larger list. Sliač is no longer offered for new installations, as SHMÚ has not published its observations for over a month; existing Sliač installations still load, but their station sensors stay unavailable until SHMÚ resumes publishing it.
-
-- **The weather condition now uses the radar.** An echo of 20 dBZ or more within about 1 km of the station in the latest radar frame means precipitation (rain, sleet or snow by temperature), ranked just below the station's own present-weather report; no echo there overrules the forecast model when it predicts rain or a thunderstorm, and an echo that confirms a forecast downpour or thunderstorm keeps it. Measured over a month against 29 stations' own reports, for a station without a present-weather sensor a "rainy" condition is now right 61 % of the time instead of 35 %, and it catches 59 % of the precipitating hours instead of 39 %; when the model said rain over a radar-dry spot, it was raining only 5–7 % of the time. A radar frame older than 20 minutes is ignored. `condition_source` reads `radar` when it decides the condition, and diagnostics show the local echo and which observation vetoed the model.
+- **Every SHMÚ automatic weather station can now be picked, not only the 27 synoptic ones.** That makes 94 to choose from, roughly halving the typical distance to the nearest station. Existing installations are unchanged, and a new one preselects the nearest station of the larger list.
+  - Synoptic stations are marked ★ because they report the most. The others all measure temperature, humidity, wind and precipitation, but only some measure pressure, present weather or visibility, and the sensors for what a station does not measure are unavailable.
+  - A station that cannot compute its own **Sea-level pressure**, for lack of a barometer or a known elevation, shows the value of the nearest station within 40 km that can. The sensor's `source_name` and `source_distance_km` attributes name that station, and the weather entity's pressure follows the same sensor.
+  - At Banská Bystrica, Spišské Vlachy, Žabokreky, Turzovka and Liptovský Mikuláš, the present-weather sensor reports drizzle or rain far more often than the radar and the station's own gauge see it, so their weather condition ignores those reports. The **Weather code** sensor still shows the code SHMÚ publishes.
+  - Sliač is no longer offered for new installations, because SHMÚ has not published its observations for over a month. Existing Sliač installations still load, but their station sensors stay unavailable until SHMÚ publishes again.
+- **The weather condition now uses the radar.** An echo of 20 dBZ or more within about 1 km of the station means precipitation (rain, sleet or snow by temperature), and no echo there overrules the forecast model when it predicts rain or a thunderstorm. For a station without a present-weather sensor, a *rainy* condition is now right 61 % of the time instead of 35 %. A radar frame older than 20 minutes is ignored. `condition_source` reads `radar` when the radar decides the condition.
 
 ### Changed
 
-- **A sensor whose reading is missing is now *unavailable* instead of *unknown*.** This applies to station readings (a station without a barometer, or a minute without a precipitation sum), the rain-gauge and sea-level pressure sensors, and the model-based freezing level and 850 hPa temperature when the current forecast run lacks them. Home Assistant reserves *unknown* for a value that is only temporarily missing, and these usually are not: many stations never measure some quantities. History and long-term statistics treat both states as a gap, so nothing is lost; an automation or template that tested for `unknown` on these sensors should test for `unavailable` instead.
+- **A sensor whose reading is missing is now *unavailable* instead of *unknown*.** This covers station readings, the rain-gauge and sea-level pressure sensors, and the model-based freezing level and 850 hPa temperature. Home Assistant reserves *unknown* for a value that is only temporarily missing, and many stations never measure some quantities. History and statistics treat both states as a gap, but an automation or template that tested these sensors for `unknown` should test for `unavailable` instead.
 
 ## [0.11.1] - 2026-10-15
 
 ### Fixed
 
-- Fewer `SHMÚ … unavailable, keeping previous: … Server disconnected` warnings and `Error fetching shmu data` errors. SHMÚ's server now and then hangs up on a request without answering it; aiohttp already resends a request once in that case, but production logs showed the resend hanging up too, so a source fell back to its previous data, or the whole poll failed for observations, until the next poll five minutes later. Such a request is now retried up to two more times, which is safe because fetching a file changes nothing on the server. Any other failure — a timeout, a refused connection, an error status — still falls back at once.
+- Fewer `SHMÚ … unavailable, keeping previous: … Server disconnected` warnings and `Error fetching shmu data` errors. SHMÚ's server now and then hangs up on a request without answering, so a source fell back to its previous data, or the whole poll failed, until the next poll. Such a request is now retried up to two more times. Any other failure still falls back at once.
 
 ## [0.11.0] - 2026-10-13
 
 ### Changed
 
-- **Breaking: the Precipitation and Rain gauge precipitation sensors now report intensity in mm/h instead of an amount in mm.** SHMÚ publishes the rain that fell in a single minute, once every five minutes, so the old value was neither a total (four minutes in five never reached it) nor a rate, and anything summing it undercounted roughly five times over. Each sensor now shows the hourly rate that minute implies — the 1-minute sum × 60, so 0.2 mm in that minute reads 12 mm/h. The entities and their history are kept, but Home Assistant cannot convert mm to mm/h, so it stops compiling long-term statistics for them and raises a *The unit of … has changed* repair. Fix it under *Developer tools → Statistics* by deleting the old statistics; don't keep them under the new unit, as they would read sixty times too low. Automations comparing either sensor against a threshold need the threshold multiplied by 60.
-- **Wind bearing is now a wind direction**, and its long-term statistics take the circular mean, so a wind swinging between 350° and 10° averages to north rather than to 180°. Home Assistant treats the change of averaging as a different statistic: it stops compiling long-term statistics for the sensor and raises a *The mean type of … has changed* repair until you delete the old statistics under *Developer tools → Statistics* — which, for northerly winds, were wrong anyway.
-- **Snow depth is now a distance**, so you can display it in another unit (inches, say) from the entity settings. Nothing changes for existing history.
-- **Requires Home Assistant 2026.3 or newer** (was 2025.1). Home Assistant supports one Python version at a time, and 2026.3 is the first release on Python 3.14, which the integration is now developed and tested on. Older Home Assistant versions keep the release they have; HACS will not offer them this update.
-- **Removed three debugging attributes** ahead of 1.0, when the attribute surface becomes a commitment: `data_source` and `raw_condition` from the weather entity, and `source` from the `radar` and `radar_map` image entities. The two `source` values were SHMÚ file paths that change every poll, and `raw_condition` repeated the entity's own condition. The same provenance — the observation and radar file paths, and the full condition resolution — is still in the integration's diagnostics download. A template that read `raw_condition` can use the entity's state instead; it differs only in showing *clear-night* rather than *sunny* after sunset.
-- The radar scrubber — `number.<device>_radar_frame_selector` and the `radar_frame` and `radar_map_frame` images it drives — is now documented as provisional: it is likely to be replaced by frame-by-frame playback in the map plugin ([#52](https://github.com/vaind/ha-shmu/issues/52)). Nothing changes in behaviour yet.
+- **Breaking: the Precipitation and Rain gauge precipitation sensors now report intensity in mm/h instead of an amount in mm.** SHMÚ publishes the rain of a single minute once every five minutes, so the old value undercounted roughly five times when summed. Each sensor now shows the hourly rate that minute implies (the 1-minute sum × 60, so 0.2 mm reads 12 mm/h). Home Assistant raises a *The unit of … has changed* repair: delete the old statistics under *Developer tools → Statistics* rather than keep them under the new unit, where they would read sixty times too low. Multiply any automation threshold on these sensors by 60.
+- **Wind bearing is now a wind direction**, so its long-term statistics take the circular mean and a wind swinging between 350° and 10° averages to north rather than to 180°. Home Assistant raises a *The mean type of … has changed* repair until you delete the old statistics under *Developer tools → Statistics*.
+- **Snow depth is now a distance**, so you can display it in another unit from the entity settings.
+- **Requires Home Assistant 2026.3 or newer** (was 2025.1). Home Assistant 2026.3 is the first release on Python 3.14, which the integration is now developed and tested on. Older Home Assistant versions keep the release they have.
+- **Removed three debugging attributes** before 1.0 makes the attributes a commitment: `data_source` and `raw_condition` from the weather entity, and `source` from the `radar` and `radar_map` images. The diagnostics download still has the same information. A template that read `raw_condition` can use the entity's state instead, which differs only in showing *clear-night* rather than *sunny* after sunset.
+- The radar scrubber (`number.<device>_radar_frame_selector` and the `radar_frame` and `radar_map_frame` images) is now documented as provisional, because frame-by-frame playback in the map plugin is likely to replace it ([#52](https://github.com/vaind/ha-shmu/issues/52)). Its behaviour is unchanged.
 
 ### Fixed
 
-- Home Assistant no longer freezes for several seconds whenever a new ALADIN forecast run is picked up — at every startup and up to four times a day. To read the forecast at your location, the integration unpacked every value of every forecast map in pure Python only to keep the one grid point it needed, and it did so on Home Assistant's event loop, so nothing else (automations, the UI, other integrations) could run until it finished. It now unpacks just that point: a full 67-file run takes 12 ms instead of 6.2 s on an Apple-silicon Mac, with peak memory during the read down from 7.1 MB to 0.4 MB. What remains runs in a worker thread, so it cannot block Home Assistant on slower hardware such as a Raspberry Pi either.
-- No more `SHMÚ warnings unavailable, keeping previous: No entries matching '^\\d{8}/$' …` warning every five minutes during calm weather. When nothing is in force, SHMÚ empties its CAP warnings folder completely rather than publishing an empty issuance. The integration took that as a failed fetch, so it logged every poll and kept the last snapshot it had; it now reads it as "no warnings".
-- Malformed data from SHMÚ now shows up as an ordinary failed update instead of an "unexpected error" traceback in the log, and a change to the SHMÚ website's layout is treated like any other website outage (the last known conditions are kept) instead of logging a layout warning every five minutes.
-- The station's sensors now go unavailable if SHMÚ stops publishing new observation files, instead of showing the last reading as current for as long as the stall lasts. The integration only downloads a file when a newer one appears, and it was counting every poll that found the same old file as a fresh reading. It now only does so for a genuinely new file, so after 30 minutes without one the readings age out — the same rule the rain-gauge sensor already followed.
-- Removing the integration, or changing its options, while a poll is in progress no longer leaves the old instance's poll timer running in the background. The timer re-armed itself after the in-flight poll finished, so the discarded instance — radar frames included, over a megabyte — stayed in memory until Home Assistant restarted. Polling now stops for good on unload.
-- The weather condition no longer stays stuck on an old reading while the SHMÚ website is unreachable. The website's observed weather outranks every other condition source, and when a scrape failed the last successful one was kept indefinitely — so during an outage of hours the condition kept showing whatever the page last said. The website publishes one report per hour, so a scrape is now set aside once it is an hour old, and the condition falls back to the station's own present-weather code and the ALADIN model until the website answers again. Diagnostics show `ignored_as_stale` when that happens.
-- An outage of one of the supplementary SHMÚ sources — warnings, forecast, radar, website conditions or rain gauges — no longer writes the same `SHMÚ … unavailable, keeping previous` warning to the log every five minutes for as long as it lasts. The warning is now logged once when a source goes down, an info line once when it comes back, and the polls in between only at debug level.
+- Home Assistant no longer freezes for several seconds whenever a new ALADIN forecast run arrives, at every startup and up to four times a day. The integration unpacked every forecast map on Home Assistant's event loop to read one grid point. It now unpacks only that point, which takes milliseconds, and does it in a worker thread.
+- No more `SHMÚ warnings unavailable, keeping previous: No entries matching '^\\d{8}/$' …` warning every five minutes in calm weather. SHMÚ empties its warnings folder when nothing is in force, and the integration now reads that as "no warnings" instead of a failed fetch.
+- Malformed data from SHMÚ now shows up as an ordinary failed update instead of an "unexpected error" traceback, and a change to the SHMÚ website's layout is treated like a website outage instead of logging a warning every five minutes.
+- The station's sensors now go unavailable when SHMÚ stops publishing new observation files, instead of showing the last reading as current for as long as the stall lasts.
+- Removing the integration, or changing its options, during a poll no longer leaves the old instance polling in the background until Home Assistant restarts.
+- The weather condition no longer stays stuck on an old reading while the SHMÚ website is unreachable. The website publishes one report per hour, so a scrape is now set aside once it is an hour old, and the condition falls back to the station's present-weather code and the ALADIN model.
+- An outage of a supplementary SHMÚ source (warnings, forecast, radar, website conditions or rain gauges) no longer writes the same warning every five minutes. The integration now logs a warning once when the source goes down and an info line when it comes back.
 
 ## [0.10.0] - 2026-09-02
 
 ### Added
 
-- **The radar can now be panned and zoomed on a map.** Three new image entities — `radar_map`, `radar_map_loop` and `radar_map_frame` — carry the same frames as the existing radar pictures, but rendered as the whole national composite at the radar's native ~0.3 km resolution, with no borders, station marker or timestamp drawn on and transparent where there is no echo. They publish the WGS84 box they cover, so a map card can drape them over its own basemap; the existing cropped pictures are unchanged, and the same scrubber slider drives both.
-- The plugin that puts them on a map **ships with the integration** and is served at `/shmu_static/radar-map-overlay.js`. The only thing you install is the [ha-map-card](https://github.com/nathan-gs/ha-map-card) Lovelace card itself — there is no second download and no Lovelace resource to register. The README has a ready-made card under [Zoomable radar on a map](https://github.com/vaind/ha-shmu#zoomable-radar-on-a-map).
-- The overlay lines up with the map exactly rather than approximately: the SHMÚ radar grid and web maps are both spherical Mercator, so stretching a frame between its reported corners puts every pixel where the map itself would put that coordinate. Verified against Leaflet on a live composite — no measurable error anywhere on the grid, corners included.
+- **The radar can now be panned and zoomed on a map.** Three new image entities, `radar_map`, `radar_map_loop` and `radar_map_frame`, carry the same frames as the radar pictures, but as the whole national composite at the radar's native ~0.3 km resolution, undecorated and transparent where there is no echo. They publish the box they cover, so a map card can drape them over its own map, and the same scrubber slider drives both kinds.
+- The plugin that puts them on a map **ships with the integration** at `/shmu_static/radar-map-overlay.js`. You install only the [ha-map-card](https://github.com/nathan-gs/ha-map-card) card itself, and the README has a ready-made card under [Zoomable radar on a map](https://github.com/vaind/ha-shmu#zoomable-radar-on-a-map). The overlay lines up exactly, because the radar grid and web maps both use spherical Mercator.
 
 ### Fixed
 
-- The `bbox_*` attributes now describe the area a radar picture **actually covers**. When the renderer downsamples — which the station crop does — the box was taken from the requested crop rather than from the pixels drawn, so it fell short by up to one sampled cell. Anything positioning the image geographically was off by that constant sub-kilometre amount.
+- The `bbox_*` attributes now describe the area a radar picture actually covers. For the downsampled station crop, the box fell short by up to one sampled cell, under a kilometre.
 
 ### Changed
 
-- Radar frames are now decoded once and rendered twice (the cropped picture and the map overlay), and that work has moved off Home Assistant's event loop into a worker thread — so the first poll after a restart, which fills the whole 12-frame buffer, no longer blocks it. The extra rendering costs about 1.2 MB of memory for the buffer and a fraction of a second of CPU per new frame; a poll that brings no new frame still re-renders nothing.
+- Radar frames are now decoded once and rendered twice, in a worker thread, so the first poll after a restart no longer blocks Home Assistant's event loop. The extra rendering costs about 1.2 MB of memory.
 
 ## [0.9.0] - 2026-08-26
 
 ### Added
 
-- New **Rain gauge precipitation** sensor, reading SHMÚ's automatic rain-gauge network — a second network of ~190 gauges, disjoint from and roughly three times denser than the 27 synoptic stations (~16 km spacing against ~40 km).
-Precipitation is the measurement that varies most sharply over short distances, so this matters: sampled over a grid of points across the country, the nearest rain gauge is a median **10 km** away against **28 km** for the nearest synoptic station, and is the closer of the two at 92% of points.
-The gauge is chosen from your measurement location (as the forecast and radar already are) and named in the sensor's attributes, along with its distance.
-Your station's existing **Precipitation** sensor is unchanged and still reads the station — the two are different networks measuring different places, so neither silently stands in for the other.
-- SHMÚ's open-data server publishes no coordinates for these gauges, which is why the network went unused until now; they were recovered from the SHMÚ website page that plots the gauges on a map, and cross-checked against the existing station catalogue, which the same page also carries (the two independent sources agree to a median of 272 m).
-- Two new **opt-in** sensors read from the ALADIN model run: **Freezing level** — the height of the 0 °C isotherm above sea level — and **Temperature at 850 hPa**, the standard air-mass indicator at roughly 1450 m, above the valley inversions and daytime heating a 2 m thermometer sees. The freezing level is an *indicator* of the snow line, not the snow line itself: snow goes on falling and melting below the isotherm, so it usually settles a few hundred metres lower. Both are disabled by default; enable them from the device page if you want them. They cost nothing extra upstream: the forecast files have always carried these fields on every download, and every message in them was already being decoded and then discarded.
+- New **Rain gauge precipitation** sensor from SHMÚ's network of ~190 automatic rain gauges, about three times denser than the 27 synoptic stations. Across the country, the nearest gauge is a median 10 km away against 28 km for the nearest synoptic station. The sensor reads the gauge nearest your measurement location and names it, with its distance, in its attributes. The station's own **Precipitation** sensor is unchanged, because the two measure different places.
+- Two new **opt-in** sensors from the ALADIN model: **Freezing level**, the height of the 0 °C isotherm above sea level, and **Temperature at 850 hPa**, the standard air-mass indicator at roughly 1450 m. The freezing level is not the snow line, which usually sits a few hundred metres lower. Enable them from the device page.
 
 ### Fixed
 
-- The weather entity's `observation_time` attribute is no longer an hour in the future. SHMÚ stamps the observation timestamp in SEC (Central European Time, a fixed UTC+1) — both feeds' metadata say so — but it was read as UTC. Readings themselves were never affected: every record in a file shares the offset, so "newest minute wins" picked the same reading either way; only the reported time of the observation was wrong.
-- The forecast now refreshes with every ALADIN run (4×/day) instead of once a day. SHMÚ publishes four runs daily, but only the 00 UTC one reaches +102 h — the 06/12/18 UTC runs stop at +72 h. The integration required every hour through +102, so it silently discarded three runs in four and served a forecast up to 24 hours old. Today's forecast is noticeably closer to reality as a result: on a live comparison the discarded 06 UTC run corrected the current afternoon by 1.5–2.4 °C and raised the next day's high by 0.7 °C.
-- Today's daily forecast no longer shows *yesterday* as its first entry in the hours after midnight. The series is now re-bounded to the current local day on every update, rather than only when a new model run appears — between local midnight and the next run being published (several hours), the leading day was the one that had just ended.
+- The weather entity's `observation_time` attribute is no longer an hour in the future. SHMÚ stamps observations in UTC+1, as its metadata says, but the integration read them as UTC. The readings themselves were never affected.
+- The forecast now refreshes with every ALADIN run (four a day) instead of once a day. Only the 00 UTC run reaches +102 h, and the integration discarded the other three runs, which stop at +72 h, so the forecast could be up to 24 hours old.
+- Today's daily forecast no longer shows *yesterday* as its first entry in the hours after midnight.
 
 ### Changed
 
-- Forecast steps from successive model runs are now combined into one series, newest run winning per hour, instead of the newest run replacing the previous one. This keeps the full forecast length while still refreshing 4×/day: on its own a +72 h run stops short of its last local day, so that day would be dropped and the daily forecast would lose a day (in exchange for the freshness). Merging keeps both — today covered from midnight, the last day intact, and the near term from the newest run. Diagnostics gained a `contributing_runs` field showing which runs the series is built from.
+- Forecast steps from successive model runs are now combined into one series, newest run winning per hour. A +72 h run alone would cut a day off the daily forecast, so merging keeps the full length while still refreshing four times a day. Diagnostics show the runs in use under `contributing_runs`.
 
 ## [0.8.0] - 2026-07-23
 
 ### Added
 
-- New **Sea-level pressure** sensor. SHMÚ reports `tlak` as the raw barometer reading *at the station* (QFE), which on an elevated station sits well below the ~1013 hPa people expect and is not comparable between stations (e.g. Lomnický Štít at 2635 m reads ≈793 hPa). The new sensor reduces that reading to mean sea level (QFF) using the station's elevation and current temperature, so it lines up with synoptic charts and other weather sources. The existing **Pressure** sensor is unchanged and still reports the raw station value.
+- New **Sea-level pressure** sensor. SHMÚ's pressure is the raw barometer reading at the station, which at altitude sits well below the ~1013 hPa people expect (Lomnický Štít at 2635 m reads ≈793 hPa). The new sensor reduces it to sea level using the station's elevation and temperature, so it is comparable with weather charts and other stations. The **Pressure** sensor still reports the raw reading.
 
 ### Changed
 
-- The weather entity's pressure attribute now reports sea-level (QFF) pressure instead of the raw station reading. This puts "now" on the same datum as the forecast (whose pressure is already reduced to sea level), so the two no longer jump by the station's elevation offset.
+- The weather entity's pressure is now sea-level pressure, on the same basis as the forecast's, so the two no longer differ by the station's elevation offset.
 
 ## [0.7.1] - 2026-07-21
 
 ### Fixed
 
-- Daily forecast no longer shows a truncated final day as if it were a whole day. The ALADIN model horizon is +102 h, so the last local calendar day is usually covered only into the morning (for a 00 UTC run it stops around 08:00 local); its "high" was therefore the pre-dawn temperature rather than the real afternoon peak (e.g. a summer Saturday reading 16.8 °C instead of ~26 °C). A day is now summarised only when the forecast horizon reaches its end, so the last, partly-covered day is dropped instead of being shown with a misleading high/low and total.
-- Daily and hourly forecast conditions past +48 h no longer overstate rain. Beyond +48 h ALADIN steps are 3-hourly, but each step's precipitation was classified as if it fell in a single hour, so a light drizzle spread over three hours read as *Pouring* and a trace could surface a phantom *Lightning, rainy*. Precipitation is now classified by its per-hour intensity, so the later forecast days reflect the actual rain rate.
-- Today's daily high/low no longer omits the early morning when a fresh model run starts later in the day. A run begins at its reference hour (00/06/12/18 UTC), so the newest one can start partway through the current day; its earlier hours were simply absent, so today's low could be taken from mid-morning rather than the dawn minimum. The previous run's earlier steps for today are now carried forward, so today is summarised from model data spanning the whole local day (the forecast stays entirely model-sourced — no observation is blended in).
+- The daily forecast no longer shows a truncated final day as a whole day. The model's last day usually ends in the morning, so its "high" was the pre-dawn temperature. A day is now shown only when the forecast covers it to its end.
+- Forecast conditions past +48 h no longer overstate rain. Those steps cover three hours each, but their precipitation was classified as if it fell in one, so light drizzle read as *Pouring*. Precipitation is now classified by its hourly rate.
+- Today's daily high and low no longer miss the early morning when a model run starts later in the day. The previous run's earlier hours for today are now carried forward.
 
 ## [0.7.0] - 2026-06-12
 
 ### Added
 
-- Diagnostics now explain *how* the current condition was decided: the `derived_condition` block lists every source that produced a candidate (with its tier, priority, proposed condition, and which one won) and a `veto` block showing when a station's "no significant weather" observation overrode a model storm. The `forecast` block also reports the `current_step` the resolver used. This makes "why is it showing X" answerable straight from a downloaded dump.
+- Diagnostics now explain how the current condition was decided: the `derived_condition` block lists every source's candidate and which one won, a `veto` block shows when a station's observation overrode a model storm, and the `forecast` block reports the `current_step` used.
 
 ### Fixed
 
-- Weather condition no longer shows a model-forecast *Lightning, rainy* (or rain) while the station itself reports calm, dry weather. The ALADIN model fills the condition when the observations have no sky reading, but on a convective summer afternoon its current-hour cell could predict a thunderstorm over a station that was actually dry. Now, when a station observes no significant present weather (`stav_poc` 0 and no precipitation), that observation vetoes the model's precipitation/storm claim and the condition falls back to the model's cloud-only sky state (e.g. *Cloudy*) instead. Observed present weather is never vetoed, and stations that do not report `stav_poc` are unaffected.
+- The weather condition no longer shows a model-forecast *Lightning, rainy* (or rain) while the station reports calm, dry weather. When a station observes no significant weather and no precipitation, the condition now falls back to the model's sky state (e.g. *Cloudy*). Observed weather is never overruled, and stations without a present-weather sensor are unaffected.
 
 ## [0.6.1] - 2026-06-05
 
 ### Fixed
 
-- Current weather condition no longer flips to *Unknown* for long stretches. The SHMÚ website's cloud column is populated for only a minority of stations at any moment, and the `stav_poc` code carries no cloud cover, so whenever both were silent the condition fell through to unknown. Conditions are now resolved by a cross-source priority ladder that adds the ALADIN model's current-hour cloud cover as a cloud-aware fallback, so the sky state is filled even when the observations have none. The ladder also fixes a latent case where an observed *cloudy* sky could hide present rain — observed precipitation now outranks an observed cloud reading. The winning source (`website`, `stav_poc`, `aladin`) is shown in the weather entity's `condition_source` attribute and in diagnostics.
+- The weather condition no longer flips to *Unknown* for long stretches. The SHMÚ website's cloud column is empty for most stations, and the station's present-weather code carries no cloud cover, so the condition often had no source. The ALADIN model's current cloud cover now fills that gap. Observed precipitation also now outranks an observed cloudy sky. The weather entity's `condition_source` attribute shows the winning source (`website`, `stav_poc` or `aladin`).
 
 ## [0.6.0] - 2026-06-03
 
 ### Added
 
-- **Measurement location** — the forecast, radar crop and warning relevance can now follow a location separate from the observation station. Choose *Same as the station* (the previous behaviour), *Home Assistant location*, or a *Custom* point on the map, either when adding the integration or later via its **Configure** (options) button. Observations still come from the chosen synoptic station.
-- **Name** — the device/entity name is now configurable at setup, defaulting to your Home Assistant location name (e.g. "Home") instead of always being the station name.
-- Dataset-freshness diagnostic sensors: *Observation released* / *Observation fetched* and *Forecast model run* / *Forecast fetched*. They surface when the SHMÚ data currently in use was published upstream and when this integration fetched it, so a stale card can be told apart from a stalled poll.
+- **Measurement location**: the forecast, the radar crop and warning relevance can follow a location other than the station: *Same as the station* (the previous behaviour), *Home Assistant location*, or a *Custom* point on the map. Set it when adding the integration or later under **Configure**.
+- **Name**: the device and entity name is now configurable at setup and defaults to your Home Assistant location name (e.g. "Home") instead of the station name.
+- Diagnostic sensors for data freshness: *Observation released*, *Observation fetched*, *Forecast model run* and *Forecast fetched*, so a stale card can be told apart from a stalled poll.
 
 ### Fixed
 
-- Hourly forecast no longer lists hours that have already elapsed. An ALADIN run is published from its reference time onward, so until the next run lands the raw step list begins several hours in the past; the hourly forecast is now trimmed to the current hour onward. Daily aggregation is unchanged and still summarises each whole calendar day.
-- Diagnostics now coarsen the radar crop's centre/bounding box to ~0.1° so the dump can never pinpoint a private measurement location; the live radar image keeps full precision for map positioning.
+- The hourly forecast no longer lists hours that have already passed.
+- Diagnostics now round the radar crop's centre and bounding box to ~0.1°, so a download can never pinpoint a private measurement location.
 
 ## [0.5.2] - 2026-05-20
 
 ### Changed
 
-- Entities now ride out a brief upstream blip instead of flipping every value to *Unavailable* the moment a single poll fails. Last good readings, warnings and radar frames are served for up to `OBSERVATION_STALE_AFTER` (30 minutes) after the most recent successful fetch; the diagnostics dump still shows `last_update_success`, `last_update` and `failures_since_success` for visibility, and a multi-cycle outage tips entities to unavailable as before.
+- Entities now ride out a brief upstream outage instead of turning *Unavailable* the moment one poll fails. The last good readings, warnings and radar frames are served for up to 30 minutes after the last successful fetch.
 
 ## [0.5.1] - 2026-05-19
 
 ### Changed
 
-- CI: dropped the obsolete `ignore: brands` from the HACS validation action.
-  The HACS action validates the bundled `custom_components/shmu/brand/` assets
-  directly, so the check now passes with no exemption — a prerequisite for
-  HACS default-store inclusion.
+- CI: dropped the obsolete `ignore: brands` from the HACS validation, which now validates the bundled `custom_components/shmu/brand/` icons directly.
 
 ## [0.5.0] - 2026-05-19
 
@@ -177,16 +172,16 @@ First public release.
 
 ### Added
 
-- **Weather entity** — current conditions for a chosen SHMÚ synoptic station, plus the ALADIN/SHMÚ daily and hourly forecast (`get_forecasts`), decoded from GRIB2 in pure Python with no native dependency.
-- **Sensors** — temperature, ground temperature, humidity, pressure, wind speed/gust/bearing, precipitation, snow depth, visibility, global radiation, and a warning-level sensor. The raw WMO present-weather code is available as an opt-in diagnostic sensor.
-- **Weather warnings** — a binary sensor that is on while a SHMÚ CAP alert's own polygon covers the station, exposing the full alert details as attributes.
-- **Radar** — an image entity rendering the national ODIM_H5 composite (decoded in pure Python), cropped to the station vicinity with a country-border and station-marker overlay, as an animated APNG loop of the recent frames.
-- Config-flow setup with the nearest station preselected, English and Slovak translations, and a diagnostics dump with credential/PII redaction.
-- Brand icon and logo bundled in `custom_components/shmu/brand/` (served locally via the Home Assistant Brands Proxy API).
+- **Weather entity**: current conditions for a chosen SHMÚ synoptic station, and the ALADIN daily and hourly forecast (`get_forecasts`), decoded from GRIB2 in pure Python.
+- **Sensors**: temperature, ground temperature, humidity, pressure, wind speed, gust and bearing, precipitation, snow depth, visibility, global radiation and warning level. The raw WMO present-weather code is an opt-in diagnostic sensor.
+- **Weather warnings**: a binary sensor that is on while a SHMÚ warning covers the station, with the alert details as attributes.
+- **Radar**: an animated loop of the national radar composite, decoded in pure Python and cropped to the station with country borders and a station marker.
+- Setup with the nearest station preselected, English and Slovak translations, and a diagnostics download with personal data redacted.
+- Brand icon and logo bundled in `custom_components/shmu/brand/`.
 
 ### Notes
 
-- Distributed via **HACS** (not Home Assistant core) by design: the current sky condition is read from the SHMÚ website because the open-data files carry no cloud information.
+- Distributed through **HACS** rather than Home Assistant core by design, because the current sky condition is read from the SHMÚ website.
 - Home Assistant quality scale: **silver**.
 
 [1.0.1]: https://github.com/vaind/ha-shmu/releases/tag/v1.0.1
