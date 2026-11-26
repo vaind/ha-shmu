@@ -346,6 +346,7 @@ async def test_entities_survive_transient_update_failure(
         # tolerate the same blip — they read independent coordinator data.
         assert hass.states.get("binary_sensor.hurbanovo_weather_warning").state == "off"
         assert hass.states.get("sensor.hurbanovo_warning_level").state == "none"
+        assert hass.states.get("calendar.hurbanovo_weather_warnings").state == "off"
         assert hass.states.get("image.hurbanovo_radar").state is not None
 
         # Upstream becomes unreachable. The coordinator marks the cycle failed
@@ -375,6 +376,10 @@ async def test_entities_survive_transient_update_failure(
             == "unavailable"
         )
         assert hass.states.get("sensor.hurbanovo_warning_level").state == "unavailable"
+        assert (
+            hass.states.get("calendar.hurbanovo_weather_warnings").state
+            == "unavailable"
+        )
 
 
 async def test_unload(

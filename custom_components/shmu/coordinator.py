@@ -258,6 +258,25 @@ class ShmuData:
         relevant.sort(key=lambda w: _SEVERITY_ORDER.get(w.severity, 0), reverse=True)
         return relevant
 
+    def unexpired_warnings_for(
+        self, latitude: float, longitude: float
+    ) -> list[Warning]:
+        """Warnings covering the point, in force or still to come, worst first.
+
+        SHMÚ issues a warning ahead of its onset, so unlike
+        :meth:`active_warnings_for` this keeps the ones not in force yet.
+        """
+        if self.warnings is None:
+            return []
+        now = dt_util.utcnow()
+        relevant = [
+            w
+            for w in self.warnings.warnings
+            if (w.expires is None or now < w.expires) and w.covers(latitude, longitude)
+        ]
+        relevant.sort(key=lambda w: _SEVERITY_ORDER.get(w.severity, 0), reverse=True)
+        return relevant
+
     def resolve_condition(
         self, station: Station, observation: Observation | None
     ) -> tuple[str | None, str]:

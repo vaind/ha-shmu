@@ -43,6 +43,7 @@ Do not rely on it for safety-critical decisions: consult SHMÚ's official channe
   Both report **intensity in mm/h**: SHMÚ publishes only the rain of one minute in every five, so each sensor shows the hourly rate that minute implies (the 1-minute sum × 60).
 - **Upper air (opt-in)**: the **freezing level** (the height of the 0 °C isotherm above sea level) and the **850 hPa temperature** (the standard air-mass indicator, ~1450 m up), from the same ALADIN run as the forecast. The freezing level is *not* the snow line, which usually sits a few hundred metres lower. Enable them from the device page.
 - **Weather warnings**: a binary sensor that is on while a SHMÚ warning covers your measurement location, with each warning's full text in its attributes (see [Weather warnings](#weather-warnings)).
+- **Warnings calendar**: the same warnings as calendar events, including those SHMÚ has issued for later, for the *Calendar* panel and for automations that act before a warning comes into force (see [Warnings calendar](#warnings-calendar)).
 - **Radar**: the national reflectivity composite cropped to your measurement location as a still image, a ~1-hour loop and a scrubbable frame, plus the same three as overlays you can pan and zoom on a map card (see [Radar](#radar)).
 - **Fresh data**: one shared fetch per cycle, timed to SHMÚ's 5-minute publishing schedule and tuned to its observed publishing delay, so readings arrive within minutes. A station missing from one snapshot keeps its last reading until it is genuinely stale instead of flickering to unavailable.
 
@@ -175,6 +176,7 @@ Times are ISO 8601 strings in UTC, which `as_local(as_datetime(...))` converts f
 |---|---|
 | `weather.<device>` | `condition_source` names the source that decided the condition (see [Stations](#stations)), `observation_time` is when the station took the current readings, and `station_id` is the station's SHMÚ number. |
 | `binary_sensor.<device>_weather_warning` | `warnings` lists the warnings in force at your measurement location (see [Weather warnings](#weather-warnings)), and `warning_count` counts them. |
+| `calendar.<device>_weather_warnings` | Every calendar's attributes: `message`, `description`, `start_time` and `end_time` describe the worst warning in force, or else the next one to come (see [Warnings calendar](#warnings-calendar)). Its times are in your local time. |
 | `sensor.<device>_rain_gauge_precipitation` | `gauge_name` and `gauge_distance_km` name the rain gauge the reading comes from and its distance from your measurement location, and `gauge_ind_zra` is its SHMÚ number. |
 | `sensor.<device>_sea_level_pressure` | `source_name` and `source_distance_km` name the station the value comes from (see [Stations](#stations)), and `source_ind_kli` is its SHMÚ number. |
 | `image.<device>_radar`, `image.<device>_radar_map` | `max_dbz` is the peak reflectivity in the picture, `product` is the SHMÚ radar product (`zmax`), and `center_*` and `bbox_*` give the picture's centre and edges in degrees of latitude and longitude. |
@@ -184,7 +186,7 @@ Times are ISO 8601 strings in UTC, which `as_local(as_datetime(...))` converts f
 
 ### Weather warnings
 
-Home Assistant limits a state to 255 characters, so the warnings' text is only in the `warnings` attribute of `binary_sensor.<device>_weather_warning`.
+Home Assistant limits a state to 255 characters, so the warnings' text is in the `warnings` attribute of `binary_sensor.<device>_weather_warning` and in the events of the [warnings calendar](#warnings-calendar).
 The attribute lists the warnings in force at your measurement location, worst first, in Slovak as SHMÚ writes them.
 Each warning holds:
 
@@ -221,6 +223,22 @@ content: |
 ```
 
 Keep each alert on one line and the `replace('\n\n', '<br><br>')` calls, because a blank line ends the alert's HTML and the rest of its text would show as plain Markdown.
+
+### Warnings calendar
+
+`calendar.<device>_weather_warnings` holds one event per warning at your measurement location, from its `onset` to its `expires`.
+The event's title is the warning's `event`, and its text is the `description` followed by the `instruction`.
+Unlike the binary sensor, the calendar also holds the warnings SHMÚ has issued that are not in force yet, so you can see them coming.
+An expired warning leaves the calendar, which therefore shows no history.
+
+The warnings show in Home Assistant's *Calendar* panel, and a calendar card lists the coming ones on a dashboard:
+
+```yaml
+type: calendar
+initial_view: listWeek
+entities:
+  - calendar.<device>_weather_warnings
+```
 
 ## How data is updated
 
@@ -266,6 +284,27 @@ automation:
 ```
 
 To react only to the more serious warnings, trigger on `sensor.<device>_warning_level` changing to `orange` or `red` instead.
+
+**Get notified an hour before a warning comes into force.**
+A calendar trigger on the [warnings calendar](#warnings-calendar) fires ahead of each warning's onset.
+
+```yaml
+automation:
+  - alias: Notify before a SHMÚ weather warning
+    triggers:
+      - trigger: calendar
+        event: start
+        offset: "-1:00:00"
+        entity_id: calendar.<device>_weather_warnings
+    actions:
+      - action: notify.notify
+        data:
+          title: "In an hour: {{ trigger.calendar_event.summary }}"
+          message: "{{ trigger.calendar_event.description }}"
+```
+
+Home Assistant looks for upcoming events every 15 minutes, so a warning issued less than about 75 minutes before its onset may not fire this trigger.
+Keep the binary sensor automation above to hear about those too.
 
 **Retract an awning or close a roof window when it starts to rain.**
 The rain-gauge sensor is usually the closest measurement to your home, and any value above zero means the gauge collected rain in the last reported minute.

@@ -90,6 +90,9 @@
     "binary_sensor": {
       "weather_warning": { "name": "Meteorologická výstraha" }
     },
+    "calendar": {
+      "weather_warnings": { "name": "Meteorologické výstrahy" }
+    },
     "image": {
       "radar": { "name": "Radar" },
       "radar_loop": { "name": "Radarová slučka" },

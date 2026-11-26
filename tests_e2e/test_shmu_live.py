@@ -194,6 +194,8 @@ async def test_warnings(client: ShmuClient, caplog: pytest.LogCaptureFixture) ->
         assert warning.event
         assert warning.severity
         assert warning.polygons, warning.identifier
+        # The calendar leaves out an alert without a span (AGENTS.md).
+        assert warning.onset and warning.expires, warning.identifier
         # regions.py outlines a region whose polygon goes missing, so it has to
         # know every region SHMÚ issues alerts for.
         unknown = set(warning.region_ids) - REGION_POLYGONS.keys()
