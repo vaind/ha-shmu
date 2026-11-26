@@ -499,8 +499,8 @@ class ShmuClient:
         reading only the newest issuance of the newest day is sufficient. If
         SHMÚ ever switches to incremental issuances, still-active earlier
         alerts would wrongly disappear; the fix would then be to union recent
-        issuances within the active window. Re-check with the script in
-        AGENTS.md if warnings behave oddly.
+        issuances within the active window. Re-check as AGENTS.md describes
+        if warnings behave oddly.
 
         **An empty CAP root means "nothing in force"** (verified 2026-10-13,
         when SHMÚ's warnings page showed level 0 in every region): once the
