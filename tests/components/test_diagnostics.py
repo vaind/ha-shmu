@@ -83,6 +83,7 @@ async def test_config_entry_diagnostics(
     assert diag["web_conditions"]["ignored_as_stale"] is False
     # No active warning covers Hurbanovo (polygon is around Bratislava).
     assert diag["warnings"]["active_for_location"] == []
+    assert diag["warnings"]["pending_source"] is None
     # The measurement-location mode is surfaced (default = same as station).
     assert diag["coordinator"]["location_mode"] == LOCATION_MODE_STATION
     # The rain gauge that feeds the precipitation sensor is identified, so

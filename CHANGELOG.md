@@ -4,6 +4,12 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- Weather warnings no longer miss alerts that SHMÚ publishes a few minutes into an update. SHMÚ writes the files of one warnings update over up to five minutes, and a refresh in that window used to read only the alerts written so far and keep that partial set until the next update, hours later. A location could then show a yellow warning level while an orange warning was in force. Every refresh now also reads the alerts added since the previous one, and a new warnings update replaces the previous one only once SHMÚ has finished writing it, 5 to 10 minutes after it is complete, so a half-written update never hides alerts that are still in force.
+
 ## [1.0.0] - 2026-11-19
 
 The first stable release. From now on, a breaking change to the entities, their states and units, the documented attributes, the configuration options or the map plugin comes only with a new major version. The [Versioning](https://github.com/vaind/ha-shmu#versioning) section of the README lists exactly what is covered.

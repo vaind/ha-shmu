@@ -178,6 +178,105 @@ async def test_get_warnings(http, session, fixture) -> None:
     assert snap.source == f"{WARN}/20260517/0353"
 
 
+def _serve_cap(
+    http, fixture, issuances: dict[str, list[int]], broken: set[int] = frozenset()
+) -> None:
+    """Serve a CAP day folder whose issuances list the given alert numbers.
+
+    Replaces every earlier registration, so a test can change the tree between
+    polls. All alerts share one fixture, so tests tell them apart by count;
+    the numbers in ``broken`` serve malformed XML instead.
+    """
+    http.clear_requests()
+    http.get(f"{BASE}{WARN}/", text=_listing("20260517/"))
+    http.get(f"{BASE}{WARN}/20260517/", text=_listing(*(f"{i}/" for i in issuances)))
+    for issuance, numbers in issuances.items():
+        names = [f"sk.shmu.meteo.alert.{n:05d}.cap.xml" for n in numbers]
+        http.get(f"{BASE}{WARN}/20260517/{issuance}/", text=_listing(*names))
+        for number in numbers:
+            http.get(
+                _alert_url(issuance, number),
+                content=b"<alert" if number in broken else fixture("alert.cap.xml"),
+            )
+
+
+def _alert_url(issuance: str, number: int) -> str:
+    return f"{BASE}{WARN}/20260517/{issuance}/sk.shmu.meteo.alert.{number:05d}.cap.xml"
+
+
+async def test_warnings_read_files_written_after_the_issuance_was_listed(
+    http, session, fixture
+) -> None:
+    # Live 2026-11-26: SHMÚ wrote the 155 files of one issuance over four
+    # minutes, so a poll in that window lists only some of them.
+    _serve_cap(http, fixture, {"0353": [1]})
+    client = ShmuClient(session)
+    partial = await client.async_get_warnings()
+    assert len(partial.warnings) == 1
+
+    _serve_cap(http, fixture, {"0353": [1, 2]})
+    snap = await client.async_get_warnings(previous=partial)
+    assert (snap.source, len(snap.warnings)) == (f"{WARN}/20260517/0353", 2)
+    # Only the file that is new since the last poll is fetched.
+    assert _fetches(http, _alert_url("0353", 1)) == 0
+    assert _fetches(http, _alert_url("0353", 2)) == 1
+
+    # An unchanged listing fetches nothing.
+    assert await client.async_get_warnings(previous=snap) is snap
+    assert _fetches(http, _alert_url("0353", 2)) == 1
+
+
+async def test_a_new_issuance_is_served_once_its_listing_settles(
+    http, session, fixture
+) -> None:
+    _serve_cap(http, fixture, {"0353": [1, 2, 3]})
+    client = ShmuClient(session)
+    served = await client.async_get_warnings()
+
+    # 0900 is still being written: its alerts so far would be a partial set,
+    # so the complete 0353 stays in use and nothing of 0900 is fetched.
+    _serve_cap(http, fixture, {"0353": [1, 2, 3], "0900": [1]})
+    snap = await client.async_get_warnings(previous=served)
+    assert (snap.source, len(snap.warnings)) == (f"{WARN}/20260517/0353", 3)
+    assert _fetches(http, _alert_url("0900", 1)) == 0
+
+    _serve_cap(http, fixture, {"0353": [1, 2, 3], "0900": [1, 2]})
+    snap = await client.async_get_warnings(previous=snap)
+    assert snap.source == f"{WARN}/20260517/0353"
+
+    # Listed the same as on the last poll, so 0900 is written and replaces 0353.
+    snap = await client.async_get_warnings(previous=snap)
+    assert (snap.source, len(snap.warnings)) == (f"{WARN}/20260517/0900", 2)
+    assert snap.pending_source is None
+
+
+async def test_a_new_issuance_is_read_at_once_when_no_alerts_are_served(
+    http, session, fixture
+) -> None:
+    # A partial set beats none, and later polls add the files written since.
+    http.get(f"{BASE}{WARN}/", content=fixture("cap_empty_listing.html"))
+    client = ShmuClient(session)
+    calm = await client.async_get_warnings()
+
+    _serve_cap(http, fixture, {"0900": [1]})
+    snap = await client.async_get_warnings(previous=calm)
+    assert (snap.source, len(snap.warnings)) == (f"{WARN}/20260517/0900", 1)
+
+
+async def test_an_unparseable_alert_is_not_fetched_again(
+    http, session, fixture
+) -> None:
+    _serve_cap(http, fixture, {"0353": [1, 2]}, broken={2})
+    client = ShmuClient(session)
+    first = await client.async_get_warnings()
+    assert len(first.warnings) == 1
+
+    _serve_cap(http, fixture, {"0353": [1, 2, 3]}, broken={2})
+    snap = await client.async_get_warnings(previous=first)
+    assert len(snap.warnings) == 2
+    assert _fetches(http, _alert_url("0353", 2)) == 0
+
+
 async def test_empty_warnings_tree_means_no_warnings(http, session, fixture) -> None:
     # Live 2026-10-13: with nothing in force, SHMÚ prunes old day folders and
     # publishes no empty issuance, so the CAP root lists nothing at all. The
