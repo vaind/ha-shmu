@@ -9,7 +9,8 @@ Phase-2a spike (issue #2):
 * a Section-6 **bitmap** masking the rectangular grid down to the Slovakia
   sub-domain (so ``Section 7`` holds only the unmasked values, in scan order).
 
-Anything outside that scope (other packing templates, no-bitmap files) raises
+Anything outside that scope (other packing templates, no-bitmap files, time
+intervals of no fixed length) raises
 :class:`ShmuDataError` *loudly* rather than silently returning wrong numbers —
 if SHMÚ ever changes the encoding we want a clear failure, not corrupt
 forecasts. The fixed grid geometry is intentionally **not** interpreted here;
@@ -29,7 +30,7 @@ from __future__ import annotations
 import struct
 from collections.abc import Iterator
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from .exceptions import ShmuDataError
 
@@ -38,6 +39,20 @@ _END = b"7777"
 _SIMPLE_PACKING = 0
 _IEEE_PACKING = 4
 _SUPPORTED_TEMPLATES = frozenset({_SIMPLE_PACKING, _IEEE_PACKING})
+#: Product definition template 4.8: a value processed over a time interval.
+_TIME_PROCESSED = 8
+#: Length of the 4.8 template with a single time range specification.
+_TIME_PROCESSED_LEN = 58
+#: WMO code table 4.4 (unit of time), for the units of a fixed length.
+_TIME_UNITS = {
+    0: timedelta(minutes=1),
+    1: timedelta(hours=1),
+    2: timedelta(days=1),
+    10: timedelta(hours=3),
+    11: timedelta(hours=6),
+    12: timedelta(hours=12),
+    13: timedelta(seconds=1),
+}
 #: GRIB marks an absent numeric field by setting every bit — see
 #: :func:`_fixed_surface`.
 _MISSING_U8 = 0xFF
@@ -77,6 +92,53 @@ def _fixed_surface(section4: bytes) -> float | None:
 
 
 @dataclass(frozen=True, slots=True)
+class TimeStatistic:
+    """What a time-processed message (template 4.8) holds, over which time.
+
+    ``process`` is WMO code table 4.10 (0 average, 1 accumulation, 2 maximum,
+    ...), taken over the ``length`` of time that ends at ``end``.
+    """
+
+    process: int
+    end: datetime
+    length: timedelta
+
+
+def _time_statistic(section4: bytes) -> TimeStatistic | None:
+    """The interval of a template 4.8 message, or ``None`` for any other.
+
+    Only a single time range is read: a second one nests one statistic inside
+    another, which SHMÚ does not publish.
+    """
+    if _u(section4, 7, 2) != _TIME_PROCESSED:
+        return None
+    if len(section4) < _TIME_PROCESSED_LEN:
+        raise ShmuDataError("Truncated product definition template 4.8")
+    if section4[41] != 1:
+        raise ShmuDataError(
+            f"Unsupported template 4.8 with {section4[41]} time ranges (only 1)"
+        )
+    unit = _TIME_UNITS.get(section4[48])
+    if unit is None:
+        raise ShmuDataError(
+            f"Unsupported template 4.8 time unit {section4[48]} (code table 4.4)"
+        )
+    return TimeStatistic(
+        process=section4[46],
+        end=datetime(
+            _u(section4, 34, 2),
+            section4[36],
+            section4[37],
+            section4[38],
+            section4[39],
+            section4[40],
+            tzinfo=UTC,
+        ),
+        length=_u(section4, 49, 4) * unit,
+    )
+
+
+@dataclass(frozen=True, slots=True)
 class Grib2Field:
     """One decoded GRIB2 message (a single 2-D field on the grid).
 
@@ -93,11 +155,15 @@ class Grib2Field:
     ``param`` alone cannot separate the five pressure levels ALADIN publishes
     the same quantity on, so a caller picking one addresses it as
     ``(*param, level)``.
+
+    ``statistic`` says what a time-processed value (template 4.8) is over
+    which interval, and is ``None`` for an instantaneous one (template 4.0).
     """
 
     reference_time: datetime
     param: tuple[int, int, int, int]
     level: float | None
+    statistic: TimeStatistic | None
     nx: int
     ny: int
     scan_mode: int
@@ -130,6 +196,7 @@ class Grib2Message:
     reference_time: datetime
     param: tuple[int, int, int, int]
     level: float | None
+    statistic: TimeStatistic | None
     nx: int
     ny: int
     scan_mode: int
@@ -182,6 +249,7 @@ class Grib2Message:
             reference_time=self.reference_time,
             param=self.param,
             level=self.level,
+            statistic=self.statistic,
             nx=self.nx,
             ny=self.ny,
             scan_mode=self.scan_mode,
@@ -331,6 +399,7 @@ def iter_messages(data: bytes) -> Iterator[Grib2Message]:
         reference_time: datetime | None = None
         param: tuple[int, int, int, int] | None = None
         level: float | None = None
+        statistic: TimeStatistic | None = None
         npts = nx = ny = scan_mode = 0
         data_template = -1
         bitmap: bytes | None = None
@@ -369,6 +438,7 @@ def iter_messages(data: bytes) -> Iterator[Grib2Message]:
                 # the only two SHMÚ uses, so one path reads both.
                 param = (discipline, sec[9], sec[10], sec[22])
                 level = _fixed_surface(sec)
+                statistic = _time_statistic(sec)
             elif sec_num == 5:
                 data_template = _u(sec, 9, 2)
                 if data_template not in _SUPPORTED_TEMPLATES:
@@ -424,6 +494,7 @@ def iter_messages(data: bytes) -> Iterator[Grib2Message]:
             reference_time=reference_time,
             param=param,
             level=level,
+            statistic=statistic,
             nx=nx,
             ny=ny,
             scan_mode=scan_mode,

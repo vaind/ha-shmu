@@ -39,10 +39,12 @@ DEFAULT_RADAR_PRODUCT: Final = "zmax"
 #: in-memory buffer.
 RADAR_LOOP_FRAMES: Final = 12
 
-#: Forecast hours to fetch per run: hourly to +48 h, then 3-hourly to +102 h
-#: (the model's horizon). ≈67 files (~11 MB) once per run — *not* per
-#: observation poll. Trimmed if a run does not publish the full set.
-FORECAST_HOURS: Final = (*range(0, 49), *range(51, 103, 3))
+#: Forecast hours to fetch per run: every hour to +102 h (the model's horizon).
+#: Each file holds only its own hour's precipitation, so a skipped file is rain
+#: missing from the daily total. 103 files (~17 MB) for a 00 UTC run and 73
+#: for the others, once per run — *not* per observation poll. Trimmed if a run
+#: does not publish the full set.
+FORECAST_HOURS: Final = tuple(range(103))
 
 #: Shortest run we will use. Only the **00 UTC** run publishes out to +102 h;
 #: the 06/12/18 UTC runs stop at +72 h (verified 2026-08-26 across the full

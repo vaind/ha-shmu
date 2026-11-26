@@ -22,6 +22,7 @@ import re
 import sys
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
+from itertools import pairwise
 from zoneinfo import ZoneInfo
 
 import aiohttp
@@ -204,6 +205,13 @@ async def test_forecast(client: ShmuClient) -> None:
     assert datetime.now(UTC) - snap.run <= timedelta(hours=30), snap.run
     horizon = snap.steps[-1].time - snap.run
     assert horizon >= timedelta(hours=MIN_FORECAST_HOURS), horizon
+    # AGENTS.md: every hour is published, and each file's precipitation is
+    # the one hour ending at its valid time (parse_forecast raises unless it
+    # is an accumulation ending there), so the hourly steps tile exactly.
+    gaps = {later.time - earlier.time for earlier, later in pairwise(snap.steps)}
+    assert gaps == {timedelta(hours=1)}, gaps
+    windows = {step.span_hours for step in snap.steps}
+    assert windows == {1.0}, windows
 
     for step in snap.steps:
         missing = [
@@ -221,8 +229,8 @@ async def test_forecast(client: ShmuClient) -> None:
             )
             if getattr(step, name) is None
         ]
-        # Hour 000 carries no accumulated precipitation (orography takes its
-        # slot); every later hour must.
+        # Hour 000 carries no precipitation (orography takes its slot); every
+        # later hour must.
         if step.time != snap.run and step.precipitation is None:
             missing.append("precipitation")
         # A field that silently stops decoding (changed level set, new

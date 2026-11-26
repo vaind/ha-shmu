@@ -134,8 +134,9 @@ def _reading_is_current(
 
 
 #: Slack when comparing a step's accumulation window to the gap before it.
-#: Both are whole hours derived from integer forecast hours, so this only
-#: absorbs float noise — it is not a tolerance for genuinely misaligned steps.
+#: Both are whole hours (integer forecast hours, and windows the files state
+#: in hours), so this only absorbs float noise — it is not a tolerance for
+#: genuinely misaligned steps.
 _TILING_TOLERANCE_H = 1e-6
 
 
@@ -185,9 +186,9 @@ def _merge_forecast_runs(
     the newest contributing run.
 
     Merging is only sound while the merged steps' accumulation windows still
-    tile (see :func:`_accumulations_tile`). That holds for SHMÚ's current step
-    grids because every run's step times are a subset of any denser run
-    overlapping them — an observation about today's product, not a guarantee.
+    tile (see :func:`_accumulations_tile`). That holds for SHMÚ's current
+    product because every run is hourly and every file holds one hour of
+    precipitation — an observation about today's product, not a guarantee.
     If it ever stops holding we opt out of the merge rather than serve
     double-counted rain, falling back to the newest run alone: always
     self-consistent, always the freshest data, at the cost of the extra day.

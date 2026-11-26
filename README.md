@@ -248,7 +248,7 @@ The radar cards are described under [Radar](#radar).
 ## Known limitations
 
 - **The forecast reaches about four days ahead.**
-  SHMÚ publishes the ALADIN model to at most 102 hours, hourly for the first 48 hours and in 3-hour steps after that, and the daily forecast lists only the days the model covers to their end.
+  SHMÚ publishes the ALADIN model hourly to at most 102 hours, and the daily forecast lists only the days the model covers to their end.
   SHMÚ publishes its longer-range forecasts as pictures only, so the integration cannot read them.
 - **There is no rainfall total.**
   Both precipitation sensors report an intensity in mm/h taken from one minute in every five, so summing them does not give a daily amount.

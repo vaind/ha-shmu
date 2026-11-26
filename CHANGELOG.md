@@ -4,7 +4,12 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.0.0] - 2026-11-19
+## [Unreleased]
+
+### Fixed
+
+- Forecast precipitation is no longer about a tenth of SHMÚ's own forecast. Each ALADIN file holds the precipitation of its own hour, but the integration read it as a total since the model run started and kept only how much it grew from one hour to the next, so a steady rain or snow showed as almost dry and its hours as *Cloudy*. The hourly forecast now shows each hour's amount as SHMÚ forecasts it, and the daily totals and conditions follow.
+- The hourly forecast now has a step for every hour up to the model's horizon. Past 48 hours it used to list only every third hour, and the two hours in between were missing from the daily precipitation total.
 
 The first stable release. From now on, a breaking change to the entities, their states and units, the documented attributes, the configuration options or the map plugin comes only with a new major version. The [Versioning](https://github.com/vaind/ha-shmu#versioning) section of the README lists exactly what is covered.
 

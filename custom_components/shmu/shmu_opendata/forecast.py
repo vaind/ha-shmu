@@ -63,13 +63,15 @@ _U10: _FieldKey = (0, 2, 2, 103, 10.0)  # 10 m u-wind (m/s)
 _V10: _FieldKey = (0, 2, 3, 103, 10.0)  # 10 m v-wind (m/s)
 _GUST_U: _FieldKey = (0, 2, 23, 103, 10.0)  # 10 m u-wind gust (m/s)
 _GUST_V: _FieldKey = (0, 2, 24, 103, 10.0)  # 10 m v-wind gust (m/s)
-_TP: _FieldKey = (0, 1, 193, 1, 0.0)  # total precip, accumulated (kg/m²≡mm)
+_TP: _FieldKey = (0, 1, 193, 1, 0.0)  # precip over the past hour (kg/m²≡mm)
 _TCC: _FieldKey = (192, 128, 164, 1, 0.0)  # total cloud cover (fraction 0..1)
 _PRMSL: _FieldKey = (0, 3, 1, 101, 0.0)  # pressure reduced to MSL (Pa)
 _CAPE: _FieldKey = (0, 7, 6, 1, 0.0)  # convective available potential (J/kg)
 #: Model terrain height (gpm). Published **only in a run's hour-000 file**, and
 #: constant — decoded once per run and reused for every step.
 _OROGRAPHY: _FieldKey = (0, 3, 5, 1, 0.0)
+#: WMO code table 4.10: the statistic a precipitation message must hold.
+_ACCUMULATION = 1
 
 # --- Upper-air fields (issue #44, verified live 2026-08-26) ----------------
 # The same hour-files carry temperature, humidity, wind and geopotential on
@@ -101,10 +103,8 @@ SNOWY_RAINY = "snowy-rainy"
 LIGHTNING_RAINY = "lightning-rainy"
 
 #: Rain *rate* (mm/h) heavy enough to call "pouring". Classification is by
-#: intensity, not by a step's raw accumulation: ALADIN steps are hourly only to
-#: +48 h and 3-hourly beyond (see ``const.FORECAST_HOURS``), so a 3-hourly step
-#: bundles three hours of rain — thresholding its raw total would overstate the
-#: intensity three-fold (a gentle drizzle would read as "pouring").
+#: intensity, not by a step's raw amount, so the thresholds hold whatever
+#: window a step's precipitation covers.
 _HEAVY_RAIN_MM_PER_H = 2.5
 #: Rain rate (mm/h) at/under which a step counts as no meaningful precipitation.
 _TRACE_MM_PER_H = 0.05
@@ -117,22 +117,23 @@ class ForecastStep:
     """One forecast valid time at the configured location's grid point.
 
     Units mirror the library's observation model: temperatures °C, wind m/s,
-    bearing degrees, pressure hPa, precipitation mm accumulated *within this
-    step*, cloud cover %, CAPE J/kg. Any field may be ``None`` if its source
-    message was absent. ``condition`` is an HA condition string (plain text).
+    bearing degrees, pressure hPa, precipitation mm fallen over the
+    ``span_hours`` ending at ``time``, cloud cover %, CAPE J/kg. Any field may
+    be ``None`` if its source message was absent. ``condition`` is an HA
+    condition string (plain text).
 
     ``temperature_850hpa`` (°C) and ``freezing_level`` (metres **above sea
     level**) come from the upper-air fields on the same grid point. The
     freezing level is ``None`` when the profile cannot support one — see
     :func:`derive_freezing_level`.
 
-    ``span_hours`` is the width of the accumulation window ``precipitation``
-    represents — the gap to the previous step *of the same run*. It is
-    retained (rather than being a local of :func:`parse_forecast`) because a
-    caller may merge steps from several runs into one series, and such a
-    series is only correct while every step's window equals the gap to its
-    predecessor. Without the width there is no way to tell, and a mismatch
-    silently double-counts or drops rain.
+    ``span_hours`` is the width of that precipitation window, as the file's
+    own product definition states it: one hour for every step SHMÚ publishes,
+    and one hour for hour 000 too, which has no precipitation message. It is
+    retained because a caller may merge steps from several runs into one
+    series, and such a series is only correct while every step's window
+    equals the gap to its predecessor. Without the width there is no way to
+    tell, and a mismatch silently double-counts or drops rain.
 
     ``run`` is the reference time of the model run the step came from, so a
     merged series stays traceable to its sources.
@@ -276,12 +277,10 @@ def derive_condition(
     cover is unknown and it is dry — the caller surfaces that as "unknown"
     rather than inventing a sky state (same philosophy as ``conditions.py``).
 
-    ``precipitation`` is the accumulation *over this step*; ``hours`` is the
-    step's duration, so precipitation is classified as an intensity (mm/h)
-    rather than a raw total. This matters past +48 h where ALADIN steps are
-    3-hourly: without normalising, a light drizzle spread over three hours
-    would be mis-read as "pouring" (and a trace as "rainy"). Defaults to
-    ``1.0`` so an hourly step is unchanged.
+    ``precipitation`` is the amount fallen over the step's window and
+    ``hours`` is that window's width, so precipitation is classified as an
+    intensity (mm/h) rather than a raw total: three hours of drizzle must not
+    read as "pouring". Defaults to ``1.0``, the window SHMÚ publishes.
     """
     rate = None
     if precipitation is not None:
@@ -352,17 +351,43 @@ def _vertical_profile(
     return profile
 
 
+def _precipitation(
+    message: Grib2Message | None, step_time: datetime, i: int, j: int
+) -> tuple[float | None, float]:
+    """Precipitation (mm) at a grid point, and the hours it fell over.
+
+    Each hour-file holds only its own hour's precipitation, not a total since
+    the run started. The window is read from the message rather than assumed,
+    so a file that holds anything other than an accumulation ending at its
+    own valid time raises instead of mis-scaling the forecast. Hour 000 has no
+    precipitation message, and its step keeps the hourly width.
+    """
+    if message is None:
+        return None, 1.0
+    statistic = message.statistic
+    if statistic is None or statistic.process != _ACCUMULATION:
+        raise ShmuDataError(
+            f"ALADIN precipitation for {step_time:%Y-%m-%d %H:%M} is not an "
+            f"accumulation (statistic: {statistic})"
+        )
+    if statistic.end != step_time:
+        raise ShmuDataError(
+            f"ALADIN precipitation for {step_time:%Y-%m-%d %H:%M} ends at "
+            f"{statistic.end:%Y-%m-%d %H:%M}, not at the file's valid time"
+        )
+    return message.value_at(i, j), statistic.length / timedelta(hours=1)
+
+
 def parse_forecast(
     hourly_files: Sequence[tuple[int, bytes]],
     latitude: float,
     longitude: float,
 ) -> list[ForecastStep]:
-    """Decode an ordered run into per-step forecasts at a location.
+    """Decode a run into per-step forecasts at a location.
 
-    ``hourly_files`` is ``(forecast_hour, grib_bytes)`` pairs; they must be
-    ordered by forecast hour because total precipitation is accumulated since
-    the run start, so the per-step amount is the difference between successive
-    files' accumulations (the first available step is reported as-is).
+    ``hourly_files`` is ``(forecast_hour, grib_bytes)`` pairs, one step each.
+    A step's precipitation comes from its own file alone (see
+    :func:`_precipitation`), so the files may come in any order.
 
     The model terrain height is published only in a run's hour-000 file and is
     constant, so it is picked up from whichever file carries it and reused for
@@ -374,8 +399,6 @@ def parse_forecast(
     """
     steps: list[ForecastStep] = []
     grid: tuple[int, int] | None = None
-    prev_accum: float | None = None
-    prev_hour: int | None = None
     terrain: float | None = None
 
     for forecast_hour, payload in hourly_files:
@@ -407,24 +430,8 @@ def parse_forecast(
         t2m = value(_T2M)
         temperature = None if t2m is None else t2m - 273.15
 
-        accum = value(_TP)
-        if accum is None:
-            precipitation = None
-        elif prev_accum is None:
-            precipitation = max(accum, 0.0)
-        else:
-            # A new run resets accumulation; clamp negatives to 0.
-            precipitation = max(accum - prev_accum, 0.0)
-        if accum is not None:
-            prev_accum = accum
-
-        # The precip accumulation covers the gap since the previous file, so
-        # that same gap is the step duration used to turn the total into a
-        # rate. The first step spans from the run start (its own forecast
-        # hour); a non-increasing gap (files fed out of order) falls back to 1.
-        span = forecast_hour - prev_hour if prev_hour is not None else forecast_hour
-        hours = float(span) if span > 0 else 1.0
-        prev_hour = forecast_hour
+        step_time = reference_time + timedelta(hours=forecast_hour)
+        precipitation, hours = _precipitation(fields.get(_TP), step_time, i, j)
 
         u10, v10 = value(_U10), value(_V10)
         if u10 is None or v10 is None:
@@ -465,7 +472,7 @@ def parse_forecast(
 
         steps.append(
             ForecastStep(
-                time=reference_time + timedelta(hours=forecast_hour),
+                time=step_time,
                 temperature=temperature,
                 precipitation=precipitation,
                 wind_speed=wind_speed,

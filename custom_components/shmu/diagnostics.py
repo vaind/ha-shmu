@@ -189,10 +189,9 @@ async def async_get_config_entry_diagnostics(
             # First and last decoded forecast hour of the newest run — named a
             # range, not ``forecast_hours``, because the snapshot's field of
             # that name is the full hour tuple and the two must not be read as
-            # the same thing. The endpoints bound the run's reach; they do not
-            # imply every hour between is present (the requested set is hourly
-            # only to +48 h, 3-hourly beyond) — what the client guarantees is
-            # that no *requested* hour inside the range is missing.
+            # the same thing. The endpoints bound the run's reach, and the
+            # client guarantees that no *requested* hour inside the range is
+            # missing.
             "forecast_hour_range": [
                 forecast.forecast_hours[0],
                 forecast.forecast_hours[-1],

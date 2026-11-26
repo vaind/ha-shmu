@@ -563,10 +563,10 @@ class ShmuClient:
         and only when that reaches at least ``MIN_FORECAST_HOURS``. Both halves
         matter:
 
-        * *Contiguous* — precipitation is accumulated since the run start, so a
-          step's amount is the difference against its predecessor. A hole would
-          silently widen one step's window past its nominal interval, so the
-          scan stops at the first missing hour rather than skipping over it.
+        * *Contiguous* — each file holds only its own hour's precipitation, so
+          a hole would silently drop that hour's rain from the day's total.
+          The scan stops at the first missing hour rather than skipping over
+          it.
         * *At least +72 h* — only the 00 UTC run reaches the full +102 h;
           requiring that rejected the other three runs outright. Taking the
           leading run also means a run still being published is usable as soon
@@ -609,7 +609,7 @@ class ShmuClient:
                 usable: list[int] = []
                 for hour in wanted:
                     if hour not in available:
-                        break  # a hole would misattribute accumulated precip
+                        break  # a hole would drop that hour's precipitation
                     usable.append(hour)
                 if not usable or usable[-1] < minimum_hour:
                     # Too shallow to be worth using (or still publishing its
