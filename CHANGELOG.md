@@ -8,8 +8,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- Warnings for the Piešťany district no longer show up everywhere in Slovakia. SHMÚ sends those warnings without the district's outline, and the weather warning and warning level sensors used to treat them as covering the whole country. They now cover only the Piešťany district, whose outline comes from the map on SHMÚ's own warnings page. The integration carries that map's outline of every district, so a warning for any other district that arrives without an outline is placed the same way.
 - Forecast precipitation is no longer about a tenth of SHMÚ's own forecast. Each ALADIN file holds the precipitation of its own hour, but the integration read it as a total since the model run started and kept only how much it grew from one hour to the next, so a steady rain or snow showed as almost dry and its hours as *Cloudy*. The hourly forecast now shows each hour's amount as SHMÚ forecasts it, and the daily totals and conditions follow.
 - The hourly forecast now has a step for every hour up to the model's horizon. Past 48 hours it used to list only every third hour, and the two hours in between were missing from the daily precipitation total.
+
+## [1.0.0] - 2026-11-19
 
 The first stable release. From now on, a breaking change to the entities, their states and units, the documented attributes, the configuration options or the map plugin comes only with a new major version. The [Versioning](https://github.com/vaind/ha-shmu#versioning) section of the README lists exactly what is covered.
 

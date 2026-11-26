@@ -518,8 +518,8 @@ class ShmuClient:
             try:
                 warnings.append(parse_cap_alert(payload))
             except ShmuDataError as err:
-                # One malformed alert must not sink the whole batch.
-                _LOGGER.warning("Skipping unparseable CAP file %s: %s", name, err)
+                # One alert we cannot read or place must not sink the batch.
+                _LOGGER.warning("Skipping CAP file %s: %s", name, err)
         _LOGGER.debug("Parsed %d warnings from %s", len(warnings), issuance_path)
         return WarningsSnapshot(
             warnings=warnings,
