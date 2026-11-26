@@ -372,7 +372,7 @@ From version 1.0 on, a breaking change to any of the following comes only with a
 
 Not covered, and free to change in any release:
 
-- the scrubber entities marked provisional under [Radar](#radar)
+- the scrubber entities marked provisional under [Radar](#radar), and their attributes
 - the content of the diagnostics download
 - log messages
 - how the weather condition is resolved from its sources, which keeps improving
