@@ -221,10 +221,11 @@ def _region_ring(
     without geometry covers every location in the country.
     """
     for emma_id in emma_ids:
-        if emma_id in REGION_POLYGONS:
-            return _parse_polygon(REGION_POLYGONS[emma_id])
+        # An unreadable entry must fail too: an empty ring covers no location.
+        if ring := _parse_polygon(REGION_POLYGONS.get(emma_id)):
+            return ring
     if emma_ids:
-        reason = f"no outline for region {', '.join(emma_ids)} in regions.py"
+        reason = f"no usable outline for region {', '.join(emma_ids)} in regions.py"
     else:
         reason = "no EMMA_ID geocode to look its region up by"
     raise ShmuDataError(

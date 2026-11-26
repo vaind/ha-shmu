@@ -18,6 +18,7 @@ was unusual.
 
 from __future__ import annotations
 
+import logging
 import re
 import sys
 from collections.abc import AsyncIterator
@@ -180,10 +181,11 @@ async def test_warnings(client: ShmuClient, caplog: pytest.LogCaptureFixture) ->
     assert snap.warnings, f"no parseable alerts in {snap.source}"
     # The client only logs an alert it skips, such as one whose area sends no
     # polygon from a region that regions.py has no outline for (AGENTS.md).
+    # Skipping is the client's only warning, so we match the level, not text.
     skipped = [
         r.getMessage()
         for r in caplog.records
-        if r.getMessage().startswith("Skipping CAP file")
+        if r.name == "shmu_opendata.client" and r.levelno >= logging.WARNING
     ]
     assert not skipped, skipped
     for warning in snap.warnings:

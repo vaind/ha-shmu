@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from custom_components.shmu.shmu_opendata import parsers
 from custom_components.shmu.shmu_opendata.exceptions import ShmuDataError
 from custom_components.shmu.shmu_opendata.gauges import GAUGES
 from custom_components.shmu.shmu_opendata.parsers import (
@@ -195,6 +196,13 @@ def test_parse_cap_alert_rejects_an_area_it_cannot_place() -> None:
         parse_cap_alert(_CAP_AREA.format(_geocode("SK999")))
     with pytest.raises(ShmuDataError, match="no polygon"):
         parse_cap_alert(_CAP_AREA.format(""))
+
+
+def test_parse_cap_alert_rejects_an_unreadable_region_outline(monkeypatch) -> None:
+    # A typo in regenerated data would otherwise leave a ring that covers nothing.
+    monkeypatch.setattr(parsers, "REGION_POLYGONS", {"SK204": "48.6,17.8 48.7;17.9"})
+    with pytest.raises(ShmuDataError, match="SK204"):
+        parse_cap_alert(_CAP_AREA.format(_geocode("SK204")))
 
 
 def test_parse_cap_alert_rejects_malformed() -> None:
