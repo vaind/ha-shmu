@@ -76,32 +76,15 @@ def test_nearest_unmasked_returns_a_value(fixture) -> None:
             },
             "lightning-rainy",
         ),
-        # A 3-hourly step (hours=3) is classified by its per-hour rate, not its
-        # raw total: 3 mm over 3 h is 1 mm/h → "rainy", not "pouring".
+        # A trace also vetoes the thunderstorm branch even with high CAPE:
+        # ALADIN over-predicts convection, so a dry step must not surface a
+        # phantom lightning-rainy.
         (
             {
                 "cloud_coverage": 100.0,
-                "precipitation": 3.0,
-                "temperature": 10.0,
-                "hours": 3.0,
-            },
-            "rainy",
-        ),
-        # 0.1 mm over 3 h is a trace rate (0.033 mm/h) → dry sky, not "rainy".
-        (
-            {"cloud_coverage": 100.0, "precipitation": 0.1, "hours": 3.0},
-            "cloudy",
-        ),
-        # Trace rate also vetoes the thunderstorm branch even with high CAPE:
-        # ALADIN over-predicts convection, so a dry 3-hourly step must not
-        # surface a phantom lightning-rainy.
-        (
-            {
-                "cloud_coverage": 100.0,
-                "precipitation": 0.1,
+                "precipitation": 0.03,
                 "temperature": 18.0,
                 "cape": 400.0,
-                "hours": 3.0,
             },
             "cloudy",
         ),
@@ -171,8 +154,8 @@ def test_parse_forecast_window_comes_from_the_file_not_the_gap(fixture) -> None:
         assert steps[-1].span_hours == 1.0
 
 
-def _with_precipitation_statistic(payload: bytes, process: int) -> bytes:
-    """``payload`` with its precipitation message's statistic set to ``process``."""
+def _with_precipitation_octet(payload: bytes, index: int, value: int) -> bytes:
+    """``payload`` with byte ``index`` of its precipitation Section 4 replaced."""
     data = bytearray(payload)
     pos = 0
     while (pos := data.find(b"GRIB", pos)) >= 0:
@@ -181,7 +164,7 @@ def _with_precipitation_statistic(payload: bytes, process: int) -> bytes:
         while data[sec + 4] != 4:
             sec += int.from_bytes(data[sec : sec + 4])
         if (data[pos + 6], data[sec + 9], data[sec + 10]) == (0, 1, 193):
-            data[sec + 46] = process  # octet 47: WMO code table 4.10
+            data[sec + index] = value
             return bytes(data)
         pos = end
     raise AssertionError("no precipitation message")
@@ -191,14 +174,26 @@ def test_parse_forecast_rejects_precipitation_that_is_not_an_accumulation(
     fixture,
 ) -> None:
     """A changed statistic must fail loudly, not scale the forecast wrongly."""
-    payload = _with_precipitation_statistic(fixture("aladin_001.grb"), 0)  # average
+    # Octet 47 is the statistic (WMO code table 4.10), and 0 is an average.
+    payload = _with_precipitation_octet(fixture("aladin_001.grb"), 46, 0)
     with pytest.raises(ShmuDataError, match="not an accumulation"):
         parse_forecast([(1, payload)], 48.1717, 17.2)
 
 
+def test_parse_forecast_rejects_a_window_longer_than_the_hour(fixture) -> None:
+    """A running total ending at the step would count again in every step.
+
+    Octets 50-53 hold the window's length, so this is a 2 h total from the
+    run start, the shape the field was once wrongly assumed to have.
+    """
+    payload = _with_precipitation_octet(fixture("aladin_002.grb"), 52, 2)
+    with pytest.raises(ShmuDataError, match="covers 2:00:00 ending at"):
+        parse_forecast([(2, payload)], 48.1717, 17.2)
+
+
 def test_parse_forecast_rejects_a_window_ending_off_the_step(fixture) -> None:
     """A file whose window ends elsewhere than its name says is not this hour's."""
-    with pytest.raises(ShmuDataError, match="14:00 ends at 2026-05-17 13:00"):
+    with pytest.raises(ShmuDataError, match="ending at 2026-05-17 13:00"):
         parse_forecast([(2, fixture("aladin_001.grb"))], 48.1717, 17.2)
 
 

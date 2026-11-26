@@ -72,6 +72,8 @@ _CAPE: _FieldKey = (0, 7, 6, 1, 0.0)  # convective available potential (J/kg)
 _OROGRAPHY: _FieldKey = (0, 3, 5, 1, 0.0)
 #: WMO code table 4.10: the statistic a precipitation message must hold.
 _ACCUMULATION = 1
+#: The window a precipitation message must cover, ending at its valid time.
+_PRECIPITATION_WINDOW = timedelta(hours=1)
 
 # --- Upper-air fields (issue #44, verified live 2026-08-26) ----------------
 # The same hour-files carry temperature, humidity, wind and geopotential on
@@ -102,9 +104,7 @@ SNOWY = "snowy"
 SNOWY_RAINY = "snowy-rainy"
 LIGHTNING_RAINY = "lightning-rainy"
 
-#: Rain *rate* (mm/h) heavy enough to call "pouring". Classification is by
-#: intensity, not by a step's raw amount, so the thresholds hold whatever
-#: window a step's precipitation covers.
+#: Rain rate (mm/h) heavy enough to call "pouring".
 _HEAVY_RAIN_MM_PER_H = 2.5
 #: Rain rate (mm/h) at/under which a step counts as no meaningful precipitation.
 _TRACE_MM_PER_H = 0.05
@@ -127,9 +127,9 @@ class ForecastStep:
     freezing level is ``None`` when the profile cannot support one — see
     :func:`derive_freezing_level`.
 
-    ``span_hours`` is the width of that precipitation window, as the file's
-    own product definition states it: one hour for every step SHMÚ publishes,
-    and one hour for hour 000 too, which has no precipitation message. It is
+    ``span_hours`` is the width of that precipitation window, always one hour:
+    :func:`parse_forecast` rejects a file whose precipitation covers any
+    other window, and hour 000, which has none, keeps the same width. It is
     retained because a caller may merge steps from several runs into one
     series, and such a series is only correct while every step's window
     equals the gap to its predecessor. Without the width there is no way to
@@ -268,7 +268,6 @@ def derive_condition(
     precipitation: float | None,
     temperature: float | None,
     cape: float | None,
-    hours: float = 1.0,
 ) -> str | None:
     """Map model surface fields to a Home Assistant condition string.
 
@@ -277,23 +276,16 @@ def derive_condition(
     cover is unknown and it is dry — the caller surfaces that as "unknown"
     rather than inventing a sky state (same philosophy as ``conditions.py``).
 
-    ``precipitation`` is the amount fallen over the step's window and
-    ``hours`` is that window's width, so precipitation is classified as an
-    intensity (mm/h) rather than a raw total: three hours of drizzle must not
-    read as "pouring". Defaults to ``1.0``, the window SHMÚ publishes.
+    ``precipitation`` is the amount fallen in the hour ending at the step, so
+    it is also the rate in mm/h.
     """
-    rate = None
-    if precipitation is not None:
-        rate = precipitation / hours if hours > 0 else precipitation
-    wet = rate is not None and rate > _TRACE_MM_PER_H
-    if wet:
+    if precipitation is not None and precipitation > _TRACE_MM_PER_H:
         if cape is not None and cape >= _THUNDER_CAPE:
             return LIGHTNING_RAINY
         kind = precipitation_kind(temperature)
         if kind != RAINY:
             return kind
-        assert rate is not None
-        return POURING if rate >= _HEAVY_RAIN_MM_PER_H else RAINY
+        return POURING if precipitation >= _HEAVY_RAIN_MM_PER_H else RAINY
     return sky_from_cloud(cloud_coverage)
 
 
@@ -353,29 +345,30 @@ def _vertical_profile(
 
 def _precipitation(
     message: Grib2Message | None, step_time: datetime, i: int, j: int
-) -> tuple[float | None, float]:
-    """Precipitation (mm) at a grid point, and the hours it fell over.
+) -> float | None:
+    """Precipitation (mm) at a grid point in the hour ending at ``step_time``.
 
     Each hour-file holds only its own hour's precipitation, not a total since
     the run started. The window is read from the message rather than assumed,
-    so a file that holds anything other than an accumulation ending at its
-    own valid time raises instead of mis-scaling the forecast. Hour 000 has no
-    precipitation message, and its step keeps the hourly width.
+    and anything but an accumulation over exactly that hour raises instead of
+    mis-scaling the forecast: a longer window, such as a running total, would
+    be counted again by every step it overlaps.
     """
     if message is None:
-        return None, 1.0
+        return None
     statistic = message.statistic
     if statistic is None or statistic.process != _ACCUMULATION:
         raise ShmuDataError(
             f"ALADIN precipitation for {step_time:%Y-%m-%d %H:%M} is not an "
             f"accumulation (statistic: {statistic})"
         )
-    if statistic.end != step_time:
+    if statistic.end != step_time or statistic.length != _PRECIPITATION_WINDOW:
         raise ShmuDataError(
-            f"ALADIN precipitation for {step_time:%Y-%m-%d %H:%M} ends at "
-            f"{statistic.end:%Y-%m-%d %H:%M}, not at the file's valid time"
+            f"ALADIN precipitation for {step_time:%Y-%m-%d %H:%M} covers "
+            f"{statistic.length} ending at {statistic.end:%Y-%m-%d %H:%M}, not "
+            "the hour ending at the file's valid time"
         )
-    return message.value_at(i, j), statistic.length / timedelta(hours=1)
+    return message.value_at(i, j)
 
 
 def parse_forecast(
@@ -432,7 +425,7 @@ def parse_forecast(
         temperature = None if t2m is None else t2m - 273.15
 
         step_time = reference_time + timedelta(hours=forecast_hour)
-        precipitation, hours = _precipitation(fields.get(_TP), step_time, i, j)
+        precipitation = _precipitation(fields.get(_TP), step_time, i, j)
 
         u10, v10 = value(_U10), value(_V10)
         if u10 is None or v10 is None:
@@ -491,9 +484,8 @@ def parse_forecast(
                     precipitation=precipitation,
                     temperature=temperature,
                     cape=cape,
-                    hours=hours,
                 ),
-                span_hours=hours,
+                span_hours=_PRECIPITATION_WINDOW / timedelta(hours=1),
                 run=reference_time,
             )
         )
