@@ -29,6 +29,7 @@ from custom_components.shmu.shmu_opendata import (
     get_station,
 )
 from custom_components.shmu.shmu_opendata.client import _radar_snapshot, _render_frame
+from custom_components.shmu.shmu_opendata.const import FORECAST_HOURS
 
 # Europe/Bratislava is UTC+2 in July, so local midnight on the 21st is 22:00 UTC
 # on the 20th. The helper compares instants, so a UTC-aware value is enough.
@@ -168,7 +169,7 @@ def test_merge_of_a_full_four_run_day_tiles() -> None:
     self-consistent throughout and keep the 00 UTC run's longer reach.
     """
     day = datetime(2026, 7, 20, 22, tzinfo=UTC)  # local midnight on the 21st
-    long_hours = [*range(49), *range(51, 103, 3)]
+    long_hours = list(FORECAST_HOURS)
     short_hours = [h for h in long_hours if h <= 72]
 
     snapshot = _snap("run-00", datetime(2026, 7, 21, tzinfo=UTC), long_hours)

@@ -2,14 +2,21 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+
 import pytest
 
 from custom_components.shmu.shmu_opendata.exceptions import ShmuDataError
-from custom_components.shmu.shmu_opendata.grib2 import iter_fields, iter_messages
+from custom_components.shmu.shmu_opendata.grib2 import (
+    TimeStatistic,
+    iter_fields,
+    iter_messages,
+)
 
 # Surface params we rely on, by (discipline, category, number, level type).
 _T2M = (0, 0, 0, 103)
 _TCC = (192, 128, 164, 1)
+_TP = (0, 1, 193, 1)  # precipitation, time-processed (template 4.8)
 _OROGRAPHY = (0, 3, 5, 1)  # the only DRT 5.4 (IEEE) message, hour 000 only
 _T_PRESSURE = (0, 0, 0, 100)  # temperature, published on five pressure levels
 
@@ -180,6 +187,44 @@ def test_surface_message_reports_its_own_level(fixture) -> None:
     by_param = {f.param: f for f in iter_fields(fixture("aladin_001.grb"))}
     assert by_param[_T2M].level == 2.0  # the 2 m screen
     assert by_param[(0, 2, 2, 103)].level == 10.0  # 10 m wind
+
+
+def test_time_processed_message_reports_its_interval(fixture) -> None:
+    """Template 4.8 says what the value is over which hours; 4.0 has neither."""
+    by_param = {f.param: f for f in iter_messages(fixture("aladin_024.grb"))}
+    assert by_param[_TP].statistic == TimeStatistic(
+        process=1,  # accumulation
+        end=datetime(2026, 5, 18, 12, tzinfo=UTC),
+        length=timedelta(hours=1),
+    )
+    assert by_param[_T2M].statistic is None
+    full = {f.param: f for f in iter_fields(fixture("aladin_024.grb"))}
+    assert full[_TP].statistic == by_param[_TP].statistic
+
+
+def _precipitation_section4(data: bytearray) -> int:
+    """Offset of the precipitation message's Section 4 in ``data``."""
+    pos = 0
+    while True:
+        sec = pos + _section_offset(data[pos:], 4)
+        if (data[pos + 6], data[sec + 9], data[sec + 10]) == (0, 1, 193):
+            return sec
+        pos += int.from_bytes(data[pos + 8 : pos + 16], "big")
+
+
+@_READERS
+@pytest.mark.parametrize(
+    ("octet", "value", "match"),
+    [
+        (41, 2, "2 time ranges"),  # octet 42: number of time range specs
+        (48, 4, "time unit 4"),  # octet 49: a year has no fixed length
+    ],
+)
+def test_unsupported_time_interval_raises(fixture, reader, octet, value, match) -> None:
+    data = bytearray(fixture("aladin_001.grb"))
+    data[_precipitation_section4(data) + octet] = value
+    with pytest.raises(ShmuDataError, match=match):
+        list(reader(bytes(data)))
 
 
 def test_missing_level_is_none_not_an_absurd_exponent(fixture) -> None:
