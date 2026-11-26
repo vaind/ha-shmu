@@ -18,6 +18,7 @@ was unusual.
 
 from __future__ import annotations
 
+import logging
 import re
 import sys
 from collections.abc import AsyncIterator
@@ -37,6 +38,7 @@ from shmu_opendata.const import (
     RADAR_LOOP_FRAMES,
     WARNINGS_PATH,
 )
+from shmu_opendata.regions import REGION_POLYGONS
 
 # Trnava: inside both the forecast grid and the radar composite.
 LATITUDE, LONGITUDE = 48.377, 17.588
@@ -165,7 +167,7 @@ async def test_rain_gauges(client: ShmuClient) -> None:
     assert known >= 0.5 * len(GAUGES), f"only {known}/{len(GAUGES)} gauges present"
 
 
-async def test_warnings(client: ShmuClient) -> None:
+async def test_warnings(client: ShmuClient, caplog: pytest.LogCaptureFixture) -> None:
     snap = await client.async_get_warnings()
 
     if snap.source == WARNINGS_PATH:
@@ -177,11 +179,24 @@ async def test_warnings(client: ShmuClient) -> None:
     # upstream format change behind what looks like calm weather.
     assert snap.source.startswith(f"{WARNINGS_PATH}/")
     assert snap.warnings, f"no parseable alerts in {snap.source}"
+    # The client only logs an alert it skips, such as one whose area sends no
+    # polygon from a region that regions.py has no outline for (AGENTS.md).
+    # Skipping is the client's only warning, so we match the level, not text.
+    skipped = [
+        r.getMessage()
+        for r in caplog.records
+        if r.name == "shmu_opendata.client" and r.levelno >= logging.WARNING
+    ]
+    assert not skipped, skipped
     for warning in snap.warnings:
         assert warning.identifier
         assert warning.event
         assert warning.severity
-        assert warning.areas or warning.polygons, warning.identifier
+        assert warning.polygons, warning.identifier
+        # regions.py outlines a region whose polygon goes missing, so it has to
+        # know every region SHMÚ issues alerts for.
+        unknown = set(warning.region_ids) - REGION_POLYGONS.keys()
+        assert not unknown, (warning.identifier, warning.areas, unknown)
 
 
 async def test_website_conditions(client: ShmuClient) -> None:
