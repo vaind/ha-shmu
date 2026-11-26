@@ -225,6 +225,16 @@ Where a verified fact is cheap to assert, pin it in `tests_e2e/` too, so the dai
   # the last two issuance folders (expect them ~equal, not disjoint).
   ```
   **An empty `cap/` root is a valid state, not an outage.** Verified live 2026-10-13: the folder listed no day folders at all (its `Last-Modified` was 2026-10-11 02:00) while SHMÚ's warnings page showed level 0 in every region. So once the last alert expires, old day folders get pruned and no empty issuance replaces them. `async_get_warnings` returns an empty snapshot only for a listing with no entries at all; entries that are not `YYYYMMDD/` folders still raise, since they mean the layout changed rather than that the weather is calm. It used to raise instead, and the coordinator logged "warnings unavailable" every poll for as long as the calm lasted.
+- **Each alert covers one warning region, and Piešťany's alerts carry no polygon.**
+  **Verified 2026-11-26** over the whole CAP archive (21 days, 129 issuances, 1259 alerts): every alert has exactly one `<area>`, named by an `EMMA_ID` geocode for one of 72 regions, which are the districts with the city districts of Bratislava and of Košice merged into one region each.
+  The other 71 regions always send a `<polygon>`, together with the parameter `use_polygon_over_geocode` set to `True`, and each region's polygon was identical in all its alerts.
+  Piešťany (SK204) sent neither in any of its 13 alerts, which appeared in 49 of the 129 issuances.
+  `Warning.covers()` treated an alert without polygons as country-wide, so those alerts matched every location in Slovakia (issue #99).
+  The parser now outlines such an area by its region from `regions.py`, generated from the district map that SHMÚ's own warnings page draws (`www.shmu.sk/assets/maps/meteo_map.json`, recipe in the module docstring).
+  That map's `ID` is not the `EMMA_ID` number, so a map feature is matched to an alert by the district abbreviation that ends the alert's `<identifier>`.
+  An area with no polygon and no outline in `regions.py` makes the parser reject its alert, which the client logs and skips, because covering the whole country would repeat issue #99. `tests_e2e` fails on such a skip.
+  Neighbouring regions' CAP polygons overlap in slivers along their shared boundaries, so a point right on a boundary can get both regions' warnings.
+  Every station and rain gauge lies in exactly one region, and the Košice okolie polygon leaves out the city of Košice, which is a region of its own.
 
 ### Radar
 

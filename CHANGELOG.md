@@ -4,6 +4,12 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- Warnings for the Piešťany district no longer show up everywhere in Slovakia. SHMÚ sends those warnings without the district's outline, and the weather warning and warning level sensors used to treat them as covering the whole country. They now cover only the Piešťany district, whose outline comes from the map on SHMÚ's own warnings page.
+
 ## [1.0.0] - 2026-11-19
 
 The first stable release. From now on, a breaking change to the entities, their states and units, the documented attributes, the configuration options or the map plugin comes only with a new major version. The [Versioning](https://github.com/vaind/ha-shmu#versioning) section of the README lists exactly what is covered.

@@ -13,6 +13,7 @@ from custom_components.shmu.shmu_opendata.parsers import (
     parse_gauge_observations,
     parse_observations,
 )
+from custom_components.shmu.shmu_opendata.stations import STATIONS
 
 
 def test_list_directory_decodes_and_skips_navigation(fixture) -> None:
@@ -140,6 +141,37 @@ def test_parse_cap_alert_prefers_slovak_and_extracts_polygon(fixture) -> None:
     assert "Bratislava" in warning.areas
     assert len(warning.polygons) == 1
     assert warning.polygons[0][0] == (48.10, 17.00)
+
+
+def test_parse_cap_alert_places_a_geocode_only_area_in_its_region(fixture) -> None:
+    # A real alert: SHMÚ sends Piešťany's alerts with an EMMA_ID geocode and
+    # no polygon, so the outline has to come from regions.py.
+    warning = parse_cap_alert(fixture("alert_geocode_only.cap.xml"))
+
+    assert warning.areas == ("Piešťany",)
+    piestany = next(s for s in STATIONS if s.name == "Piešťany")
+    zabokreky = next(s for s in STATIONS if s.ind_kli == 11893)
+    assert warning.covers(piestany.latitude, piestany.longitude)
+    assert not warning.covers(zabokreky.latitude, zabokreky.longitude)
+
+
+_CAP_AREA = """<alert xmlns="urn:oasis:names:tc:emergency:cap:1.2">
+<identifier>x</identifier>
+<info><language>sk</language><event>e</event>
+<area><areaDesc>Somewhere</areaDesc>{}</area></info>
+</alert>"""
+
+
+def test_parse_cap_alert_rejects_an_area_it_cannot_place() -> None:
+    # Covering everywhere would put one district's warning on the whole
+    # country, so an area with neither a polygon nor a known region fails.
+    unknown_region = _CAP_AREA.format(
+        "<geocode><valueName>EMMA_ID</valueName><value>SK999</value></geocode>"
+    )
+    with pytest.raises(ShmuDataError, match="SK999"):
+        parse_cap_alert(unknown_region)
+    with pytest.raises(ShmuDataError, match="no polygon"):
+        parse_cap_alert(_CAP_AREA.format(""))
 
 
 def test_parse_cap_alert_rejects_malformed() -> None:

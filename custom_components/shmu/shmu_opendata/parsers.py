@@ -17,6 +17,7 @@ from xml.etree import ElementTree as ET
 
 from .exceptions import ShmuDataError
 from .models import GaugeObservation, Observation, Warning
+from .regions import REGION_POLYGONS
 
 # Apache autoindex links: skip the column-sort links ("?C=...") and the
 # "Parent Directory" link ("/...").
@@ -211,6 +212,26 @@ def _parse_polygon(text: str | None) -> tuple[tuple[float, float], ...]:
     return tuple(ring)
 
 
+def _region_ring(
+    identifier: str, area: str | None, emma_ids: list[str]
+) -> tuple[tuple[float, float], ...]:
+    """Outline a CAP area that sends no polygon by its region's ``EMMA_ID``.
+
+    We raise rather than leave the area without geometry, because a warning
+    without geometry covers every location in the country.
+    """
+    for emma_id in emma_ids:
+        if emma_id in REGION_POLYGONS:
+            return _parse_polygon(REGION_POLYGONS[emma_id])
+    if emma_ids:
+        reason = f"no outline for region {', '.join(emma_ids)} in regions.py"
+    else:
+        reason = "no EMMA_ID geocode to look its region up by"
+    raise ShmuDataError(
+        f"CAP alert {identifier!r}: area {area!r} has no polygon and {reason}"
+    )
+
+
 def _cap_text(element: ET.Element | None) -> str | None:
     if element is None or element.text is None:
         return None
@@ -283,10 +304,20 @@ def parse_cap_alert(payload: bytes | str) -> Warning:
         desc = _cap_text(area.find(q("areaDesc")))
         if desc is not None:
             areas.append(desc)
-        for polygon in area.findall(q("polygon")):
-            ring = _parse_polygon(_cap_text(polygon))
-            if ring:
-                polygons.append(ring)
+        rings = [
+            ring
+            for polygon in area.findall(q("polygon"))
+            if (ring := _parse_polygon(_cap_text(polygon)))
+        ]
+        if not rings:
+            emma_ids = [
+                value
+                for geocode in area.findall(q("geocode"))
+                if _cap_text(geocode.find(q("valueName"))) == "EMMA_ID"
+                and (value := _cap_text(geocode.find(q("value")))) is not None
+            ]
+            rings = [_region_ring(identifier, desc, emma_ids)]
+        polygons.extend(rings)
 
     return Warning(
         identifier=identifier,
