@@ -571,9 +571,9 @@ class ShmuClient:
             try:
                 files[name] = parse_cap_alert(payload)
             except ShmuDataError as err:
-                # One malformed alert must not sink the whole batch. We keep
-                # its name, so it is not fetched and logged again every poll.
-                _LOGGER.warning("Skipping unparseable CAP file %s: %s", name, err)
+                # One alert we cannot read or place must not sink the batch. We
+                # keep its name, so it is not fetched and logged again every poll.
+                _LOGGER.warning("Skipping CAP file %s: %s", name, err)
                 files[name] = None
         warnings = [w for w in files.values() if w is not None]
         _LOGGER.debug(

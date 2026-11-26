@@ -6,13 +6,17 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from custom_components.shmu.shmu_opendata import parsers
 from custom_components.shmu.shmu_opendata.exceptions import ShmuDataError
+from custom_components.shmu.shmu_opendata.gauges import GAUGES
 from custom_components.shmu.shmu_opendata.parsers import (
     list_directory,
     parse_cap_alert,
     parse_gauge_observations,
     parse_observations,
 )
+from custom_components.shmu.shmu_opendata.regions import REGION_POLYGONS
+from custom_components.shmu.shmu_opendata.stations import STATIONS
 
 
 def test_list_directory_decodes_and_skips_navigation(fixture) -> None:
@@ -140,6 +144,65 @@ def test_parse_cap_alert_prefers_slovak_and_extracts_polygon(fixture) -> None:
     assert "Bratislava" in warning.areas
     assert len(warning.polygons) == 1
     assert warning.polygons[0][0] == (48.10, 17.00)
+
+
+_CAP_AREA = """<alert xmlns="urn:oasis:names:tc:emergency:cap:1.2">
+<identifier>x</identifier>
+<info><language>sk</language><event>e</event>
+<area><areaDesc>Somewhere</areaDesc>{}</area></info>
+</alert>"""
+
+
+def _geocode(emma_id: str) -> str:
+    return f"<geocode><valueName>EMMA_ID</valueName><value>{emma_id}</value></geocode>"
+
+
+def test_parse_cap_alert_places_a_geocode_only_area_in_its_region(fixture) -> None:
+    # A real alert: SHMÚ sends Piešťany's alerts with an EMMA_ID geocode and
+    # no polygon, so the outline has to come from regions.py.
+    warning = parse_cap_alert(fixture("alert_geocode_only.cap.xml"))
+
+    assert warning.areas == ("Piešťany",)
+    assert warning.region_ids == ("SK204",)
+    piestany = next(s for s in STATIONS if s.name == "Piešťany")
+    zabokreky = next(s for s in STATIONS if s.ind_kli == 11893)
+    assert warning.covers(piestany.latitude, piestany.longitude)
+    assert not warning.covers(zabokreky.latitude, zabokreky.longitude)
+
+
+def test_region_outlines_place_every_station_and_gauge_once() -> None:
+    # The outlines tile the country, so a site in no region or in two means
+    # swapped coordinates, an overlap or a gap. The Košice sites also check
+    # that Košice okolie's outline leaves out the city.
+    regions = {
+        emma_id: parse_cap_alert(_CAP_AREA.format(_geocode(emma_id)))
+        for emma_id in REGION_POLYGONS
+    }
+    sites = [(s.name, s.latitude, s.longitude) for s in STATIONS] + [
+        (g.name, g.latitude, g.longitude) for g in GAUGES
+    ]
+    misplaced = [
+        (name, found)
+        for name, lat, lon in sites
+        if len(found := [e for e, w in regions.items() if w.covers(lat, lon)]) != 1
+    ]
+    assert misplaced == []
+
+
+def test_parse_cap_alert_rejects_an_area_it_cannot_place() -> None:
+    # Covering everywhere would put one district's warning on the whole
+    # country, so an area with neither a polygon nor a known region fails.
+    with pytest.raises(ShmuDataError, match="SK999"):
+        parse_cap_alert(_CAP_AREA.format(_geocode("SK999")))
+    with pytest.raises(ShmuDataError, match="no polygon"):
+        parse_cap_alert(_CAP_AREA.format(""))
+
+
+def test_parse_cap_alert_rejects_an_unreadable_region_outline(monkeypatch) -> None:
+    # A typo in regenerated data would otherwise leave a ring that covers nothing.
+    monkeypatch.setattr(parsers, "REGION_POLYGONS", {"SK204": "48.6,17.8 48.7;17.9"})
+    with pytest.raises(ShmuDataError, match="SK204"):
+        parse_cap_alert(_CAP_AREA.format(_geocode("SK204")))
 
 
 def test_parse_cap_alert_rejects_malformed() -> None:

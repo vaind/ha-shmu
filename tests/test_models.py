@@ -24,6 +24,7 @@ def _warning(**kw) -> Warning:
         description=None,
         instruction=None,
         areas=("Bratislava",),
+        region_ids=("SK100",),
         polygons=(_RING,),
         web=None,
     )

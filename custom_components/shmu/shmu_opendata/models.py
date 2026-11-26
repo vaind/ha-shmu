@@ -76,7 +76,11 @@ class Warning:
     description: str | None
     instruction: str | None
     areas: tuple[str, ...]
-    #: One ring per CAP ``<area>``; each a tuple of (lat, lon) vertices.
+    #: The areas' Meteoalarm ``EMMA_ID`` geocodes, the keys of :mod:`.regions`.
+    region_ids: tuple[str, ...]
+    #: Rings of (lat, lon) vertices outlining the alert's areas: each area's
+    #: ``<polygon>``, or its region's outline from :mod:`.regions` when SHMÚ
+    #: sends none. Empty only for an alert that names no area at all.
     polygons: tuple[tuple[tuple[float, float], ...], ...]
     web: str | None
 
@@ -89,8 +93,8 @@ class Warning:
     def covers(self, latitude: float, longitude: float) -> bool:
         """Whether a point lies in any of the warning's area polygons.
 
-        Warnings with no polygon geometry are treated as covering everywhere
-        (country-wide) so they are never silently dropped.
+        A CAP alert without an ``<area>`` is not restricted to any area, so it
+        covers every point.
         """
         if not self.polygons:
             return True

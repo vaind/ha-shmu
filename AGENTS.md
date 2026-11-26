@@ -232,10 +232,23 @@ Where a verified fact is cheap to assert, pin it in `tests_e2e/` too, so the dai
   Every issuance folder's own `Last-modified` equals its newest file's, so no file arrives after the writing ends.
   The client used to key its cache on the issuance path alone, so a poll inside that window kept the partial set until the next issuance, hours later (issue #100: 74 files of 155, and an orange alert missing).
   Now `async_get_warnings` lists the served issuance on every poll and reads only the files new since (`WarningsSnapshot.files`).
-  A newer issuance replaces it only once two polls in a row list the same files (`pending_source`/`pending_files`), so a new issuance is served 5–10 min after SHMÚ finishes writing it, and a half-written one never hides alerts still in force.
+  A newer issuance replaces it only once two polls in a row list the same files (`pending_source`/`pending_files`), and never while it lists none, so a new issuance is served 5–10 min after SHMÚ finishes writing it, and a half-written one never hides alerts still in force.
   With no alerts to keep serving (first poll, or after an empty root), a new issuance is read at once and grows on the next polls.
   Issuances sometimes follow each other within minutes (`0629`/`0630` on 11-14, `2216`/`2217` on 11-11), and the newest one then restarts the wait.
   A fixed wait after the folder's `Last-modified` would also work, but it has to cover the longest write and compares the server's clock with ours, so we don't use one.
+- **Each alert covers one warning region, and Piešťany's alerts carry no polygon.**
+  **Verified 2026-11-26** over the whole CAP archive (21 days, 129 issuances, 1259 alerts): every alert has exactly one `<area>`, named by an `EMMA_ID` geocode for one of 72 regions, which are the districts with the city districts of Bratislava and of Košice merged into one region each.
+  The other 71 regions always send a `<polygon>`, together with the parameter `use_polygon_over_geocode` set to `True`, and each region's polygon was identical in all its alerts.
+  Piešťany (SK204) sent neither in any of its 13 alerts, which appeared in 49 of the 129 issuances.
+  `Warning.covers()` treated an alert without polygons as country-wide, so those alerts matched every location in Slovakia (issue #99).
+  The parser now outlines such an area by its region from `regions.py`, which holds all 72 regions so the fallback also works for any other region whose polygon goes missing.
+  The table is generated from the district map that SHMÚ's own warnings page draws (`www.shmu.sk/assets/maps/meteo_map.json`, recipe in the module docstring).
+  That map's `ID` is not the `EMMA_ID` number, so a map feature is matched to an alert by the district abbreviation that ends the alert's `<identifier>`.
+  The map's boundaries are not the CAP polygons': a CAP vertex lies a median of 90 m (p90 190 m) from the map's boundary of the same region, except around Kežmarok, whose CAP polygon takes in about 200 km² that the map gives to its neighbours.
+  An area with no polygon and no outline in `regions.py` makes the parser reject its alert, which the client logs and skips, because covering the whole country would repeat issue #99.
+  `tests_e2e` fails on such a skip, and also when any alert names a region that `regions.py` lacks.
+  Neighbouring regions' CAP polygons overlap in slivers along their shared boundaries, so a point right on a boundary can get both regions' warnings.
+  Every station and rain gauge lies in exactly one region, by the CAP polygons and by `regions.py` alike, and both leave the city of Košice, a region of its own, out of Košice okolie.
 
 ### Radar
 
