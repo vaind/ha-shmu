@@ -216,11 +216,11 @@ content: |
   {%- set kind = {'red': 'error', 'orange': 'warning', 'yellow': 'warning'} -%}
   {%- set f = '%-d.%-m. %H:%M' -%}
   {%- for w in ws %}
-  <ha-alert alert-type="{{ kind.get(w.awareness_level, 'info') }}" title="{{ dot.get(w.awareness_level, '') }} {{ w.event | e }}">{% if w.onset or w.expires %}{% if w.onset %}{{ as_local(as_datetime(w.onset)).strftime(f) }}{% endif %} – {% if w.expires %}{{ as_local(as_datetime(w.expires)).strftime(f) }}{% endif %}<br>{% endif %}{{ (w.description or w.headline) | e | replace('\n\n', '<br><br>') }}{% if w.instruction %}<br><br><i>{{ w.instruction | e }}</i>{% endif %}</ha-alert>
+  <ha-alert alert-type="{{ kind.get(w.awareness_level, 'info') }}" title="{{ dot.get(w.awareness_level, '') }} {{ w.event | e }}">{% if w.onset or w.expires %}{% if w.onset %}{{ as_local(as_datetime(w.onset)).strftime(f) }}{% endif %} – {% if w.expires %}{{ as_local(as_datetime(w.expires)).strftime(f) }}{% endif %}<br>{% endif %}{{ (w.description or w.headline or '') | e | replace('\n\n', '<br><br>') }}{% if w.instruction %}<br><br><i>{{ w.instruction | e | replace('\n\n', '<br><br>') }}</i>{% endif %}</ha-alert>
   {% endfor -%}
 ```
 
-Keep each alert on one line and the `replace('\n\n', '<br><br>')`, because a blank line ends the alert's HTML and the rest of its text would show as plain Markdown.
+Keep each alert on one line and the `replace('\n\n', '<br><br>')` calls, because a blank line ends the alert's HTML and the rest of its text would show as plain Markdown.
 
 ## How data is updated
 
