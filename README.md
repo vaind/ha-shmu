@@ -168,7 +168,9 @@ On a wall dashboard, mind the bandwidth: the map loop is ~330 KB and the browser
 ## Entity attributes
 
 Several entities publish more than their state, as attributes.
-The device page lists only states, so look for attributes in *Developer tools → States*, or read them in a template with `state_attr()`.
+The device page lists only states.
+To see an entity's attributes, click the entity, choose *Details* from the dialog's ⋮ menu and look under *Attributes*.
+*Settings → Tools → States* lists the attributes of every entity (the menu was *Developer tools* before Home Assistant 2026.8), and a template reads one with `state_attr()`.
 Times are ISO 8601 strings in UTC, which `as_local(as_datetime(...))` converts for display.
 
 | Entity | Attributes |
@@ -348,7 +350,7 @@ The diagnostics download shows every source's candidate under `derived_condition
 
 **Home Assistant raised a repair about a changed unit or mean type.**
 Version 0.11.0 changed the precipitation sensors to mm/h and the wind bearing to a wind direction.
-Delete the old statistics for those sensors under *Developer tools → Statistics*, as the [changelog](CHANGELOG.md) describes.
+Delete the old statistics for those sensors under *Settings → Tools → Statistics* (*Developer tools → Statistics* before Home Assistant 2026.8), as the [changelog](CHANGELOG.md) describes.
 
 **The radar does not appear on the map card.**
 Check that [ha-map-card](https://github.com/nathan-gs/ha-map-card) is installed, that the plugin `url` is exactly `/shmu_static/radar-map-overlay.js` and that `entity` is one of the three `image.<device>_radar_map*` entities.
