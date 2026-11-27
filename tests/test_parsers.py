@@ -240,6 +240,18 @@ def test_parse_cap_alert_rejects_an_unreadable_region_outline(monkeypatch) -> No
         parse_cap_alert(_CAP_AREA.format(_geocode("SK204")))
 
 
+def test_parse_cap_alert_rejects_an_alert_that_expires_before_its_onset(
+    fixture,
+) -> None:
+    # Home Assistant rejects a calendar event that ends before it starts, so
+    # one such alert would make the warnings calendar fail on every update.
+    payload = fixture("alert.cap.xml").replace(
+        b"<expires>2026-05-17T18:00:00", b"<expires>2026-05-14T18:00:00"
+    )
+    with pytest.raises(ShmuDataError, match="expires before its onset"):
+        parse_cap_alert(payload)
+
+
 def test_parse_cap_alert_rejects_malformed() -> None:
     with pytest.raises(ShmuDataError):
         parse_cap_alert(b"<not-cap/>")

@@ -334,6 +334,13 @@ def parse_cap_alert(payload: bytes | str) -> Warning:
             rings = [_region_ring(identifier, desc, emma_ids)]
         polygons.extend(rings)
 
+    onset = _cap_datetime(info.find(q("onset")))
+    expires = _cap_datetime(info.find(q("expires")))
+    if onset is not None and expires is not None and expires < onset:
+        raise ShmuDataError(
+            f"CAP alert {identifier!r} expires before its onset ({expires} < {onset})"
+        )
+
     return Warning(
         identifier=identifier,
         event=_cap_text(info.find(q("event"))) or "",
@@ -341,8 +348,8 @@ def parse_cap_alert(payload: bytes | str) -> Warning:
         certainty=_cap_text(info.find(q("certainty"))),
         awareness_level=awareness_level,
         awareness_type=awareness_type,
-        onset=_cap_datetime(info.find(q("onset"))),
-        expires=_cap_datetime(info.find(q("expires"))),
+        onset=onset,
+        expires=expires,
         sent=sent,
         headline=_cap_text(info.find(q("headline"))),
         description=_cap_prose(info.find(q("description"))),
