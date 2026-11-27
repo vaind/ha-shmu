@@ -42,7 +42,7 @@ Do not rely on it for safety-critical decisions: consult SHMÚ's official channe
   It is separate from the station's own **Precipitation** sensor on purpose, because the two measure different places and are expected to disagree.
   Both report **intensity in mm/h**: SHMÚ publishes only the rain of one minute in every five, so each sensor shows the hourly rate that minute implies (the 1-minute sum × 60).
 - **Upper air (opt-in)**: the **freezing level** (the height of the 0 °C isotherm above sea level) and the **850 hPa temperature** (the standard air-mass indicator, ~1450 m up), from the same ALADIN run as the forecast. The freezing level is *not* the snow line, which usually sits a few hundred metres lower. Enable them from the device page.
-- **Weather warnings**: a binary sensor that is on while a SHMÚ warning covers your measurement location, with the alert details as attributes.
+- **Weather warnings**: a binary sensor that is on while a SHMÚ warning covers your measurement location, with each warning's full text in its attributes (see [Weather warnings](#weather-warnings)).
 - **Radar**: the national reflectivity composite cropped to your measurement location as a still image, a ~1-hour loop and a scrubbable frame, plus the same three as overlays you can pan and zoom on a map card (see [Radar](#radar)).
 - **Fresh data**: one shared fetch per cycle, timed to SHMÚ's 5-minute publishing schedule and tuned to its observed publishing delay, so readings arrive within minutes. A station missing from one snapshot keeps its last reading until it is genuinely stale instead of flickering to unavailable.
 
@@ -99,11 +99,11 @@ The other is the whole country at native resolution with nothing drawn on, for [
 The radar is national data, so its entities stay available even when your station drops out of an observation snapshot.
 The colours show reflectivity (rain and storm intensity), *not* cloud cover.
 
-The entities belong to the station device, where `<device>` is the device name you chose during setup (e.g. `home`):
+The entities belong to the station device, where `<device>` is the device name you chose during setup (e.g. `home`), and their attributes are listed under [Entity attributes](#entity-attributes):
 
 | Entity | What it shows |
 |---|---|
-| `image.<device>_radar` | The **latest** frame. Attributes: `product`, `max_dbz` (the peak reflectivity in the picture), `center_*` and `bbox_*`. |
+| `image.<device>_radar` | The **latest** frame. |
 | `image.<device>_radar_loop` | An **autoplaying ~1-hour loop** of the last 12 frames (animated PNG). Each frame is stamped with its time in your Home Assistant timezone, over a row of step markers that fills in across the hour. |
 | `image.<device>_radar_frame` | The **buffered frame** the scrubber below selects, for stepping through the loop by hand. |
 | `number.<device>_radar_frame_selector` | The **scrubber** (slider). `0`, on the **right**, is the newest frame. Drag **left** into the past: `-1` is ≈ 5 min ago, down to `-(frames-1)` for the oldest buffered frame. |
@@ -165,6 +165,63 @@ To step through the last hour on the map, point `entity` at `image.<device>_rada
 
 On a wall dashboard, mind the bandwidth: the map loop is ~330 KB and the browser fetches it again every 5 minutes while the card is open, so prefer the still `image.<device>_radar_map` (~30 KB) where that matters.
 
+## Entity attributes
+
+Several entities publish more than their state, as attributes.
+The device page lists only states, so look for attributes in *Developer tools → States*, or read them in a template with `state_attr()`.
+Times are ISO 8601 strings in UTC, which `as_local(as_datetime(...))` converts for display.
+
+| Entity | Attributes |
+|---|---|
+| `weather.<device>` | `condition_source` names the source that decided the condition (see [Stations](#stations)), `observation_time` is when the station took the current readings, and `station_id` is the station's SHMÚ number. |
+| `binary_sensor.<device>_weather_warning` | `warnings` lists the warnings in force at your measurement location (see [Weather warnings](#weather-warnings)), and `warning_count` counts them. |
+| `sensor.<device>_rain_gauge_precipitation` | `gauge_name` and `gauge_distance_km` name the rain gauge the reading comes from and its distance from your measurement location, and `gauge_ind_zra` is its SHMÚ number. |
+| `sensor.<device>_sea_level_pressure` | `source_name` and `source_distance_km` name the station the value comes from (see [Stations](#stations)), and `source_ind_kli` is its SHMÚ number. |
+| `image.<device>_radar`, `image.<device>_radar_map` | `max_dbz` is the peak reflectivity in the picture, `product` is the SHMÚ radar product (`zmax`), and `center_*` and `bbox_*` give the picture's centre and edges in degrees of latitude and longitude. |
+| `image.<device>_radar_loop`, `image.<device>_radar_map_loop` | `loop_start` and `loop_end` are the times of the first and last frame, and `frame_count` is the number of frames. `product`, `center_*` and `bbox_*` are as above. |
+| `image.<device>_radar_frame`, `image.<device>_radar_map_frame` | `valid_at` is the time of the frame shown, `frame_offset` is how many frames before the newest it is, and `frame_count` is the number of frames to choose from. `product`, `center_*` and `bbox_*` are as above. |
+| `number.<device>_radar_frame_selector` | `selected_valid_at` is the time of the selected frame, and `frame_count` is the number of frames to choose from. |
+
+### Weather warnings
+
+Home Assistant limits a state to 255 characters, so the warnings' text is only in the `warnings` attribute of `binary_sensor.<device>_weather_warning`.
+The attribute lists the warnings in force at your measurement location, worst first, in Slovak as SHMÚ writes them.
+Each warning holds:
+
+| Key | What it holds |
+|---|---|
+| `event` | The warning's name, such as *Výstraha pred silným snežením*. |
+| `awareness_level` | Its colour, such as `yellow`, `orange` or `red`. The worst one is also the state of `sensor.<device>_warning_level`. |
+| `severity` | The same level in the terms of the international alert format (CAP), such as `Moderate` or `Severe`. |
+| `awareness_type` | The hazard, such as `snow-ice` or `Fog`, spelled as SHMÚ sends it. |
+| `headline` | A one-line summary, which is often generic. |
+| `description` | SHMÚ's full text, such as how much snow is expected and where. It can contain blank lines. |
+| `instruction` | What to do. |
+| `onset`, `expires` | When the warning comes into force and when it ends. |
+| `areas` | The names of the regions the warning covers, such as `Bratislava`. |
+
+`headline`, `description`, `instruction`, `onset` and `expires` can each be empty (`null`).
+
+A Markdown card can show each warning as an alert in its colour, with its time span, full text and instruction, and hide itself while no warning is in force:
+
+```yaml
+type: markdown
+visibility:
+  - condition: state
+    entity: binary_sensor.<device>_weather_warning
+    state: "on"
+content: |
+  {%- set ws = state_attr('binary_sensor.<device>_weather_warning', 'warnings') or [] -%}
+  {%- set dot = {'red': '🔴', 'orange': '🟠', 'yellow': '🟡'} -%}
+  {%- set kind = {'red': 'error', 'orange': 'warning', 'yellow': 'warning'} -%}
+  {%- set f = '%-d.%-m. %H:%M' -%}
+  {%- for w in ws %}
+  <ha-alert alert-type="{{ kind.get(w.awareness_level, 'info') }}" title="{{ dot.get(w.awareness_level, '') }} {{ w.event | e }}">{% if w.onset or w.expires %}{% if w.onset %}{{ as_local(as_datetime(w.onset)).strftime(f) }}{% endif %} – {% if w.expires %}{{ as_local(as_datetime(w.expires)).strftime(f) }}{% endif %}<br>{% endif %}{{ (w.description or w.headline or '') | e | replace('\n\n', '<br><br>') }}{% if w.instruction %}<br><br><i>{{ w.instruction | e | replace('\n\n', '<br><br>') }}</i>{% endif %}</ha-alert>
+  {% endfor -%}
+```
+
+Keep each alert on one line and the `replace('\n\n', '<br><br>')` calls, because a blank line ends the alert's HTML and the rest of its text would show as plain Markdown.
+
 ## How data is updated
 
 The integration polls SHMÚ every 5 minutes, in one shared fetch for all entities, timed just after SHMÚ's own 5-minute publishing schedule.
@@ -189,9 +246,8 @@ When a fetch fails, the integration keeps the last data it has and tries again o
 In the examples, replace `<device>` with the device name you chose during setup (e.g. `home`).
 
 **Get notified when a warning comes into force at your location.**
-The warning binary sensor lists the active warnings in its `warnings` attribute, worst first, each with `event`, `severity`, `awareness_level`, `awareness_type`, `headline`, `description`, `instruction`, `onset`, `expires` and `areas`.
-`description` holds SHMÚ's full warning text, such as how much snow is expected, and `instruction` says what to do.
-Use them rather than `headline`, which is often generic.
+The warning binary sensor lists the warnings in force in its `warnings` attribute, worst first (see [Weather warnings](#weather-warnings)).
+Prefer each warning's `description` to its `headline`, which is often generic.
 
 ```yaml
 automation:
@@ -310,13 +366,13 @@ From version 1.0 on, a breaking change to any of the following comes only with a
 
 - the entities, their entity IDs and unique IDs
 - the meaning and unit of each entity's state
-- the entity attributes described in this README
+- the entity attributes listed under [Entity attributes](#entity-attributes)
 - the configuration options
 - the map plugin's URL and options
 
 Not covered, and free to change in any release:
 
-- the scrubber entities marked provisional under [Radar](#radar)
+- the scrubber entities marked provisional under [Radar](#radar), and their attributes
 - the content of the diagnostics download
 - log messages
 - how the weather condition is resolved from its sources, which keeps improving
