@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from itertools import pairwise
@@ -247,16 +248,8 @@ class ShmuData:
         relevance follows the configured point — they can differ once the user
         picks a custom location or their HA home.
         """
-        if self.warnings is None:
-            return []
         now = dt_util.utcnow()
-        relevant = [
-            w
-            for w in self.warnings.warnings
-            if w.is_active(now) and w.covers(latitude, longitude)
-        ]
-        relevant.sort(key=lambda w: _SEVERITY_ORDER.get(w.severity, 0), reverse=True)
-        return relevant
+        return self._warnings_for(latitude, longitude, lambda w: w.is_active(now))
 
     def unexpired_warnings_for(
         self, latitude: float, longitude: float
@@ -266,13 +259,21 @@ class ShmuData:
         SHMÚ issues a warning ahead of its onset, so unlike
         :meth:`active_warnings_for` this keeps the ones not in force yet.
         """
+        now = dt_util.utcnow()
+        return self._warnings_for(
+            latitude, longitude, lambda w: w.expires is None or now < w.expires
+        )
+
+    def _warnings_for(
+        self, latitude: float, longitude: float, keep: Callable[[Warning], bool]
+    ) -> list[Warning]:
+        """Warnings that ``keep`` accepts and that cover the point, worst first."""
         if self.warnings is None:
             return []
-        now = dt_util.utcnow()
         relevant = [
             w
             for w in self.warnings.warnings
-            if (w.expires is None or now < w.expires) and w.covers(latitude, longitude)
+            if keep(w) and w.covers(latitude, longitude)
         ]
         relevant.sort(key=lambda w: _SEVERITY_ORDER.get(w.severity, 0), reverse=True)
         return relevant

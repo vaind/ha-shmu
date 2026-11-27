@@ -69,32 +69,29 @@ class ShmuWarningCalendar(ShmuStationEntity, CalendarEntity):
         """
         return self.coordinator.has_recent_success
 
-    def _events(self) -> list[tuple[Warning, CalendarEvent]]:
-        """The warnings to show and their events, worst severity first."""
-        pairs = []
-        for warning in self.coordinator.data.unexpired_warnings_for(
+    def _events(self) -> list[CalendarEvent]:
+        """The events of the warnings to show, worst severity first."""
+        warnings = self.coordinator.data.unexpired_warnings_for(
             self.coordinator.location_latitude,
             self.coordinator.location_longitude,
-        ):
-            if (event := _event(warning)) is not None:
-                pairs.append((warning, event))
-        return pairs
+        )
+        return [event for w in warnings if (event := _event(w)) is not None]
 
     @property
     def event(self) -> CalendarEvent | None:
         """The worst warning in force, or else the next one to come into force."""
-        pairs = self._events()
+        events = self._events()
         now = dt_util.utcnow()
-        in_force = (e for w, e in pairs if w.is_active(now))
+        in_force = (e for e in events if e.start <= now < e.end)
         if (current := next(in_force, None)) is not None:
             return current
-        return min((e for _, e in pairs), key=lambda e: e.start, default=None)
+        return min(events, key=lambda e: e.start, default=None)
 
     async def async_get_events(
         self, hass: HomeAssistant, start_date: datetime, end_date: datetime
     ) -> list[CalendarEvent]:
         """The warnings overlapping the range, by onset."""
         return sorted(
-            (e for _, e in self._events() if e.start < end_date and e.end > start_date),
+            (e for e in self._events() if e.start < end_date and e.end > start_date),
             key=lambda e: (e.start, e.end),
         )
