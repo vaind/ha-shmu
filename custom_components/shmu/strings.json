@@ -90,6 +90,9 @@
     "binary_sensor": {
       "weather_warning": { "name": "Weather warning" }
     },
+    "calendar": {
+      "weather_warnings": { "name": "Weather warnings" }
+    },
     "image": {
       "radar": { "name": "Radar" },
       "radar_loop": { "name": "Radar loop" },

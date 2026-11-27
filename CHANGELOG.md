@@ -4,6 +4,12 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- A new calendar, `calendar.<device>_weather_warnings`, shows each weather warning at your location as an event with SHMÚ's full text. Unlike the warning sensor, it also holds the warnings issued for later, so they appear in the *Calendar* panel ahead of time and a calendar trigger can notify you before one comes into force.
+
 ## [1.1.0] - 2026-11-26
 
 ### Added

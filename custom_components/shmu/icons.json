@@ -14,6 +14,9 @@
         }
       }
     },
+    "calendar": {
+      "weather_warnings": { "default": "mdi:calendar-alert" }
+    },
     "image": {
       "radar": { "default": "mdi:radar" },
       "radar_loop": { "default": "mdi:radar" },

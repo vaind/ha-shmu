@@ -21,6 +21,7 @@ PLATFORMS: list[Platform] = [
     Platform.WEATHER,
     Platform.SENSOR,
     Platform.BINARY_SENSOR,
+    Platform.CALENDAR,
     Platform.IMAGE,
     Platform.NUMBER,
 ]
