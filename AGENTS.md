@@ -257,6 +257,7 @@ Before you add to one of them, look for the fact already stated there or in anot
   Every one of those issuances held alerts whose `onset` lay after the issuance was sent, 245 of 452 in all, by a median 8 h and up to 67 h.
   `Warning.is_active` is false for them, so the binary sensor and the warning level leave them out, and only the calendar shows them (`ShmuData.unexpired_warnings_for`).
   Every alert carried both `onset` and `expires`. The calendar leaves out an alert without them rather than invent a span, and `tests_e2e` fails if one appears.
+  `tests_e2e` also fails on an alert that expires before its onset, because Home Assistant rejects such an event and the calendar would then fail on every update.
   Re-check if the calendar stays empty while SHMÚ's warnings page shows warnings for the next day.
 
 ### Radar
